@@ -8,3 +8,4 @@ backups/
 exports/
 inventory.db
 .vscode/
+app/static/
