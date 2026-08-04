@@ -26,3 +26,5 @@ backups/
 .vscode/
 
 Add-Content .gitignore "`napp/static/invoices/*.pdf"
+
+app/static/invoices/
