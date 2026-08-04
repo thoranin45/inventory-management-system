@@ -1,90 +1,132 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, status
 
-from app.database import get_db
-from app.models import Supplier
-from app.schemas.supplier_schema import SupplierCreate, SupplierUpdate
-from app.core.dependencies import require_admin
+from app.core.dependencies import (
+    DatabaseSession,
+    SupplierRepositoryDependency,
+    require_admin,
+)
+from app.models import User
+from app.schemas.response import ApiResponse
+from app.schemas.supplier_schema import (
+    SupplierCreate,
+    SupplierResponse,
+    SupplierUpdate,
+)
+from app.services.supplier_service import (
+    create_supplier_service,
+    delete_supplier_service,
+    get_supplier_service,
+    get_suppliers_service,
+    update_supplier_service,
+)
 
-router = APIRouter(prefix="/suppliers", tags=["Suppliers"])
+
+router = APIRouter(
+    prefix="/suppliers",
+    tags=["Suppliers"],
+)
 
 
-@router.post("/")
+@router.post(
+    "",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ApiResponse[SupplierResponse],
+)
 def create_supplier(
     data: SupplierCreate,
-    db: Session = Depends(get_db),
-    current_user=Depends(require_admin),
-):
-    supplier = Supplier(
-        supplier_name=data.supplier_name,
-        contact_name=data.contact_name,
-        phone=data.phone,
-        email=data.email,
-        address=data.address,
+    db: DatabaseSession,
+    supplier_repo: SupplierRepositoryDependency,
+    current_user: User = Depends(require_admin),
+) -> ApiResponse[SupplierResponse]:
+    supplier = create_supplier_service(
+        db=db,
+        supplier_repo=supplier_repo,
+        data=data,
     )
 
-    db.add(supplier)
-    db.commit()
-    db.refresh(supplier)
-
-    return {
-        "message": "Supplier Created",
-        "id": supplier.id,
-        "supplier_name": supplier.supplier_name,
-    }
+    return ApiResponse(
+        message="Supplier created successfully",
+        data=supplier,
+    )
 
 
-@router.get("/")
-def get_suppliers(db: Session = Depends(get_db)):
-    return db.query(Supplier).all()
+@router.get(
+    "",
+    response_model=ApiResponse[list[SupplierResponse]],
+)
+def get_suppliers(
+    supplier_repo: SupplierRepositoryDependency,
+) -> ApiResponse[list[SupplierResponse]]:
+    suppliers = get_suppliers_service(
+        supplier_repo=supplier_repo,
+    )
+
+    return ApiResponse(
+        message="Suppliers retrieved successfully",
+        data=suppliers,
+    )
 
 
-@router.get("/{supplier_id}")
-def get_supplier(supplier_id: int, db: Session = Depends(get_db)):
-    supplier = db.query(Supplier).filter(Supplier.id == supplier_id).first()
+@router.get(
+    "/{supplier_id}",
+    response_model=ApiResponse[SupplierResponse],
+)
+def get_supplier(
+    supplier_id: int,
+    supplier_repo: SupplierRepositoryDependency,
+) -> ApiResponse[SupplierResponse]:
+    supplier = get_supplier_service(
+        supplier_repo=supplier_repo,
+        supplier_id=supplier_id,
+    )
 
-    if supplier is None:
-        raise HTTPException(status_code=404, detail="Supplier not found")
+    return ApiResponse(
+        message="Supplier retrieved successfully",
+        data=supplier,
+    )
 
-    return supplier
 
-
-@router.put("/{supplier_id}")
+@router.put(
+    "/{supplier_id}",
+    response_model=ApiResponse[SupplierResponse],
+)
 def update_supplier(
     supplier_id: int,
     data: SupplierUpdate,
-    db: Session = Depends(get_db),
-    current_user=Depends(require_admin),
-):
-    supplier = db.query(Supplier).filter(Supplier.id == supplier_id).first()
+    db: DatabaseSession,
+    supplier_repo: SupplierRepositoryDependency,
+    current_user: User = Depends(require_admin),
+) -> ApiResponse[SupplierResponse]:
+    supplier = update_supplier_service(
+        db=db,
+        supplier_repo=supplier_repo,
+        supplier_id=supplier_id,
+        data=data,
+    )
 
-    if supplier is None:
-        raise HTTPException(status_code=404, detail="Supplier not found")
-
-    supplier.supplier_name = data.supplier_name
-    supplier.contact_name = data.contact_name
-    supplier.phone = data.phone
-    supplier.email = data.email
-    supplier.address = data.address
-
-    db.commit()
-    db.refresh(supplier)
-
-    return {"message": "Supplier Updated", "id": supplier.id}
+    return ApiResponse(
+        message="Supplier updated successfully",
+        data=supplier,
+    )
 
 
-@router.delete("/{supplier_id}")
+@router.delete(
+    "/{supplier_id}",
+    response_model=ApiResponse[SupplierResponse],
+)
 def delete_supplier(
     supplier_id: int,
-    db: Session = Depends(get_db),
-    current_user=Depends(require_admin),
-):
-    supplier = db.query(Supplier).filter(Supplier.id == supplier_id).first()
+    db: DatabaseSession,
+    supplier_repo: SupplierRepositoryDependency,
+    current_user: User = Depends(require_admin),
+) -> ApiResponse[SupplierResponse]:
+    supplier = delete_supplier_service(
+        db=db,
+        supplier_repo=supplier_repo,
+        supplier_id=supplier_id,
+    )
 
-    if supplier is None:
-        raise HTTPException(status_code=404, detail="Supplier not found")
-
-    db.delete(supplier)
-    db.commit()
-
-    return {"message": "Supplier Deleted"}
+    return ApiResponse(
+        message="Supplier deleted successfully",
+        data=supplier,
+    )

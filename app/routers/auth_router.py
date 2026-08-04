@@ -1,68 +1,208 @@
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Annotated
+
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    status,
+)
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
+from app.core.security import (
+    create_access_token,
+    hash_password,
+    verify_password,
+)
 from app.database import get_db
 from app.models import User
-from app.schemas.user_schema import UserRegister, UserLogin
-from app.core.security import hash_password, verify_password, create_access_token
+from app.schemas.user_schema import (
+    UserLogin,
+    UserRegister,
+)
 
-router = APIRouter(prefix="/auth", tags=["Auth"])
+
+router = APIRouter(
+    prefix="/auth",
+    tags=["Auth"],
+)
 
 
-@router.post("/register")
-def register_user(user: UserRegister, db: Session = Depends(get_db)):
-    existing_user = db.query(User).filter(
-        User.username == user.username
-    ).first()
+def authenticate_user(
+    db: Session,
+    username: str,
+    password: str,
+) -> User:
+    """
+    Validate username and password.
+    """
 
-    if existing_user:
+    db_user = (
+        db.query(User)
+        .filter(
+            User.username == username
+        )
+        .first()
+    )
+
+    if db_user is None:
         raise HTTPException(
-            status_code=400,
-            detail="Username already exists"
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid username or password",
+            headers={
+                "WWW-Authenticate": "Bearer",
+            },
+        )
+
+    if not verify_password(
+        password,
+        db_user.password_hash,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid username or password",
+            headers={
+                "WWW-Authenticate": "Bearer",
+            },
+        )
+
+    if (
+        hasattr(db_user, "is_active")
+        and db_user.is_active is False
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Inactive user",
+        )
+
+    return db_user
+
+
+def generate_token(
+    user: User,
+) -> dict:
+    """
+    Generate JWT access token.
+    """
+
+    role = getattr(
+        user,
+        "role",
+        None,
+    )
+
+    if hasattr(role, "value"):
+        role = role.value
+
+    access_token = create_access_token(
+        {
+            "sub": str(user.id),
+            "username": user.username,
+            "role": role,
+        }
+    )
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+    }
+
+
+@router.post(
+    "/register",
+    status_code=status.HTTP_201_CREATED,
+)
+def register_user(
+    user: UserRegister,
+    db: Session = Depends(get_db),
+):
+    existing_user = (
+        db.query(User)
+        .filter(
+            User.username == user.username
+        )
+        .first()
+    )
+
+    if existing_user is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Username already exists",
         )
 
     new_user = User(
         username=user.username,
-        password_hash=hash_password(user.password),
-        role=user.role
+        password_hash=hash_password(
+            user.password
+        ),
+        role=user.role,
     )
 
     db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
+
+    try:
+        db.commit()
+        db.refresh(new_user)
+
+    except Exception:
+        db.rollback()
+        raise
 
     return {
-        "message": "User registered",
-        "id": new_user.id,
-        "username": new_user.username,
-        "role": new_user.role
+        "success": True,
+        "message": "User registered successfully",
+        "data": {
+            "id": new_user.id,
+            "username": new_user.username,
+            "role": new_user.role,
+        },
     }
 
 
-@router.post("/login")
-def login_user(user: UserLogin, db: Session = Depends(get_db)):
-    db_user = db.query(User).filter(
-        User.username == user.username
-    ).first()
+@router.post(
+    "/login",
+)
+def login_user(
+    user: UserLogin,
+    db: Session = Depends(get_db),
+):
+    """
+    JSON login endpoint.
 
-    if not db_user:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid username or password"
-        )
+    Intended for frontend applications and API clients.
+    """
 
-    if not verify_password(user.password, db_user.password_hash):
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid username or password"
-        )
+    db_user = authenticate_user(
+        db=db,
+        username=user.username,
+        password=user.password,
+    )
 
-    token = create_access_token({
-        "sub": db_user.username,
-        "role": db_user.role
-    })
+    return generate_token(
+        db_user
+    )
 
-    return {
-        "access_token": token,
-        "token_type": "bearer"
-    }
+
+@router.post(
+    "/token",
+)
+def oauth2_login(
+    form_data: Annotated[
+        OAuth2PasswordRequestForm,
+        Depends(),
+    ],
+    db: Session = Depends(get_db),
+):
+    """
+    OAuth2 login endpoint used by Swagger Authorize.
+    """
+
+    db_user = authenticate_user(
+        db=db,
+        username=form_data.username,
+        password=form_data.password,
+    )
+
+    return generate_token(
+        db_user
+    )

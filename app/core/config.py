@@ -12,6 +12,15 @@ class Settings(BaseSettings):
     secret_key: str
     access_token_expire_minutes: int = 1440
 
+    app_name: str = "Inventory Management API"
+    app_version: str = "1.0.0"
+    env: str = "development"
+
+    rate_limit_max_requests: int = 100
+    rate_limit_window_seconds: int = 60
+
+    cors_origins: str = "http://localhost:3000,http://localhost:5173,http://127.0.0.1:5173"
+
     class Config:
         env_file = ".env"
 

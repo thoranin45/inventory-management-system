@@ -1,134 +1,132 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-from sqlalchemy.exc import IntegrityError
+from fastapi import APIRouter, Depends, status
 
-from app.database import get_db
-from app.models import Category, Product
-from app.schemas.category_schema import CategoryCreate, CategoryUpdate
-from app.core.dependencies import require_admin
+from app.core.dependencies import (
+    CategoryRepositoryDependency,
+    DatabaseSession,
+    require_admin,
+)
+from app.models import User
+from app.schemas.category_schema import (
+    CategoryCreate,
+    CategoryResponse,
+    CategoryUpdate,
+)
+from app.schemas.response import ApiResponse
+from app.services.category_service import (
+    create_category_service,
+    delete_category_service,
+    get_categories_service,
+    get_category_service,
+    update_category_service,
+)
 
-router = APIRouter(prefix="/categories", tags=["Categories"])
+
+router = APIRouter(
+    prefix="/categories",
+    tags=["Categories"],
+)
 
 
-@router.post("/")
+@router.post(
+    "",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ApiResponse[CategoryResponse],
+)
 def create_category(
     data: CategoryCreate,
-    db: Session = Depends(get_db),
-    current_user=Depends(require_admin)
-):
-    category = Category(
-        category_name=data.category_name
+    db: DatabaseSession,
+    category_repo: CategoryRepositoryDependency,
+    current_user: User = Depends(require_admin),
+) -> ApiResponse[CategoryResponse]:
+    category = create_category_service(
+        db=db,
+        category_repo=category_repo,
+        data=data,
     )
 
-    try:
-        db.add(category)
-        db.commit()
-        db.refresh(category)
-
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(
-            status_code=400,
-            detail="Category already exists"
-        )
-
-    return {
-        "message": "Category Created",
-        "id": category.id,
-        "category_name": category.category_name
-    }
+    return ApiResponse(
+        message="Category created successfully",
+        data=category,
+    )
 
 
-@router.get("/")
-def get_categories(db: Session = Depends(get_db)):
-    return db.query(Category).all()
+@router.get(
+    "",
+    response_model=ApiResponse[list[CategoryResponse]],
+)
+def get_categories(
+    category_repo: CategoryRepositoryDependency,
+) -> ApiResponse[list[CategoryResponse]]:
+    categories = get_categories_service(
+        category_repo=category_repo,
+    )
+
+    return ApiResponse(
+        message="Categories retrieved successfully",
+        data=categories,
+    )
 
 
-@router.get("/{category_id}")
+@router.get(
+    "/{category_id}",
+    response_model=ApiResponse[CategoryResponse],
+)
 def get_category(
     category_id: int,
-    db: Session = Depends(get_db)
-):
-    category = db.query(Category).filter(
-        Category.id == category_id
-    ).first()
+    category_repo: CategoryRepositoryDependency,
+) -> ApiResponse[CategoryResponse]:
+    category = get_category_service(
+        category_repo=category_repo,
+        category_id=category_id,
+    )
 
-    if category is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Category not found"
-        )
-
-    return category
+    return ApiResponse(
+        message="Category retrieved successfully",
+        data=category,
+    )
 
 
-@router.put("/{category_id}")
+@router.put(
+    "/{category_id}",
+    response_model=ApiResponse[CategoryResponse],
+)
 def update_category(
     category_id: int,
     data: CategoryUpdate,
-    db: Session = Depends(get_db),
-    current_user=Depends(require_admin)
-):
-    category = db.query(Category).filter(
-        Category.id == category_id
-    ).first()
+    db: DatabaseSession,
+    category_repo: CategoryRepositoryDependency,
+    current_user: User = Depends(require_admin),
+) -> ApiResponse[CategoryResponse]:
+    category = update_category_service(
+        db=db,
+        category_repo=category_repo,
+        category_id=category_id,
+        data=data,
+    )
 
-    if category is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Category not found"
-        )
-
-    category.category_name = data.category_name
-
-    try:
-        db.commit()
-        db.refresh(category)
-
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(
-            status_code=400,
-            detail="Category already exists"
-        )
-
-    return {
-        "message": "Category Updated",
-        "id": category.id,
-        "category_name": category.category_name
-    }
+    return ApiResponse(
+        message="Category updated successfully",
+        data=category,
+    )
 
 
-@router.delete("/{category_id}")
+@router.delete(
+    "/{category_id}",
+    response_model=ApiResponse[CategoryResponse],
+)
 def delete_category(
     category_id: int,
-    db: Session = Depends(get_db),
-    current_user=Depends(require_admin)
-):
-    category = db.query(Category).filter(
-        Category.id == category_id
-    ).first()
+    db: DatabaseSession,
+    category_repo: CategoryRepositoryDependency,
+    current_user: User = Depends(require_admin),
+) -> ApiResponse[CategoryResponse]:
+    category = delete_category_service(
+        db=db,
+        category_repo=category_repo,
+        category_id=category_id,
+    )
 
-    if category is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Category not found"
-        )
-
-    product_using_category = db.query(Product).filter(
-        Product.category_id == category.id,
-        Product.is_active == True
-    ).first()
-
-    if product_using_category:
-        raise HTTPException(
-            status_code=400,
-            detail="Cannot delete category with active products"
-        )
-
-    db.delete(category)
-    db.commit()
-
-    return {
-        "message": "Category Deleted"
-    }
+    return ApiResponse(
+        message="Category deleted successfully",
+        data=category,
+    )

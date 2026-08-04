@@ -1,48 +1,126 @@
-from fastapi import Depends, HTTPException
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from jose import jwt, JWTError
+from typing import Annotated
+
+from fastapi import Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.core.security import get_current_user
+from app.core.service_dependencies import (
+    get_batch_repository,
+    get_category_repository,
+    get_customer_repository,
+    get_product_repository,
+    get_purchase_order_repository,
+    get_stock_repository,
+    get_supplier_repository,
+)
 from app.database import get_db
 from app.models import User
-from app.core.security import SECRET_KEY, ALGORITHM
-
-security = HTTPBearer()
-
-
-def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db)
-):
-    token = credentials.credentials
-
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username = payload.get("sub")
-
-        if username is None:
-            raise HTTPException(status_code=401, detail="Invalid token")
-
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
-
-    user = db.query(User).filter(User.username == username).first()
-
-    if user is None:
-        raise HTTPException(status_code=401, detail="User not found")
-
-    return user
+from app.repositories.batch_repository import BatchRepository
+from app.repositories.category_repository import CategoryRepository
+from app.repositories.customer_repository import CustomerRepository
+from app.repositories.product_repository import ProductRepository
+from app.repositories.purchase_order_repository import (
+    PurchaseOrderRepository,
+)
+from app.repositories.stock_repository import StockRepository
+from app.repositories.supplier_repository import SupplierRepository
 
 
-def require_admin(current_user: User = Depends(get_current_user)):
-    if current_user.role != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+DatabaseSession = Annotated[
+    Session,
+    Depends(get_db),
+]
+
+CurrentUser = Annotated[
+    User,
+    Depends(get_current_user),
+]
+
+
+def _get_role_name(
+    user: User,
+) -> str:
+    role = getattr(
+        user,
+        "role",
+        None,
+    )
+
+    if role is None:
+        return ""
+
+    if hasattr(role, "value"):
+        return str(role.value).lower()
+
+    return str(role).lower()
+
+
+def require_warehouse(
+    current_user: CurrentUser,
+) -> User:
+    role = _get_role_name(
+        current_user
+    )
+
+    if role not in {
+        "warehouse",
+        "admin",
+    }:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Warehouse permission required",
+        )
 
     return current_user
 
 
-def require_warehouse(current_user: User = Depends(get_current_user)):
-    if current_user.role not in ["admin", "warehouse"]:
-        raise HTTPException(status_code=403, detail="Warehouse only")
+def require_admin(
+    current_user: CurrentUser,
+) -> User:
+    role = _get_role_name(
+        current_user
+    )
+
+    if role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin permission required",
+        )
 
     return current_user
+
+
+ProductRepositoryDependency = Annotated[
+    ProductRepository,
+    Depends(get_product_repository),
+]
+
+CategoryRepositoryDependency = Annotated[
+    CategoryRepository,
+    Depends(get_category_repository),
+]
+
+SupplierRepositoryDependency = Annotated[
+    SupplierRepository,
+    Depends(get_supplier_repository),
+]
+
+CustomerRepositoryDependency = Annotated[
+    CustomerRepository,
+    Depends(get_customer_repository),
+]
+
+StockRepositoryDependency = Annotated[
+    StockRepository,
+    Depends(get_stock_repository),
+]
+
+BatchRepositoryDependency = Annotated[
+    BatchRepository,
+    Depends(get_batch_repository),
+]
+
+PurchaseOrderRepositoryDependency = Annotated[
+    PurchaseOrderRepository,
+    Depends(get_purchase_order_repository),
+]

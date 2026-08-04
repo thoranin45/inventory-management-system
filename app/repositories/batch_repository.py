@@ -1,0 +1,59 @@
+from sqlalchemy.orm import Session
+
+from app.models import ProductBatch
+
+
+class BatchRepository:
+    def __init__(
+        self,
+        db: Session,
+    ):
+        self.db = db
+
+    def get_by_lot_no(
+        self,
+        lot_no: str,
+    ) -> ProductBatch | None:
+        return (
+            self.db.query(ProductBatch)
+            .filter(
+                ProductBatch.lot_no == lot_no
+            )
+            .first()
+        )
+
+    def create(
+        self,
+        batch: ProductBatch,
+    ) -> ProductBatch:
+        self.db.add(batch)
+        self.db.flush()
+
+        return batch
+
+    def get_all(
+        self,
+    ) -> list[ProductBatch]:
+        return (
+            self.db.query(ProductBatch)
+            .order_by(
+                ProductBatch.created_at.desc(),
+                ProductBatch.id.desc(),
+            )
+            .all()
+        )
+
+    def get_expiring(
+        self,
+    ) -> list[ProductBatch]:
+        return (
+            self.db.query(ProductBatch)
+            .filter(
+                ProductBatch.quantity > 0
+            )
+            .order_by(
+                ProductBatch.expiry_date.asc(),
+                ProductBatch.id.asc(),
+            )
+            .all()
+        )

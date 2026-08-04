@@ -1,231 +1,277 @@
 from fastapi import (
     APIRouter,
-    Depends,
-    UploadFile,
     File,
-    Query
+    Query,
+    UploadFile,
+    status,
 )
 
-from sqlalchemy.orm import Session
-
-from app.database import get_db
+from app.core.dependencies import (
+    CategoryRepositoryDependency,
+    CurrentUser,
+    DatabaseSession,
+    ProductRepositoryDependency,
+)
 from app.schemas.product_schema import (
     ProductCreate,
+    ProductResponse,
     ProductUpdate,
-    ProductResponse
 )
-from app.core.dependencies import require_admin
-from app.core.response import success_response
+from app.schemas.response import (
+    ApiResponse,
+    PaginatedData,
+)
 from app.services.product_service import (
     create_product_service,
+    delete_product_service,
+    get_inactive_products_service,
+    get_product_by_barcode_service,
     get_product_service,
     get_products_service,
-    update_product_service,
-    delete_product_service,
-    upload_product_image_service,
+    restore_product_service,
     search_products_service,
-    get_product_by_barcode_service,
-    get_inactive_products_service,
-    restore_product_service
+    update_product_service,
+    upload_product_image_service,
 )
 
-router = APIRouter()
+
+router = APIRouter(
+    prefix="/products",
+    tags=["Products"],
+)
 
 
-@router.post("/products")
+@router.post(
+    "",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ApiResponse[ProductResponse],
+)
 def create_product(
-    product: ProductCreate,
-    db: Session = Depends(get_db),
-    current_user=Depends(require_admin)
-):
-    new_product = create_product_service(
-        db,
-        product,
-        current_user
+    data: ProductCreate,
+    db: DatabaseSession,
+    product_repo: ProductRepositoryDependency,
+    category_repo: CategoryRepositoryDependency,
+    current_user: CurrentUser,
+) -> ApiResponse[ProductResponse]:
+    product = create_product_service(
+        db=db,
+        product_repo=product_repo,
+        category_repo=category_repo,
+        data=data,
+        current_user=current_user,
     )
 
-    return success_response(
-        "Product Created",
-        {
-            "id": new_product.id
-        }
+    return ApiResponse(
+        message="Product created successfully",
+        data=product,
     )
 
 
-@router.get("/products")
+@router.get(
+    "",
+    response_model=ApiResponse[
+        PaginatedData[ProductResponse]
+    ],
+)
 def get_products(
-    page: int = Query(1, ge=1),
-    size: int = Query(20, ge=1, le=100),
-    db: Session = Depends(get_db)
-):
-    products_data = get_products_service(
-        db,
-        page,
-        size
+    product_repo: ProductRepositoryDependency,
+    current_user: CurrentUser,
+    page: int = Query(
+        default=1,
+        ge=1,
+    ),
+    size: int = Query(
+        default=20,
+        ge=1,
+        le=100,
+    ),
+) -> ApiResponse[PaginatedData[ProductResponse]]:
+    result = get_products_service(
+        product_repo=product_repo,
+        page=page,
+        size=size,
     )
 
-    return success_response(
-        "Products Retrieved",
-        products_data
+    return ApiResponse(
+        message="Products retrieved successfully",
+        data=result,
     )
 
 
-@router.get("/products/search")
+@router.get(
+    "/search",
+    response_model=ApiResponse[list[ProductResponse]],
+)
 def search_products(
-    keyword: str,
-    db: Session = Depends(get_db)
-):
+    product_repo: ProductRepositoryDependency,
+    current_user: CurrentUser,
+    keyword: str = Query(
+        min_length=1,
+        max_length=100,
+    ),
+) -> ApiResponse[list[ProductResponse]]:
     products = search_products_service(
-        db,
-        keyword
+        product_repo=product_repo,
+        keyword=keyword,
     )
 
-    return success_response(
-        "Products Search Result",
-        {
-            "items": products
-        }
+    return ApiResponse(
+        message="Products retrieved successfully",
+        data=products,
     )
 
 
-@router.get("/products/inactive")
+@router.get(
+    "/inactive",
+    response_model=ApiResponse[list[ProductResponse]],
+)
 def get_inactive_products(
-    db: Session = Depends(get_db),
-    current_user=Depends(require_admin)
-):
+    product_repo: ProductRepositoryDependency,
+    current_user: CurrentUser,
+) -> ApiResponse[list[ProductResponse]]:
     products = get_inactive_products_service(
-        db
+        product_repo=product_repo,
     )
 
-    return success_response(
-        "Inactive Products Retrieved",
-        {
-            "items": products
-        }
+    return ApiResponse(
+        message="Inactive products retrieved successfully",
+        data=products,
     )
 
 
-@router.get("/products/barcode/{barcode}")
+@router.get(
+    "/barcode/{barcode}",
+    response_model=ApiResponse[ProductResponse],
+)
 def get_product_by_barcode(
     barcode: str,
-    db: Session = Depends(get_db)
-):
+    product_repo: ProductRepositoryDependency,
+    current_user: CurrentUser,
+) -> ApiResponse[ProductResponse]:
     product = get_product_by_barcode_service(
-        db,
-        barcode
+        product_repo=product_repo,
+        barcode=barcode,
     )
 
-    return success_response(
-        "Product Found",
-        {
-            "id": product.id,
-            "sku": product.sku,
-            "barcode": product.barcode,
-            "product_name": product.product_name,
-            "price": float(product.price),
-            "stock_qty": product.stock_qty,
-            "category_id": product.category_id,
-            "is_active": product.is_active,
-            "image_url": product.image_url,
-        }
+    return ApiResponse(
+        message="Product retrieved successfully",
+        data=product,
     )
 
 
-@router.get("/products/{product_id}", response_model=ProductResponse)
+@router.get(
+    "/{product_id}",
+    response_model=ApiResponse[ProductResponse],
+)
 def get_product(
     product_id: int,
-    db: Session = Depends(get_db)
-):
-    return get_product_service(
-        db,
-        product_id
+    product_repo: ProductRepositoryDependency,
+    current_user: CurrentUser,
+) -> ApiResponse[ProductResponse]:
+    product = get_product_service(
+        product_repo=product_repo,
+        product_id=product_id,
+    )
+
+    return ApiResponse(
+        message="Product retrieved successfully",
+        data=product,
     )
 
 
-@router.put("/products/{product_id}")
+@router.put(
+    "/{product_id}",
+    response_model=ApiResponse[ProductResponse],
+)
 def update_product(
     product_id: int,
-    product_update: ProductUpdate,
-    db: Session = Depends(get_db),
-    current_user=Depends(require_admin)
-):
+    data: ProductUpdate,
+    db: DatabaseSession,
+    product_repo: ProductRepositoryDependency,
+    category_repo: CategoryRepositoryDependency,
+    current_user: CurrentUser,
+) -> ApiResponse[ProductResponse]:
     product = update_product_service(
-        db,
-        product_id,
-        product_update,
-        current_user
+        db=db,
+        product_repo=product_repo,
+        category_repo=category_repo,
+        product_id=product_id,
+        data=data,
+        current_user=current_user,
     )
 
-    return success_response(
-        "Product Updated",
-        {
-            "id": product.id,
-            "sku": product.sku,
-            "barcode": product.barcode,
-            "product_name": product.product_name,
-            "price": float(product.price),
-            "stock_qty": product.stock_qty,
-            "category_id": product.category_id,
-            "is_active": product.is_active,
-            "image_url": product.image_url
-        }
+    return ApiResponse(
+        message="Product updated successfully",
+        data=product,
     )
 
 
-@router.delete("/products/{product_id}")
+@router.delete(
+    "/{product_id}",
+    response_model=ApiResponse[ProductResponse],
+)
 def delete_product(
     product_id: int,
-    db: Session = Depends(get_db),
-    current_user=Depends(require_admin)
-):
-    delete_product_service(
-        db,
-        product_id,
-        current_user
+    db: DatabaseSession,
+    product_repo: ProductRepositoryDependency,
+    current_user: CurrentUser,
+) -> ApiResponse[ProductResponse]:
+    product = delete_product_service(
+        db=db,
+        product_repo=product_repo,
+        product_id=product_id,
+        current_user=current_user,
     )
 
-    return success_response(
-        "Product Soft Deleted"
+    return ApiResponse(
+        message="Product deleted successfully",
+        data=product,
     )
 
 
-@router.put("/products/{product_id}/restore")
+@router.put(
+    "/{product_id}/restore",
+    response_model=ApiResponse[ProductResponse],
+)
 def restore_product(
     product_id: int,
-    db: Session = Depends(get_db),
-    current_user=Depends(require_admin)
-):
+    db: DatabaseSession,
+    product_repo: ProductRepositoryDependency,
+    current_user: CurrentUser,
+) -> ApiResponse[ProductResponse]:
     product = restore_product_service(
-        db,
-        product_id,
-        current_user
+        db=db,
+        product_repo=product_repo,
+        product_id=product_id,
+        current_user=current_user,
     )
 
-    return success_response(
-        "Product Restored",
-        {
-            "id": product.id
-        }
+    return ApiResponse(
+        message="Product restored successfully",
+        data=product,
     )
 
 
-@router.post("/products/{product_id}/upload-image")
+@router.post(
+    "/{product_id}/upload-image",
+    response_model=ApiResponse[ProductResponse],
+)
 def upload_product_image(
     product_id: int,
+    db: DatabaseSession,
+    product_repo: ProductRepositoryDependency,
+    current_user: CurrentUser,
     file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    current_user=Depends(require_admin)
-):
+) -> ApiResponse[ProductResponse]:
     product = upload_product_image_service(
-        db,
-        product_id,
-        file,
-        current_user
+        db=db,
+        product_repo=product_repo,
+        product_id=product_id,
+        file=file,
+        current_user=current_user,
     )
 
-    return success_response(
-        "Image uploaded",
-        {
-            "image_url": product.image_url
-        }
+    return ApiResponse(
+        message="Product image uploaded successfully",
+        data=product,
     )

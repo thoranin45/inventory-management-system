@@ -2,17 +2,18 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
 from app.models import Product
+from app.repositories.base_repository import BaseRepository
 
 
-class ProductRepository:
+class ProductRepository(BaseRepository):
     def __init__(self, db: Session):
-        self.db = db
+        super().__init__(
+            db,
+            Product
+        )
 
     def get_by_id(self, product_id: int):
-        return self.db.query(Product).filter(
-            Product.id == product_id,
-            Product.is_active == True
-        ).first()
+        return self.get_active_by_id(product_id)
 
     def get_by_sku(self, sku: str):
         return self.db.query(Product).filter(
@@ -23,43 +24,6 @@ class ProductRepository:
         return self.db.query(Product).filter(
             Product.barcode == barcode
         ).first()
-
-    def create(self, product: Product):
-        self.db.add(product)
-        self.db.flush()
-        return product
-
-    def update(self, product: Product):
-        self.db.add(product)
-        self.db.flush()
-        return product
-
-    def soft_delete(self, product: Product):
-        product.is_active = False
-        self.db.add(product)
-        self.db.flush()
-        return product
-
-    def restore(self, product: Product):
-        product.is_active = True
-        self.db.add(product)
-        self.db.flush()
-        return product
-
-    def get_active_paginated(self, page: int, size: int):
-        query = self.db.query(Product).filter(
-            Product.is_active == True
-        )
-
-        total = query.count()
-
-        products = query.offset(
-            (page - 1) * size
-        ).limit(
-            size
-        ).all()
-
-        return total, products
 
     def search_active(self, keyword: str):
         return self.db.query(Product).filter(
@@ -83,8 +47,4 @@ class ProductRepository:
             Product.is_active == False
         ).all()
 
-    def get_inactive_by_id(self, product_id: int):
-        return self.db.query(Product).filter(
-            Product.id == product_id,
-            Product.is_active == False
-        ).first()
+    

@@ -1,11 +1,28 @@
+# Python
 venv/
+venv_py38_backup/
 __pycache__/
 *.pyc
+
+# Environment
 .env
-*.log
+
+# Logs
+logs/
+
+# Uploads
 uploads/
-backups/
+
+# Export files
 exports/
-inventory.db
+
+# Backup
+backups/
+
+# Database
+*.db
+
+# VS Code
 .vscode/
-app/static/
+
+Add-Content .gitignore "`napp/static/invoices/*.pdf"

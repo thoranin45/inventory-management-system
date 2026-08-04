@@ -1,97 +1,132 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, status
 
-from app.database import get_db
-from app.models import Customer
-from app.schemas.customer_schema import CustomerCreate, CustomerUpdate
-from app.core.dependencies import require_admin
+from app.core.dependencies import (
+    CustomerRepositoryDependency,
+    DatabaseSession,
+    require_admin,
+)
+from app.models import User
+from app.schemas.customer_schema import (
+    CustomerCreate,
+    CustomerResponse,
+    CustomerUpdate,
+)
+from app.schemas.response import ApiResponse
+from app.services.customer_service import (
+    create_customer_service,
+    delete_customer_service,
+    get_customer_service,
+    get_customers_service,
+    update_customer_service,
+)
 
-router = APIRouter(prefix="/customers", tags=["Customers"])
+
+router = APIRouter(
+    prefix="/customers",
+    tags=["Customers"],
+)
 
 
-@router.post("/")
+@router.post(
+    "",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ApiResponse[CustomerResponse],
+)
 def create_customer(
     data: CustomerCreate,
-    db: Session = Depends(get_db),
-    current_user=Depends(require_admin)
-):
-    customer = Customer(
-        customer_name=data.customer_name,
-        phone=data.phone,
-        email=data.email,
-        address=data.address
+    db: DatabaseSession,
+    customer_repo: CustomerRepositoryDependency,
+    current_user: User = Depends(require_admin),
+) -> ApiResponse[CustomerResponse]:
+    customer = create_customer_service(
+        db=db,
+        customer_repo=customer_repo,
+        data=data,
     )
 
-    db.add(customer)
-    db.commit()
-    db.refresh(customer)
-
-    return {
-        "message": "Customer Created",
-        "id": customer.id,
-        "customer_name": customer.customer_name
-    }
+    return ApiResponse(
+        message="Customer created successfully",
+        data=customer,
+    )
 
 
-@router.get("/")
-def get_customers(db: Session = Depends(get_db)):
-    return db.query(Customer).all()
+@router.get(
+    "",
+    response_model=ApiResponse[list[CustomerResponse]],
+)
+def get_customers(
+    customer_repo: CustomerRepositoryDependency,
+) -> ApiResponse[list[CustomerResponse]]:
+    customers = get_customers_service(
+        customer_repo=customer_repo,
+    )
+
+    return ApiResponse(
+        message="Customers retrieved successfully",
+        data=customers,
+    )
 
 
-@router.get("/{customer_id}")
-def get_customer(customer_id: int, db: Session = Depends(get_db)):
-    customer = db.query(Customer).filter(
-        Customer.id == customer_id
-    ).first()
+@router.get(
+    "/{customer_id}",
+    response_model=ApiResponse[CustomerResponse],
+)
+def get_customer(
+    customer_id: int,
+    customer_repo: CustomerRepositoryDependency,
+) -> ApiResponse[CustomerResponse]:
+    customer = get_customer_service(
+        customer_repo=customer_repo,
+        customer_id=customer_id,
+    )
 
-    if customer is None:
-        raise HTTPException(status_code=404, detail="Customer not found")
+    return ApiResponse(
+        message="Customer retrieved successfully",
+        data=customer,
+    )
 
-    return customer
 
-
-@router.put("/{customer_id}")
+@router.put(
+    "/{customer_id}",
+    response_model=ApiResponse[CustomerResponse],
+)
 def update_customer(
     customer_id: int,
     data: CustomerUpdate,
-    db: Session = Depends(get_db),
-    current_user=Depends(require_admin)
-):
-    customer = db.query(Customer).filter(
-        Customer.id == customer_id
-    ).first()
+    db: DatabaseSession,
+    customer_repo: CustomerRepositoryDependency,
+    current_user: User = Depends(require_admin),
+) -> ApiResponse[CustomerResponse]:
+    customer = update_customer_service(
+        db=db,
+        customer_repo=customer_repo,
+        customer_id=customer_id,
+        data=data,
+    )
 
-    if customer is None:
-        raise HTTPException(status_code=404, detail="Customer not found")
-
-    customer.customer_name = data.customer_name
-    customer.phone = data.phone
-    customer.email = data.email
-    customer.address = data.address
-
-    db.commit()
-    db.refresh(customer)
-
-    return {
-        "message": "Customer Updated",
-        "id": customer.id
-    }
+    return ApiResponse(
+        message="Customer updated successfully",
+        data=customer,
+    )
 
 
-@router.delete("/{customer_id}")
+@router.delete(
+    "/{customer_id}",
+    response_model=ApiResponse[CustomerResponse],
+)
 def delete_customer(
     customer_id: int,
-    db: Session = Depends(get_db),
-    current_user=Depends(require_admin)
-):
-    customer = db.query(Customer).filter(
-        Customer.id == customer_id
-    ).first()
+    db: DatabaseSession,
+    customer_repo: CustomerRepositoryDependency,
+    current_user: User = Depends(require_admin),
+) -> ApiResponse[CustomerResponse]:
+    customer = delete_customer_service(
+        db=db,
+        customer_repo=customer_repo,
+        customer_id=customer_id,
+    )
 
-    if customer is None:
-        raise HTTPException(status_code=404, detail="Customer not found")
-
-    db.delete(customer)
-    db.commit()
-
-    return {"message": "Customer Deleted"}
+    return ApiResponse(
+        message="Customer deleted successfully",
+        data=customer,
+    )
