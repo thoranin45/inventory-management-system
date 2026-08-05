@@ -86,7 +86,8 @@ def expiring_report(
 
     batches = db.query(ProductBatch).filter(
         ProductBatch.quantity > 0,
-        ProductBatch.expiry_date <= target_date
+        ProductBatch.expiry_date >= today,
+        ProductBatch.expiry_date <= target_date,
     ).order_by(
         ProductBatch.expiry_date.asc()
     ).all()
@@ -304,7 +305,8 @@ def export_expiring_report(
 
     batches = db.query(ProductBatch).filter(
         ProductBatch.quantity > 0,
-        ProductBatch.expiry_date <= target_date
+        ProductBatch.expiry_date >= today,
+        ProductBatch.expiry_date <= target_date,
     ).order_by(
         ProductBatch.expiry_date.asc()
     ).all()
