@@ -1,3 +1,4 @@
+from pathlib import Path
 from datetime import date, timedelta
 from uuid import uuid4
 
@@ -825,3 +826,97 @@ def test_create_sales_order_without_token(
     )
 
     assert response.status_code == 401
+
+def test_generate_sales_order_invoice(
+    client: TestClient,
+    admin_headers: dict[str, str],
+) -> None:
+    customer = _create_customer(
+        client,
+        admin_headers,
+    )
+
+    product = _create_product(
+        client,
+        admin_headers,
+    )
+
+    _create_batch(
+        client,
+        admin_headers,
+        product["id"],
+        quantity=10,
+        expiry_days=90,
+    )
+
+    created = _create_sales_order(
+        client,
+        admin_headers,
+        customer["id"],
+        product["id"],
+        quantity=2,
+        unit_price=199,
+    )
+
+    sales_order_id = created["sales_order_id"]
+    so_number = created["so_number"]
+
+    invoice_path = Path(
+        "app/static/invoices"
+    ) / f"{so_number}.pdf"
+
+    try:
+        response = client.get(
+            (
+                "/api/v1/sales-orders/"
+                f"{sales_order_id}/invoice"
+            )
+        )
+
+        assert response.status_code == 200
+
+        assert response.headers[
+            "content-type"
+        ].startswith("application/pdf")
+
+        assert response.content.startswith(
+            b"%PDF"
+        )
+
+        content_disposition = (
+            response.headers.get(
+                "content-disposition",
+                "",
+            )
+        )
+
+        assert f"{so_number}.pdf" in (
+            content_disposition
+        )
+
+        assert invoice_path.exists()
+        assert invoice_path.stat().st_size > 0
+
+    finally:
+        if invoice_path.exists():
+            invoice_path.unlink()
+
+
+def test_generate_invoice_sales_order_not_found(
+    client: TestClient,
+) -> None:
+    response = client.get(
+        (
+            "/api/v1/sales-orders/"
+            "999999999/invoice"
+        )
+    )
+
+    assert response.status_code == 404
+
+    body = response.json()
+
+    assert body["success"] is False
+    assert body["message"] == (
+        "Sales Order not found"
+    )    
