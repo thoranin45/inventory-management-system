@@ -30,3 +30,7 @@ Add-Content .gitignore "`napp/static/invoices/*.pdf"
 app/static/invoices/
 
 .env.test
+
+.coverage
+htmlcov/
+.pytest_cache/
