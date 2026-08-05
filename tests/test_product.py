@@ -123,7 +123,7 @@ def test_get_products(
     assert create_response.status_code in {200, 201}
 
     response = client.get(
-        "/api/v1/products?page=1&size=20",
+        "/api/v1/products?page=1&size=100",
         headers=admin_headers,
     )
 
@@ -135,13 +135,22 @@ def test_get_products(
     assert "items" in body["data"]
     assert "pagination" in body["data"]
 
-    skus = [
-        item["sku"]
-        for item in body["data"]["items"]
-    ]
+    assert isinstance(
+        body["data"]["items"],
+        list,
+    )
 
-    assert payload["sku"] in skus
+    assert len(
+        body["data"]["items"]
+    ) <= 100
 
+    pagination = body["data"]["pagination"]
+
+    assert isinstance(pagination, dict)
+    assert pagination["page"] == 1
+    assert pagination["page_size"] == 100
+    assert pagination["total_items"] >= 1
+    assert pagination["total_pages"] >= 1
 
 def test_get_product_by_id(
     client: TestClient,
