@@ -46,9 +46,9 @@ jobs:
       DB_USER: postgres
       DB_PASSWORD: postgres
 
-  SECRET_KEY: github-actions-test-secret-key
-  ACCESS_TOKEN_EXPIRE_MINUTES: "1440"
-  PYTHONUNBUFFERED: "1"
+      SECRET_KEY: github-actions-test-secret-key
+      ACCESS_TOKEN_EXPIRE_MINUTES: "1440"
+      PYTHONUNBUFFERED: "1"
 
     steps:
       - name: Checkout repository
