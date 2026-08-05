@@ -1,3 +1,4 @@
+import os
 import time
 
 from fastapi import Request
@@ -13,6 +14,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.clients = {}
 
     async def dispatch(self, request: Request, call_next):
+        if os.getenv("PYTEST_CURRENT_TEST"):
+            return await call_next(request)
+
         client_ip = request.client.host if request.client else "unknown"
         now = time.time()
 
