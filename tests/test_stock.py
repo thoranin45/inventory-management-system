@@ -1,0 +1,685 @@
+from datetime import date, timedelta
+from uuid import uuid4
+
+from fastapi.testclient import TestClient
+
+
+def _product_payload(
+    *,
+    initial_stock: int = 0,
+) -> dict:
+    unique_value = uuid4().hex[:10].upper()
+
+    return {
+        "sku": f"STOCK-{unique_value}",
+        "barcode": f"886{unique_value}",
+        "product_name": (
+            f"Stock Test Product {unique_value}"
+        ),
+        "price": 150.00,
+        "stock_qty": initial_stock,
+        "category_id": None,
+    }
+
+
+def _create_product(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    *,
+    initial_stock: int = 0,
+) -> dict:
+    response = client.post(
+        "/api/v1/products",
+        headers=admin_headers,
+        json=_product_payload(
+            initial_stock=initial_stock,
+        ),
+    )
+
+    assert response.status_code in {200, 201}
+
+    body = response.json()
+
+    assert body["success"] is True
+
+    return body["data"]
+
+
+def _batch_payload(
+    product_id: int,
+    *,
+    quantity: int,
+    expiry_days: int,
+    lot_no: str | None = None,
+) -> dict:
+    manufacturing_date = date.today()
+
+    return {
+        "product_id": product_id,
+        "lot_no": (
+            lot_no
+            or f"STOCK-LOT-{uuid4().hex[:12].upper()}"
+        ),
+        "mfg_date": manufacturing_date.isoformat(),
+        "expiry_date": (
+            manufacturing_date
+            + timedelta(days=expiry_days)
+        ).isoformat(),
+        "quantity": quantity,
+    }
+
+
+def _create_batch(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    product_id: int,
+    *,
+    quantity: int,
+    expiry_days: int,
+) -> dict:
+    payload = _batch_payload(
+        product_id=product_id,
+        quantity=quantity,
+        expiry_days=expiry_days,
+    )
+
+    response = client.post(
+        "/api/v1/batches",
+        headers=admin_headers,
+        json=payload,
+    )
+
+    assert response.status_code == 201
+
+    body = response.json()
+
+    assert body["success"] is True
+
+    return body["data"]["batch"]
+
+
+def _get_product(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    product_id: int,
+) -> dict:
+    response = client.get(
+        f"/api/v1/products/{product_id}",
+        headers=admin_headers,
+    )
+
+    assert response.status_code == 200
+
+    return response.json()["data"]
+
+
+def _get_batches(
+    client: TestClient,
+) -> list[dict]:
+    response = client.get(
+        "/api/v1/batches"
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert body["success"] is True
+
+    return body["data"]
+
+
+def _get_batch_by_id(
+    client: TestClient,
+    batch_id: int,
+) -> dict:
+    batches = _get_batches(client)
+
+    batch = next(
+        (
+            current_batch
+            for current_batch in batches
+            if current_batch["id"] == batch_id
+        ),
+        None,
+    )
+
+    assert batch is not None
+
+    return batch
+
+
+def _get_stock_history(
+    client: TestClient,
+) -> list[dict]:
+    response = client.get(
+        "/api/v1/stock/history"
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert body["success"] is True
+    assert body["message"] == (
+        "Stock history retrieved successfully"
+    )
+
+    return body["data"]
+
+
+def test_stock_in_success(
+    client: TestClient,
+    admin_headers: dict[str, str],
+) -> None:
+    product = _create_product(
+        client=client,
+        admin_headers=admin_headers,
+        initial_stock=0,
+    )
+
+    response = client.post(
+        "/api/v1/stock/in",
+        headers=admin_headers,
+        json={
+            "product_id": product["id"],
+            "quantity": 20,
+            "remark": "Pytest stock in",
+        },
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert body["success"] is True
+    assert body["message"] == (
+        "Stock in completed successfully"
+    )
+
+    data = body["data"]
+
+    assert data["product_id"] == product["id"]
+    assert data["previous_stock"] == 0
+    assert data["current_stock"] == 20
+    assert data["difference"] == 20
+
+    updated_product = _get_product(
+        client=client,
+        admin_headers=admin_headers,
+        product_id=product["id"],
+    )
+
+    assert updated_product["stock_qty"] == 20
+
+    history = _get_stock_history(client)
+
+    transaction = next(
+        (
+            item
+            for item in history
+            if (
+                item["product_id"] == product["id"]
+                and item["transaction_type"] == "IN"
+                and item["remark"] == "Pytest stock in"
+            )
+        ),
+        None,
+    )
+
+    assert transaction is not None
+    assert transaction["quantity"] == 20
+
+
+def test_stock_in_product_not_found(
+    client: TestClient,
+    admin_headers: dict[str, str],
+) -> None:
+    response = client.post(
+        "/api/v1/stock/in",
+        headers=admin_headers,
+        json={
+            "product_id": 999999999,
+            "quantity": 5,
+            "remark": "Missing product test",
+        },
+    )
+
+    assert response.status_code == 404
+
+    body = response.json()
+
+    assert body["success"] is False
+    assert body["message"] == "Product not found"
+
+
+def test_stock_out_fifo_success(
+    client: TestClient,
+    admin_headers: dict[str, str],
+) -> None:
+    product = _create_product(
+        client=client,
+        admin_headers=admin_headers,
+    )
+
+    first_batch = _create_batch(
+        client=client,
+        admin_headers=admin_headers,
+        product_id=product["id"],
+        quantity=10,
+        expiry_days=180,
+    )
+
+    second_batch = _create_batch(
+        client=client,
+        admin_headers=admin_headers,
+        product_id=product["id"],
+        quantity=20,
+        expiry_days=365,
+    )
+
+    response = client.post(
+        "/api/v1/stock/out-fifo",
+        headers=admin_headers,
+        json={
+            "product_id": product["id"],
+            "quantity": 15,
+            "remark": "Pytest FIFO",
+        },
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert body["success"] is True
+    assert body["message"] == (
+        "FIFO stock out completed successfully"
+    )
+
+    data = body["data"]
+
+    assert data["previous_stock"] == 30
+    assert data["current_stock"] == 15
+    assert data["difference"] == -15
+
+    first_batch_after = _get_batch_by_id(
+        client=client,
+        batch_id=first_batch["id"],
+    )
+
+    second_batch_after = _get_batch_by_id(
+        client=client,
+        batch_id=second_batch["id"],
+    )
+
+    assert first_batch_after["quantity"] == 0
+    assert second_batch_after["quantity"] == 15
+
+    history = _get_stock_history(client)
+
+    transaction = next(
+        (
+            item
+            for item in history
+            if (
+                item["product_id"] == product["id"]
+                and item["transaction_type"] == "OUT_FIFO"
+            )
+        ),
+        None,
+    )
+
+    assert transaction is not None
+    assert transaction["quantity"] == -15
+
+
+def test_stock_out_fifo_insufficient_stock(
+    client: TestClient,
+    admin_headers: dict[str, str],
+) -> None:
+    product = _create_product(
+        client=client,
+        admin_headers=admin_headers,
+    )
+
+    _create_batch(
+        client=client,
+        admin_headers=admin_headers,
+        product_id=product["id"],
+        quantity=5,
+        expiry_days=180,
+    )
+
+    response = client.post(
+        "/api/v1/stock/out-fifo",
+        headers=admin_headers,
+        json={
+            "product_id": product["id"],
+            "quantity": 10,
+            "remark": "Insufficient stock test",
+        },
+    )
+
+    assert response.status_code == 409
+
+    body = response.json()
+
+    assert body["success"] is False
+    assert body["message"] == "Not enough stock"
+
+
+def test_stock_out_fefo_success(
+    client: TestClient,
+    admin_headers: dict[str, str],
+) -> None:
+    product = _create_product(
+        client=client,
+        admin_headers=admin_headers,
+    )
+
+    later_expiry_batch = _create_batch(
+        client=client,
+        admin_headers=admin_headers,
+        product_id=product["id"],
+        quantity=20,
+        expiry_days=365,
+    )
+
+    earlier_expiry_batch = _create_batch(
+        client=client,
+        admin_headers=admin_headers,
+        product_id=product["id"],
+        quantity=10,
+        expiry_days=30,
+    )
+
+    response = client.post(
+        "/api/v1/stock/out-fefo",
+        headers=admin_headers,
+        json={
+            "product_id": product["id"],
+            "quantity": 15,
+            "remark": "Pytest FEFO",
+        },
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert body["success"] is True
+    assert body["message"] == (
+        "FEFO stock out completed successfully"
+    )
+
+    data = body["data"]
+
+    assert data["previous_stock"] == 30
+    assert data["current_stock"] == 15
+    assert data["difference"] == -15
+
+    earlier_batch_after = _get_batch_by_id(
+        client=client,
+        batch_id=earlier_expiry_batch["id"],
+    )
+
+    later_batch_after = _get_batch_by_id(
+        client=client,
+        batch_id=later_expiry_batch["id"],
+    )
+
+    assert earlier_batch_after["quantity"] == 0
+    assert later_batch_after["quantity"] == 15
+
+    history = _get_stock_history(client)
+
+    transaction = next(
+        (
+            item
+            for item in history
+            if (
+                item["product_id"] == product["id"]
+                and item["transaction_type"] == "OUT_FEFO"
+            )
+        ),
+        None,
+    )
+
+    assert transaction is not None
+    assert transaction["quantity"] == -15
+
+
+def test_stock_out_batch_stock_not_enough(
+    client: TestClient,
+    admin_headers: dict[str, str],
+) -> None:
+    # Product มี stock_qty แต่ไม่มี Batch
+    # จึงผ่านการตรวจ stock รวม แต่ไม่ผ่าน Batch stock
+    product = _create_product(
+        client=client,
+        admin_headers=admin_headers,
+        initial_stock=10,
+    )
+
+    response = client.post(
+        "/api/v1/stock/out-fefo",
+        headers=admin_headers,
+        json={
+            "product_id": product["id"],
+            "quantity": 5,
+            "remark": (
+                "Insufficient batch stock test"
+            ),
+        },
+    )
+
+    assert response.status_code == 409
+
+    body = response.json()
+
+    assert body["success"] is False
+    assert body["message"] == (
+        "Not enough batch stock"
+    )
+
+    product_after = _get_product(
+        client=client,
+        admin_headers=admin_headers,
+        product_id=product["id"],
+    )
+
+    # ต้องไม่ถูกหัก เพราะ operation ไม่สำเร็จ
+    assert product_after["stock_qty"] == 10
+
+
+def test_stock_adjust_success(
+    client: TestClient,
+    admin_headers: dict[str, str],
+) -> None:
+    product = _create_product(
+        client=client,
+        admin_headers=admin_headers,
+        initial_stock=5,
+    )
+
+    response = client.post(
+        "/api/v1/stock/adjust",
+        headers=admin_headers,
+        json={
+            "product_id": product["id"],
+            "new_quantity": 12,
+            "remark": "Pytest adjustment",
+        },
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert body["success"] is True
+    assert body["message"] == (
+        "Stock adjusted successfully"
+    )
+
+    data = body["data"]
+
+    assert data["previous_stock"] == 5
+    assert data["current_stock"] == 12
+    assert data["difference"] == 7
+
+    history = _get_stock_history(client)
+
+    transaction = next(
+        (
+            item
+            for item in history
+            if (
+                item["product_id"] == product["id"]
+                and item["transaction_type"] == "ADJUST"
+            )
+        ),
+        None,
+    )
+
+    assert transaction is not None
+    assert transaction["quantity"] == 7
+
+
+def test_stock_adjust_with_active_batch_fails(
+    client: TestClient,
+    admin_headers: dict[str, str],
+) -> None:
+    product = _create_product(
+        client=client,
+        admin_headers=admin_headers,
+    )
+
+    _create_batch(
+        client=client,
+        admin_headers=admin_headers,
+        product_id=product["id"],
+        quantity=10,
+        expiry_days=180,
+    )
+
+    response = client.post(
+        "/api/v1/stock/adjust",
+        headers=admin_headers,
+        json={
+            "product_id": product["id"],
+            "new_quantity": 50,
+            "remark": "Blocked adjustment",
+        },
+    )
+
+    assert response.status_code == 409
+
+    body = response.json()
+
+    assert body["success"] is False
+    assert body["message"] == (
+        "Cannot directly adjust a product "
+        "that has active batch stock"
+    )
+
+    product_after = _get_product(
+        client=client,
+        admin_headers=admin_headers,
+        product_id=product["id"],
+    )
+
+    assert product_after["stock_qty"] == 10
+
+
+def test_stock_history_sorted_latest_first(
+    client: TestClient,
+    admin_headers: dict[str, str],
+) -> None:
+    product = _create_product(
+        client=client,
+        admin_headers=admin_headers,
+    )
+
+    first_response = client.post(
+        "/api/v1/stock/in",
+        headers=admin_headers,
+        json={
+            "product_id": product["id"],
+            "quantity": 2,
+            "remark": "History first",
+        },
+    )
+
+    assert first_response.status_code == 200
+
+    second_response = client.post(
+        "/api/v1/stock/in",
+        headers=admin_headers,
+        json={
+            "product_id": product["id"],
+            "quantity": 3,
+            "remark": "History second",
+        },
+    )
+
+    assert second_response.status_code == 200
+
+    history = _get_stock_history(client)
+
+    product_transactions = [
+        item
+        for item in history
+        if item["product_id"] == product["id"]
+    ]
+
+    assert len(product_transactions) >= 2
+    assert product_transactions[0]["remark"] == (
+        "History second"
+    )
+    assert product_transactions[1]["remark"] == (
+        "History first"
+    )
+
+
+def test_stock_operation_without_token(
+    client: TestClient,
+    admin_headers: dict[str, str],
+) -> None:
+    product = _create_product(
+        client=client,
+        admin_headers=admin_headers,
+    )
+
+    response = client.post(
+        "/api/v1/stock/in",
+        json={
+            "product_id": product["id"],
+            "quantity": 5,
+            "remark": "Unauthorized test",
+        },
+    )
+
+    assert response.status_code == 401
+
+
+def test_stock_validation_error(
+    client: TestClient,
+    admin_headers: dict[str, str],
+) -> None:
+    product = _create_product(
+        client=client,
+        admin_headers=admin_headers,
+    )
+
+    response = client.post(
+        "/api/v1/stock/in",
+        headers=admin_headers,
+        json={
+            "product_id": product["id"],
+            "quantity": 0,
+            "remark": "Invalid quantity test",
+        },
+    )
+
+    assert response.status_code == 422
