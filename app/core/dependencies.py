@@ -8,6 +8,7 @@ from app.core.service_dependencies import (
     get_batch_repository,
     get_category_repository,
     get_customer_repository,
+    get_dashboard_repository,
     get_product_repository,
     get_purchase_order_repository,
     get_sales_order_repository,
@@ -25,6 +26,9 @@ from app.repositories.purchase_order_repository import (
 )
 from app.repositories.sales_order_repository import (
     SalesOrderRepository,
+)
+from app.repositories.dashboard_repository import (
+    DashboardRepository,
 )
 from app.repositories.stock_repository import StockRepository
 from app.repositories.supplier_repository import SupplierRepository
@@ -132,4 +136,9 @@ PurchaseOrderRepositoryDependency = Annotated[
 SalesOrderRepositoryDependency = Annotated[
     SalesOrderRepository,
     Depends(get_sales_order_repository),
+]
+
+DashboardRepositoryDependency = Annotated[
+    DashboardRepository,
+    Depends(get_dashboard_repository),
 ]

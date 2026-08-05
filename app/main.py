@@ -7,6 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import IntegrityError
 
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
 from app.core.config import settings
 from app.core.exception_handler import (
     app_exception_handler,
@@ -128,6 +130,10 @@ app.add_exception_handler(
     integrity_error_handler,
 )
 
+app.add_exception_handler(
+    StarletteHTTPException,
+    http_exception_handler,
+)
 
 # -------------------------------------------------------------------
 # Static files
@@ -262,3 +268,4 @@ app.include_router(
     health_router,
     prefix=API_V1_PREFIX,
 )
+
