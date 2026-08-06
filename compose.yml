@@ -1,0 +1,77 @@
+name: inventory-system
+
+services:
+  db:
+    image: postgres:18
+    container_name: inventory-postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: inventory_db
+
+    ports:
+      - "5433:5432"
+
+    volumes:
+      - inventory_postgres_data:/var/lib/postgresql
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U postgres -d inventory_db"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    container_name: inventory-api
+    restart: unless-stopped
+
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: inventory_db
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@db:5432/inventory_db
+
+      SECRET_KEY: docker-local-development-secret-key-change-in-production
+      ACCESS_TOKEN_EXPIRE_MINUTES: "1440"
+
+      APP_NAME: Inventory Management System
+      APP_VERSION: "2.0.0"
+      ENV: development
+
+      RATE_LIMIT_MAX_REQUESTS: "100"
+      RATE_LIMIT_WINDOW_SECONDS: "60"
+
+      CORS_ORIGINS: http://localhost:3000,http://localhost:5173,http://127.0.0.1:5173
+
+    ports:
+      - "8081:8081"
+
+    depends_on:
+      db:
+        condition: service_healthy
+
+    command: >
+      sh -c "
+      alembic upgrade head &&
+      uvicorn app.main:app
+      --host 0.0.0.0
+      --port 8081
+      "
+
+volumes:
+  inventory_postgres_data:
+    name: inventory-postgres-data
