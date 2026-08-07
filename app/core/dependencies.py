@@ -33,6 +33,15 @@ from app.repositories.dashboard_repository import (
 from app.repositories.stock_repository import StockRepository
 from app.repositories.supplier_repository import SupplierRepository
 
+from app.repositories.stock_balance_repository import (
+    StockBalanceRepository,
+)
+from app.repositories.inventory_transfer_repository import (
+    InventoryTransferRepository,
+)
+from app.repositories.inventory_movement_repository import (
+    InventoryMovementRepository,
+)
 
 DatabaseSession = Annotated[
     Session,
@@ -97,6 +106,20 @@ def require_admin(
 
     return current_user
 
+def get_stock_balance_repository(
+    db: DatabaseSession,
+) -> StockBalanceRepository:
+    return StockBalanceRepository(db)
+
+def get_inventory_transfer_repository(
+    db: DatabaseSession,
+) -> InventoryTransferRepository:
+    return InventoryTransferRepository(db)
+
+def get_inventory_movement_repository(
+    db: DatabaseSession,
+) -> InventoryMovementRepository:
+    return InventoryMovementRepository(db)
 
 ProductRepositoryDependency = Annotated[
     ProductRepository,
@@ -141,4 +164,19 @@ SalesOrderRepositoryDependency = Annotated[
 DashboardRepositoryDependency = Annotated[
     DashboardRepository,
     Depends(get_dashboard_repository),
+]
+
+StockBalanceRepositoryDependency = Annotated[
+    StockBalanceRepository,
+    Depends(get_stock_balance_repository),
+]
+
+InventoryTransferRepositoryDependency = Annotated[
+    InventoryTransferRepository,
+    Depends(get_inventory_transfer_repository),
+]
+
+InventoryMovementRepositoryDependency = Annotated[
+    InventoryMovementRepository,
+    Depends(get_inventory_movement_repository),
 ]

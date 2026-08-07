@@ -6,12 +6,14 @@ from sqlalchemy import (
     Numeric,
     DateTime,
     Date,
+    DateTime,
     Boolean,
     ForeignKey,
     SmallInteger,
     CheckConstraint,
     UniqueConstraint,
     Index,
+    text,
 )
 from sqlalchemy.sql import func
 
@@ -800,4 +802,562 @@ class ProductUnitConversion(Base):
         "Unit",
         foreign_keys=[to_unit_id],
         back_populates="conversions_to",
+    )
+
+class StockBalance(Base):
+    __tablename__ = "stock_balances"
+
+    id = Column(
+        Integer,
+        primary_key=True,
+    )
+
+    product_id = Column(
+        Integer,
+        ForeignKey(
+            "products.id",
+            name="fk_stock_balances_product_id",
+        ),
+        nullable=False,
+    )
+
+    warehouse_id = Column(
+        Integer,
+        ForeignKey(
+            "warehouses.id",
+            name="fk_stock_balances_warehouse_id",
+        ),
+        nullable=False,
+    )
+
+    location_id = Column(
+        Integer,
+        ForeignKey(
+            "warehouse_locations.id",
+            name="fk_stock_balances_location_id",
+        ),
+        nullable=False,
+    )  
+
+    batch_id = Column(
+        Integer,
+        ForeignKey(
+            "product_batches.id",
+            name="fk_stock_balances_batch_id",
+        ),
+        nullable=True,
+    )
+
+    on_hand_qty = Column(
+        Numeric(18, 3),
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+
+    reserved_qty = Column(
+        Numeric(18, 3),
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    product = relationship(
+        "Product",
+    )
+
+    warehouse = relationship(
+        "Warehouse",
+    )
+
+    location = relationship(
+        "WarehouseLocation",
+    )
+
+    batch = relationship(
+        "ProductBatch",
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "on_hand_qty >= 0",
+            name="ck_stock_balances_on_hand_non_negative",
+        ),
+        CheckConstraint(
+            "reserved_qty >= 0",
+            name="ck_stock_balances_reserved_non_negative",
+        ),
+        CheckConstraint(
+            "reserved_qty <= on_hand_qty",
+            name="ck_stock_balances_reserved_lte_on_hand",
+        ),
+
+        # สินค้าที่ไม่ได้ track batch:
+        # 1 Product + Warehouse + Location
+        # มี balance ได้เพียง record เดียว
+        Index(
+            "uq_stock_balances_no_batch",
+            "product_id",
+            "warehouse_id",
+            "location_id",
+            unique=True,
+            postgresql_where=text(
+                "batch_id IS NULL"
+            ),
+        ),
+
+        # สินค้าที่ track batch:
+        # แยก balance ต่อ Lot/Batch
+        Index(
+            "uq_stock_balances_with_batch",
+            "product_id",
+            "warehouse_id",
+            "location_id",
+            "batch_id",
+            unique=True,
+            postgresql_where=text(
+                "batch_id IS NOT NULL"
+            ),
+        ),
+
+        Index(
+            "ix_stock_balances_product_id",
+            "product_id",
+        ),
+        Index(
+            "ix_stock_balances_warehouse_id",
+            "warehouse_id",
+        ),
+        Index(
+            "ix_stock_balances_location_id",
+            "location_id",
+        ),
+        Index(
+            "ix_stock_balances_batch_id",
+            "batch_id",
+        ),
+    )
+
+    @property
+    def available_qty(self):
+        return (
+            self.on_hand_qty
+            - self.reserved_qty
+        )
+
+class InventoryTransfer(Base):
+    __tablename__ = "inventory_transfers"
+
+    id = Column(
+        Integer,
+        primary_key=True,
+    )
+
+    transfer_number = Column(
+        String(50),
+        nullable=False,
+        unique=True,
+    )
+
+    status = Column(
+        String(30),
+        nullable=False,
+        default="DRAFT",
+        server_default="DRAFT",
+    )
+
+    source_warehouse_id = Column(
+        Integer,
+        ForeignKey("warehouses.id"),
+        nullable=False,
+    )
+
+    destination_warehouse_id = Column(
+        Integer,
+        ForeignKey("warehouses.id"),
+        nullable=False,
+    )
+
+    requested_by_user_id = Column(
+        Integer,
+        ForeignKey("users.id"),
+        nullable=True,
+    )
+
+    completed_by_user_id = Column(
+        Integer,
+        ForeignKey("users.id"),
+        nullable=True,
+    )
+
+    remark = Column(
+        String(500),
+        nullable=True,
+    )
+
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    completed_at = Column(
+        DateTime,
+        nullable=True,
+    )
+
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    items = relationship(
+        "InventoryTransferItem",
+        back_populates="transfer",
+        cascade="all, delete-orphan",
+    )
+
+    source_warehouse = relationship(
+        "Warehouse",
+        foreign_keys=[source_warehouse_id],
+    )
+
+    destination_warehouse = relationship(
+        "Warehouse",
+        foreign_keys=[destination_warehouse_id],
+    )
+
+    requested_by = relationship(
+        "User",
+        foreign_keys=[requested_by_user_id],
+    )
+
+    completed_by = relationship(
+        "User",
+        foreign_keys=[completed_by_user_id],
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "source_warehouse_id <> destination_warehouse_id",
+            name=(
+                "ck_inventory_transfers_"
+                "different_warehouses"
+            ),
+        ),
+        Index(
+            "ix_inventory_transfers_status",
+            "status",
+        ),
+        Index(
+            "ix_inventory_transfers_source_warehouse",
+            "source_warehouse_id",
+        ),
+        Index(
+            "ix_inventory_transfers_destination_warehouse",
+            "destination_warehouse_id",
+        ),
+        Index(
+            "ix_inventory_transfers_created_at",
+            "created_at",
+        ),
+    )
+
+
+class InventoryTransferItem(Base):
+    __tablename__ = "inventory_transfer_items"
+
+    id = Column(
+        Integer,
+        primary_key=True,
+    )
+
+    transfer_id = Column(
+        Integer,
+        ForeignKey("inventory_transfers.id"),
+        nullable=False,
+    )
+
+    product_id = Column(
+        Integer,
+        ForeignKey("products.id"),
+        nullable=False,
+    )
+
+    batch_id = Column(
+        Integer,
+        ForeignKey("product_batches.id"),
+        nullable=True,
+    )
+
+    from_location_id = Column(
+        Integer,
+        ForeignKey("warehouse_locations.id"),
+        nullable=False,
+    )
+
+    to_location_id = Column(
+        Integer,
+        ForeignKey("warehouse_locations.id"),
+        nullable=False,
+    )
+
+    quantity = Column(
+        Numeric(18, 3),
+        nullable=False,
+    )
+
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    transfer = relationship(
+        "InventoryTransfer",
+        back_populates="items",
+    )
+
+    product = relationship(
+        "Product",
+    )
+
+    batch = relationship(
+        "ProductBatch",
+    )
+
+    from_location = relationship(
+        "WarehouseLocation",
+        foreign_keys=[from_location_id],
+    )
+
+    to_location = relationship(
+        "WarehouseLocation",
+        foreign_keys=[to_location_id],
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "quantity > 0",
+            name=(
+                "ck_inventory_transfer_items_"
+                "quantity_positive"
+            ),
+        ),
+        Index(
+            "uq_inventory_transfer_items_no_batch",
+            "transfer_id",
+            "product_id",
+            "from_location_id",
+            "to_location_id",
+            unique=True,
+            postgresql_where=text(
+                "batch_id IS NULL"
+            ),
+        ),
+        Index(
+            "uq_inventory_transfer_items_with_batch",
+            "transfer_id",
+            "product_id",
+            "batch_id",
+            "from_location_id",
+            "to_location_id",
+            unique=True,
+            postgresql_where=text(
+                "batch_id IS NOT NULL"
+            ),
+        ),
+        Index(
+            "ix_inventory_transfer_items_transfer_id",
+            "transfer_id",
+        ),
+        Index(
+            "ix_inventory_transfer_items_product_id",
+            "product_id",
+        ),
+        Index(
+            "ix_inventory_transfer_items_batch_id",
+            "batch_id",
+        ),
+    )
+
+class InventoryMovement(Base):
+    __tablename__ = "inventory_movements"
+
+    id = Column(
+        Integer,
+        primary_key=True,
+    )
+
+    product_id = Column(
+        Integer,
+        ForeignKey("products.id"),
+        nullable=False,
+    )
+
+    batch_id = Column(
+        Integer,
+        ForeignKey("product_batches.id"),
+        nullable=True,
+    )
+
+    warehouse_id = Column(
+        Integer,
+        ForeignKey("warehouses.id"),
+        nullable=False,
+    )
+
+    location_id = Column(
+        Integer,
+        ForeignKey("warehouse_locations.id"),
+        nullable=False,
+    )
+
+    movement_type = Column(
+        String(50),
+        nullable=False,
+    )
+
+    quantity = Column(
+        Numeric(18, 3),
+        nullable=False,
+    )
+
+    balance_before = Column(
+        Numeric(18, 3),
+        nullable=False,
+    )
+
+    balance_after = Column(
+        Numeric(18, 3),
+        nullable=False,
+    )
+
+    reference_type = Column(
+        String(50),
+        nullable=True,
+    )
+
+    reference_id = Column(
+        Integer,
+        nullable=True,
+    )
+
+    reference_number = Column(
+        String(100),
+        nullable=True,
+    )
+
+    remark = Column(
+        String(500),
+        nullable=True,
+    )
+
+    created_by_user_id = Column(
+        Integer,
+        ForeignKey("users.id"),
+        nullable=True,
+    )
+
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    product = relationship(
+        "Product",
+    )
+
+    batch = relationship(
+        "ProductBatch",
+    )
+
+    warehouse = relationship(
+        "Warehouse",
+    )
+
+    location = relationship(
+        "WarehouseLocation",
+    )
+
+    created_by = relationship(
+        "User",
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "quantity <> 0",
+            name=(
+                "ck_inventory_movements_"
+                "quantity_non_zero"
+            ),
+        ),
+
+        CheckConstraint(
+            "balance_before >= 0",
+            name=(
+                "ck_inventory_movements_"
+                "balance_before_non_negative"
+            ),
+        ),
+
+        CheckConstraint(
+            "balance_after >= 0",
+            name=(
+                "ck_inventory_movements_"
+                "balance_after_non_negative"
+            ),
+        ),
+
+        Index(
+            "ix_inventory_movements_product_id",
+            "product_id",
+        ),
+
+        Index(
+            "ix_inventory_movements_batch_id",
+            "batch_id",
+        ),
+
+        Index(
+            "ix_inventory_movements_warehouse_id",
+            "warehouse_id",
+        ),
+
+        Index(
+            "ix_inventory_movements_location_id",
+            "location_id",
+        ),
+
+        Index(
+            "ix_inventory_movements_movement_type",
+            "movement_type",
+        ),
+
+        Index(
+            "ix_inventory_movements_reference",
+            "reference_type",
+            "reference_id",
+        ),
+
+        Index(
+            "ix_inventory_movements_created_at",
+            "created_at",
+        ),
     )

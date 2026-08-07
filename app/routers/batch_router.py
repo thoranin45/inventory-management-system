@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, status
 from app.core.dependencies import (
     BatchRepositoryDependency,
     DatabaseSession,
+    StockBalanceRepositoryDependency,
     StockRepositoryDependency,
     require_warehouse,
 )
@@ -36,12 +37,14 @@ def create_batch(
     db: DatabaseSession,
     stock_repo: StockRepositoryDependency,
     batch_repo: BatchRepositoryDependency,
+    balance_repo: StockBalanceRepositoryDependency,
     current_user: User = Depends(require_warehouse),
 ) -> ApiResponse[BatchCreateResponse]:
     result = create_batch_service(
         db=db,
         stock_repo=stock_repo,
         batch_repo=batch_repo,
+        balance_repo=balance_repo,
         data=data,
     )
 

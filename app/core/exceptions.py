@@ -20,6 +20,35 @@ class ProductNotFoundException(AppException):
             status_code=status.HTTP_404_NOT_FOUND,
         )
 
+class StockBalanceNotFoundException(AppException):
+    def __init__(self):
+        super().__init__(
+            status_code=404,
+            message="Stock balance not found",
+        )
+
+
+class StockBalanceAlreadyExistsException(
+    AppException
+):
+    def __init__(self):
+        super().__init__(
+            status_code=409,
+            message="Stock balance already exists",
+        )
+
+
+class InvalidStockReservationException(
+    AppException
+):
+    def __init__(self):
+        super().__init__(
+            status_code=409,
+            message=(
+                "Reserved quantity cannot "
+                "exceed on-hand quantity"
+            ),
+        )
 
 class DuplicateSKUException(AppException):
     def __init__(self):
@@ -203,3 +232,130 @@ class UnexpectedPurchaseOrderReceiveItemException(AppException):
             ),
             status_code=status.HTTP_400_BAD_REQUEST,
         )   
+
+class WarehouseNotFoundException(AppException):
+    def __init__(self):
+        super().__init__(
+            message="Warehouse not found",
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+
+
+class WarehouseLocationNotFoundException(AppException):
+    def __init__(self):
+        super().__init__(
+            message="Warehouse location not found",
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+
+
+class BatchNotFoundException(AppException):
+    def __init__(self):
+        super().__init__(
+            message="Batch not found",
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+
+
+class BatchRequiredException(AppException):
+    def __init__(self):
+        super().__init__(
+            message="Batch is required for this product",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+
+class BatchNotAllowedException(AppException):
+    def __init__(self):
+        super().__init__(
+            message="Batch is not allowed for this product",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+class DefaultStorageNotConfiguredException(
+    AppException
+):
+    def __init__(self):
+        super().__init__(
+            message=(
+                "Default warehouse or location "
+                "is not configured"
+            ),
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+class InventoryTransferNotFoundException(
+    AppException
+):
+    def __init__(self):
+        super().__init__(
+            message="Inventory transfer not found",
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+
+
+class InvalidTransferLocationException(
+    AppException
+):
+    def __init__(self):
+        super().__init__(
+            message=(
+                "Transfer location does not belong "
+                "to the specified warehouse"
+            ),
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+
+class SameTransferLocationException(
+    AppException
+):
+    def __init__(self):
+        super().__init__(
+            message=(
+                "Source and destination locations "
+                "must be different"
+            ),
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+
+class DuplicateTransferItemException(
+    AppException
+):
+    def __init__(self):
+        super().__init__(
+            message="Duplicate transfer item",
+            status_code=status.HTTP_409_CONFLICT,
+        )
+
+class InventoryTransferAlreadyCompletedException(
+    AppException
+):
+    def __init__(self):
+        super().__init__(
+            message="Inventory transfer already completed",
+            status_code=status.HTTP_409_CONFLICT,
+        )
+
+
+class InventoryTransferCancelledException(
+    AppException
+):
+    def __init__(self):
+        super().__init__(
+            message="Inventory transfer is cancelled",
+            status_code=status.HTTP_409_CONFLICT,
+        )
+
+class InventoryTransferCannotCancelException(
+    AppException
+):
+    def __init__(self):
+        super().__init__(
+            message=(
+                "Only draft inventory transfer "
+                "can be cancelled"
+            ),
+            status_code=status.HTTP_409_CONFLICT,
+        )

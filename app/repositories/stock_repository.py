@@ -1,6 +1,8 @@
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from decimal import Decimal
+
 from app.models import (
     Product,
     ProductBatch,
@@ -66,7 +68,7 @@ class StockRepository:
     def get_batch_stock_total(
         self,
         product_id: int,
-    ) -> int:
+    ) -> Decimal:
         total = (
             self.db.query(
                 func.coalesce(
@@ -81,7 +83,7 @@ class StockRepository:
             .scalar()
         )
 
-        return int(total or 0)
+        return Decimal(str(total or 0))
 
     def create_transaction(
         self,

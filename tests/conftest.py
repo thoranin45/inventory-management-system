@@ -3,17 +3,21 @@ from collections.abc import Generator
 from pathlib import Path
 from uuid import uuid4
 
-from app.core.security import hash_password
-from app.models import Base, User
 import pytest
 from dotenv import load_dotenv
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.core.security import hash_password
 from app.database import get_db
 from app.main import app
-from app.models import Base
+from app.models import (
+    Base,
+    User,
+    Warehouse,
+    WarehouseLocation,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -60,14 +64,81 @@ def override_get_db() -> Generator[Session, None, None]:
 app.dependency_overrides[get_db] = override_get_db
 
 
-@pytest.fixture(scope="session", autouse=True)
+def seed_test_foundation() -> None:
+    db = TestingSessionLocal()
+
+    try:
+        warehouse = (
+            db.query(Warehouse)
+            .filter(
+                Warehouse.warehouse_code == "MAIN"
+            )
+            .first()
+        )
+
+        if warehouse is None:
+            warehouse = Warehouse(
+                warehouse_code="MAIN",
+                warehouse_name="Main Warehouse",
+                warehouse_type="MAIN",
+                is_active=True,
+            )
+
+            db.add(warehouse)
+            db.flush()
+
+        location = (
+            db.query(WarehouseLocation)
+            .filter(
+                WarehouseLocation.warehouse_id
+                == warehouse.id,
+                WarehouseLocation.location_code
+                == "DEFAULT",
+            )
+            .first()
+        )
+
+        if location is None:
+            location = WarehouseLocation(
+                warehouse_id=warehouse.id,
+                location_code="DEFAULT",
+                location_name="Default Location",
+                location_type="STORAGE",
+                is_active=True,
+            )
+
+            db.add(location)
+
+        db.commit()
+
+    except Exception:
+        db.rollback()
+        raise
+
+    finally:
+        db.close()
+
+
+@pytest.fixture(
+    scope="session",
+    autouse=True,
+)
 def prepare_test_database():
-    Base.metadata.drop_all(bind=test_engine)
-    Base.metadata.create_all(bind=test_engine)
+    Base.metadata.drop_all(
+        bind=test_engine
+    )
+
+    Base.metadata.create_all(
+        bind=test_engine
+    )
+
+    seed_test_foundation()
 
     yield
 
-    Base.metadata.drop_all(bind=test_engine)
+    Base.metadata.drop_all(
+        bind=test_engine
+    )
 
 
 @pytest.fixture
@@ -85,6 +156,7 @@ def db_session() -> Generator[Session, None, None]:
 def client() -> Generator[TestClient, None, None]:
     with TestClient(app) as test_client:
         yield test_client
+
 
 @pytest.fixture
 def admin_user(
@@ -105,9 +177,6 @@ def admin_user(
     db_session.refresh(user)
 
     yield user
-
-    db_session.delete(user)
-    db_session.commit()
 
 
 @pytest.fixture

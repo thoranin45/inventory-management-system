@@ -1,14 +1,22 @@
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import (
+    DefaultStorageNotConfiguredException,
     DuplicateLotNumberException,
     InvalidBatchDateException,
     ProductNotFoundException,
 )
 from app.core.unit_of_work import UnitOfWork
 from app.models import ProductBatch, StockTransaction
-from app.repositories.batch_repository import BatchRepository
-from app.repositories.stock_repository import StockRepository
+from app.repositories.batch_repository import (
+    BatchRepository,
+)
+from app.repositories.stock_balance_repository import (
+    StockBalanceRepository,
+)
+from app.repositories.stock_repository import (
+    StockRepository,
+)
 from app.schemas.batch_schema import (
     BatchCreate,
     BatchCreateResponse,
@@ -20,6 +28,7 @@ def create_batch_service(
     db: Session,
     stock_repo: StockRepository,
     batch_repo: BatchRepository,
+    balance_repo: StockBalanceRepository,
     data: BatchCreate,
 ) -> BatchCreateResponse:
     product = stock_repo.get_active_product(
@@ -39,6 +48,11 @@ def create_batch_service(
     if existing_batch is not None:
         raise DuplicateLotNumberException()
 
+    storage = balance_repo.get_default_storage()
+
+    if storage is None:
+        raise DefaultStorageNotConfiguredException()
+
     batch = ProductBatch(
         product_id=data.product_id,
         lot_no=data.lot_no,
@@ -50,6 +64,15 @@ def create_batch_service(
     with UnitOfWork(db) as uow:
         batch_repo.create(batch)
 
+        # ต้องมี batch.id ก่อนสร้าง StockBalance
+        db.flush()
+
+        balance_repo.create_default_batch_balance(
+            product_id=product.id,
+            batch_id=batch.id,
+            on_hand_qty=data.quantity,
+        )
+
         product.stock_qty += data.quantity
 
         transaction = StockTransaction(
@@ -59,13 +82,17 @@ def create_batch_service(
             remark=f"Lot: {data.lot_no}",
         )
 
-        stock_repo.create_transaction(transaction)
+        stock_repo.create_transaction(
+            transaction
+        )
 
     uow.refresh(batch)
     uow.refresh(product)
 
     return BatchCreateResponse(
-        batch=BatchResponse.model_validate(batch),
+        batch=BatchResponse.model_validate(
+            batch
+        ),
         current_stock=product.stock_qty,
     )
 

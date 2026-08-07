@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 
 from app.core.dependencies import (
     DatabaseSession,
+    StockBalanceRepositoryDependency,
     StockRepositoryDependency,
     require_warehouse,
 )
@@ -31,83 +32,119 @@ router = APIRouter(
 
 @router.post(
     "/in",
-    response_model=ApiResponse[StockOperationResponse],
+    response_model=ApiResponse[
+        StockOperationResponse
+    ],
 )
 def stock_in(
     data: StockIn,
     db: DatabaseSession,
     stock_repo: StockRepositoryDependency,
-    current_user: User = Depends(require_warehouse),
+    balance_repo: StockBalanceRepositoryDependency,
+    current_user: User = Depends(
+        require_warehouse
+    ),
 ) -> ApiResponse[StockOperationResponse]:
+
     result = stock_in_service(
         db=db,
         stock_repo=stock_repo,
+        balance_repo=balance_repo,
         data=data,
     )
 
     return ApiResponse(
-        message="Stock in completed successfully",
+        message=(
+            "Stock in completed successfully"
+        ),
         data=result,
     )
 
 
 @router.post(
     "/out-fifo",
-    response_model=ApiResponse[StockOperationResponse],
+    response_model=ApiResponse[
+        StockOperationResponse
+    ],
 )
 def stock_out_fifo(
     data: StockOut,
     db: DatabaseSession,
     stock_repo: StockRepositoryDependency,
-    current_user: User = Depends(require_warehouse),
+    balance_repo: StockBalanceRepositoryDependency,
+    current_user: User = Depends(
+        require_warehouse
+    ),
 ) -> ApiResponse[StockOperationResponse]:
+
     result = stock_out_fifo_service(
         db=db,
         stock_repo=stock_repo,
+        balance_repo=balance_repo,
         data=data,
     )
 
     return ApiResponse(
-        message="FIFO stock out completed successfully",
+        message=(
+            "FIFO stock out completed "
+            "successfully"
+        ),
         data=result,
     )
 
 
 @router.post(
     "/out-fefo",
-    response_model=ApiResponse[StockOperationResponse],
+    response_model=ApiResponse[
+        StockOperationResponse
+    ],
 )
 def stock_out_fefo(
     data: StockOut,
     db: DatabaseSession,
     stock_repo: StockRepositoryDependency,
-    current_user: User = Depends(require_warehouse),
+    balance_repo: StockBalanceRepositoryDependency,
+    current_user: User = Depends(
+        require_warehouse
+    ),
 ) -> ApiResponse[StockOperationResponse]:
+
     result = stock_out_fefo_service(
         db=db,
         stock_repo=stock_repo,
+        balance_repo=balance_repo,
         data=data,
     )
 
     return ApiResponse(
-        message="FEFO stock out completed successfully",
+        message=(
+            "FEFO stock out completed "
+            "successfully"
+        ),
         data=result,
     )
 
 
 @router.post(
     "/adjust",
-    response_model=ApiResponse[StockOperationResponse],
+    response_model=ApiResponse[
+        StockOperationResponse
+    ],
 )
 def stock_adjust(
     data: StockAdjust,
     db: DatabaseSession,
     stock_repo: StockRepositoryDependency,
-    current_user: User = Depends(require_warehouse),
+    balance_repo: StockBalanceRepositoryDependency,
+    current_user: User = Depends(
+        require_warehouse
+    ),
 ) -> ApiResponse[StockOperationResponse]:
+
     result = stock_adjust_service(
         db=db,
         stock_repo=stock_repo,
+        balance_repo=balance_repo,
         data=data,
     )
 
@@ -125,12 +162,20 @@ def stock_adjust(
 )
 def stock_history(
     stock_repo: StockRepositoryDependency,
-) -> ApiResponse[list[StockTransactionResponse]]:
-    transactions = get_stock_history_service(
-        stock_repo=stock_repo,
+) -> ApiResponse[
+    list[StockTransactionResponse]
+]:
+
+    transactions = (
+        get_stock_history_service(
+            stock_repo=stock_repo,
+        )
     )
 
     return ApiResponse(
-        message="Stock history retrieved successfully",
+        message=(
+            "Stock history retrieved "
+            "successfully"
+        ),
         data=transactions,
     )

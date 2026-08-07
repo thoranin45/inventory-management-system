@@ -4,6 +4,9 @@ from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
+from sqlalchemy.orm import Session
+from app.models import StockBalance
+
 def _decimal(value) -> Decimal:
     return Decimal(str(value))
 
@@ -710,3 +713,235 @@ def test_stock_validation_error(
     )
 
     assert response.status_code == 422
+
+def test_stock_in_updates_stock_balance(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    db_session: Session,
+) -> None:
+    product = _create_product(
+        client=client,
+        admin_headers=admin_headers,
+        initial_stock=0,
+    )
+
+    response = client.post(
+        "/api/v1/stock/in",
+        headers=admin_headers,
+        json={
+            "product_id": product["id"],
+            "quantity": "20.500",
+            "remark": "Dual-write test",
+        },
+    )
+
+    assert response.status_code == 200
+
+    db_session.expire_all()
+
+    balance = (
+        db_session.query(StockBalance)
+        .filter(
+            StockBalance.product_id
+            == product["id"]
+        )
+        .first()
+    )
+
+    assert balance is not None
+
+    assert Decimal(
+        str(balance.on_hand_qty)
+    ) == Decimal("20.500")
+
+    assert Decimal(
+        str(balance.reserved_qty)
+    ) == Decimal("0.000")
+
+def test_fifo_updates_batch_balances(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    db_session: Session,
+) -> None:
+    product = _create_product(
+        client=client,
+        admin_headers=admin_headers,
+    )
+
+    first_batch = _create_batch(
+        client=client,
+        admin_headers=admin_headers,
+        product_id=product["id"],
+        quantity=10,
+        expiry_days=180,
+    )
+
+    second_batch = _create_batch(
+        client=client,
+        admin_headers=admin_headers,
+        product_id=product["id"],
+        quantity=20,
+        expiry_days=365,
+    )
+
+    response = client.post(
+        "/api/v1/stock/out-fifo",
+        headers=admin_headers,
+        json={
+            "product_id": product["id"],
+            "quantity": "15.000",
+            "remark": "FIFO balance test",
+        },
+    )
+
+    assert response.status_code == 200
+
+    db_session.expire_all()
+
+    first_balance = (
+        db_session.query(StockBalance)
+        .filter(
+            StockBalance.product_id == product["id"],
+            StockBalance.batch_id == first_batch["id"]
+        )
+        .first()
+    )
+
+    second_balance = (
+        db_session.query(StockBalance)
+        .filter(
+            StockBalance.product_id == product["id"],
+            StockBalance.batch_id == second_batch["id"]
+        )
+        .first()
+    )
+
+    assert first_balance is not None
+    assert second_balance is not None
+
+    assert Decimal(
+        str(first_balance.on_hand_qty)
+    ) == Decimal("0.000")
+
+    assert Decimal(
+        str(second_balance.on_hand_qty)
+    ) == Decimal("15.000")
+
+def test_fefo_updates_batch_balances(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    db_session: Session,
+) -> None:
+    product = _create_product(
+        client=client,
+        admin_headers=admin_headers,
+    )
+
+    later_batch = _create_batch(
+        client=client,
+        admin_headers=admin_headers,
+        product_id=product["id"],
+        quantity=10,
+        expiry_days=365,
+    )
+
+    earlier_batch = _create_batch(
+        client=client,
+        admin_headers=admin_headers,
+        product_id=product["id"],
+        quantity=12,
+        expiry_days=30,
+    )
+
+    response = client.post(
+        "/api/v1/stock/out-fefo",
+        headers=admin_headers,
+        json={
+            "product_id": product["id"],
+            "quantity": "15.000",
+            "remark": "FEFO balance test",
+        },
+    )
+
+    assert response.status_code == 200
+
+    db_session.expire_all()
+
+    earlier_balance = (
+        db_session.query(StockBalance)
+        .filter(
+            StockBalance.batch_id == earlier_batch["id"]
+        )
+        .first()
+    )
+
+    later_balance = (
+        db_session.query(StockBalance)
+        .filter(
+            StockBalance.batch_id == later_batch["id"]
+        )
+        .first()
+    )
+
+    assert earlier_balance is not None
+    assert later_balance is not None
+
+    assert Decimal(
+        str(earlier_balance.on_hand_qty)
+    ) == Decimal("0.000")
+
+    assert Decimal(
+        str(later_balance.on_hand_qty)
+    ) == Decimal("7.000")
+
+def test_stock_adjust_updates_balance(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    db_session: Session,
+) -> None:
+    product = _create_product(
+        client=client,
+        admin_headers=admin_headers,
+        initial_stock=0,
+    )
+
+    stock_in_response = client.post(
+        "/api/v1/stock/in",
+        headers=admin_headers,
+        json={
+            "product_id": product["id"],
+            "quantity": "5.000",
+            "remark": "Prepare adjust",
+        },
+    )
+
+    assert stock_in_response.status_code == 200
+
+    response = client.post(
+        "/api/v1/stock/adjust",
+        headers=admin_headers,
+        json={
+            "product_id": product["id"],
+            "new_quantity": "12.500",
+            "remark": "Adjust balance test",
+        },
+    )
+
+    assert response.status_code == 200
+
+    db_session.expire_all()
+
+    balance = (
+        db_session.query(StockBalance)
+        .filter(
+            StockBalance.product_id == product["id"],
+            StockBalance.batch_id.is_(None),
+        )
+        .first()
+    )
+
+    assert balance is not None
+
+    assert Decimal(
+        str(balance.on_hand_qty)
+    ) == Decimal("12.500")

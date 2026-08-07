@@ -44,6 +44,15 @@ from app.routers.report_router import router as report_router
 from app.routers.sales_order_router import router as sales_order_router
 from app.routers.stock_router import router as stock_router
 from app.routers.supplier_router import router as supplier_router
+from app.routers.stock_balance_router import (
+    router as stock_balance_router,
+)
+from app.routers.inventory_transfer_router import (
+    router as inventory_transfer_router,
+)
+from app.routers.inventory_movement_router import (
+    router as inventory_movement_router,
+)
 
 
 # -------------------------------------------------------------------
@@ -269,3 +278,22 @@ app.include_router(
     prefix=API_V1_PREFIX,
 )
 
+app.include_router(
+    stock_balance_router,
+    prefix="/api/v1",
+)
+
+app.include_router(
+    stock_balance_router,
+    prefix="/api/v1",
+)
+
+app.include_router(
+    inventory_transfer_router,
+    prefix="/api/v1",
+)
+
+app.include_router(
+    inventory_movement_router,
+    prefix="/api/v1",
+)
