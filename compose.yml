@@ -6,10 +6,8 @@ services:
     container_name: inventory-postgres
     restart: unless-stopped
 
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: inventory_db
+    env_file:
+      - .env.db
 
     ports:
       - "5433:5432"
@@ -36,29 +34,30 @@ services:
     container_name: inventory-api
     restart: unless-stopped
 
-    environment:
-      DB_HOST: db
-      DB_PORT: "5432"
-      DB_NAME: inventory_db
-      DB_USER: postgres
-      DB_PASSWORD: postgres
-
-      DATABASE_URL: postgresql+psycopg2://postgres:postgres@db:5432/inventory_db
-
-      SECRET_KEY: docker-local-development-secret-key-change-in-production
-      ACCESS_TOKEN_EXPIRE_MINUTES: "1440"
-
-      APP_NAME: Inventory Management System
-      APP_VERSION: "2.0.0"
-      ENV: development
-
-      RATE_LIMIT_MAX_REQUESTS: "100"
-      RATE_LIMIT_WINDOW_SECONDS: "60"
-
-      CORS_ORIGINS: http://localhost:3000,http://localhost:5173,http://127.0.0.1:5173
+    env_file:
+      - .env.api
 
     ports:
       - "8081:8081"
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/api/v1/health/', timeout=3)"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+    volumes:
+      - inventory_uploads:/app/uploads
+      - inventory_exports:/app/exports
+      - inventory_logs:/app/logs
+      - inventory_invoices:/app/app/static/invoices
 
     depends_on:
       db:
@@ -75,3 +74,15 @@ services:
 volumes:
   inventory_postgres_data:
     name: inventory-postgres-data
+
+  inventory_uploads:
+    name: inventory-uploads
+
+  inventory_exports:
+    name: inventory-exports
+
+  inventory_logs:
+    name: inventory-logs
+
+  inventory_invoices:
+    name: inventory-invoices

@@ -72,7 +72,18 @@ jobs:
 
       - name: Compile Python files
         run: python -m compileall app tests
-
+      
+      - name: Build Docker image
+        run: docker build -t inventory-system-api:test .
+      
+      - name: Prepare Docker environment files
+        run: |
+          cp .env.api.example .env.api
+          cp .env.db.example .env.db  
+      
+      - name: Validate Docker Compose
+        run: docker compose -f compose.yml config
+      
       - name: Run tests with coverage
         run: >
           python -m pytest

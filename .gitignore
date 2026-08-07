@@ -34,3 +34,7 @@ app/static/invoices/
 .coverage
 htmlcov/
 .pytest_cache/
+.env.docker
+
+.env.api
+.env.db
