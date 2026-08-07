@@ -28,8 +28,8 @@ class ProductCreate(BaseModel):
         gt=0,
     )
 
-    stock_qty: int = Field(
-        default=0,
+    stock_qty: Decimal = Field(
+        default=Decimal("0"),
         ge=0,
     )
 
@@ -60,7 +60,7 @@ class ProductUpdate(BaseModel):
         gt=0,
     )
 
-    stock_qty: int | None = Field(
+    stock_qty: Decimal | None = Field(
         default=None,
         ge=0,
     )
@@ -74,7 +74,7 @@ class ProductResponse(BaseModel):
     barcode: str | None = None
     product_name: str
     price: Decimal
-    stock_qty: int
+    stock_qty: Decimal
     category_id: int | None = None
     image_url: str | None = None
     is_active: bool

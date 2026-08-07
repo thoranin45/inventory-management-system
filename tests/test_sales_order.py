@@ -1,9 +1,12 @@
+from decimal import Decimal
 from pathlib import Path
 from datetime import date, timedelta
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
+def _decimal(value) -> Decimal:
+    return Decimal(str(value))
 
 def _create_customer(
     client: TestClient,
@@ -225,7 +228,9 @@ def test_create_sales_order_success(
         product["id"],
     )
 
-    assert product_after["stock_qty"] == 15
+    assert _decimal(
+        product_after["stock_qty"]
+    ) == Decimal("15.000")
 
 
 def test_sales_order_uses_fefo(
@@ -285,11 +290,15 @@ def test_sales_order_uses_fefo(
     assert allocations[0]["batch_id"] == (
         earlier_batch["id"]
     )
-    assert allocations[0]["quantity"] == 8
+    assert _decimal(
+        allocations[0]["quantity"]
+    ) == Decimal("8.000")
     assert allocations[1]["batch_id"] == (
         later_batch["id"]
     )
-    assert allocations[1]["quantity"] == 4
+    assert _decimal(
+        allocations[1]["quantity"]
+    ) == Decimal("4.000")
 
     earlier_after = _get_batch(
         client,
@@ -301,9 +310,13 @@ def test_sales_order_uses_fefo(
         later_batch["id"],
     )
 
-    assert earlier_after["quantity"] == 0
-    assert later_after["quantity"] == 6
+    assert _decimal(
+        earlier_after["quantity"]
+    ) == Decimal("0.000")
 
+    assert _decimal(
+        later_after["quantity"]
+    ) == Decimal("6.000")
 
 def test_create_sales_order_customer_not_found(
     client: TestClient,
@@ -552,8 +565,13 @@ def test_cancel_sales_order_restores_stock(
         batch["id"],
     )
 
-    assert product_after["stock_qty"] == 10
-    assert batch_after["quantity"] == 10
+    assert _decimal(
+        product_after["stock_qty"]
+    ) == Decimal("10.000")
+
+    assert _decimal(
+        batch_after["quantity"]
+    ) == Decimal("10.000")
 
 
 def test_cancel_sales_order_twice(
@@ -684,8 +702,13 @@ def test_partial_sales_return(
         batch["id"],
     )
 
-    assert product_after["stock_qty"] == 6
-    assert batch_after["quantity"] == 6
+    assert _decimal(
+        product_after["stock_qty"]
+    ) == Decimal("6.000")
+
+    assert _decimal(
+        batch_after["quantity"]
+    ) == Decimal("6.000")
 
 
 def test_return_quantity_exceeds_remaining(

@@ -1,3 +1,4 @@
+from decimal import Decimal
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
@@ -38,7 +39,9 @@ def test_create_product_success(
     assert body["data"]["product_name"] == (
         payload["product_name"]
     )
-    assert body["data"]["stock_qty"] == 10
+    assert Decimal(
+        body["data"]["stock_qty"]
+    ) == Decimal("10.000")
     assert body["data"]["is_active"] is True
 
 
@@ -220,7 +223,9 @@ def test_update_product(
         "Pytest Product Updated"
     )
     assert float(body["data"]["price"]) == 299.75
-    assert body["data"]["stock_qty"] == 25
+    assert Decimal(
+        body["data"]["stock_qty"]
+    ) == Decimal("25.000")
 
 
 def test_soft_delete_product(

@@ -1,8 +1,11 @@
+from decimal import Decimal
 from datetime import date, timedelta
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
+def _decimal(value) -> Decimal:
+    return Decimal(str(value))
 
 def _create_supplier(
     client: TestClient,
@@ -442,8 +445,13 @@ def test_receive_purchase_order_success(
     assert received_batch["product_id"] == (
         product["id"]
     )
-    assert received_batch["received_quantity"] == 12
-    assert received_batch["current_stock"] == 12
+    assert _decimal(
+        received_batch["received_quantity"]
+    ) == Decimal("12.000")
+
+    assert _decimal(
+        received_batch["current_stock"]
+    ) == Decimal("12.000")
 
     product_after = _get_product(
         client,
@@ -451,7 +459,9 @@ def test_receive_purchase_order_success(
         product["id"],
     )
 
-    assert product_after["stock_qty"] == 12
+    assert _decimal(
+        product_after["stock_qty"]
+    ) == Decimal("12.000")
 
     batches = _get_batches(client)
 
@@ -466,7 +476,9 @@ def test_receive_purchase_order_success(
     )
 
     assert created_batch is not None
-    assert created_batch["quantity"] == 12
+    assert _decimal(
+        created_batch["quantity"]
+    ) == Decimal("12.000")
     assert created_batch["lot_no"] == (
         payload["items"][0]["lot_no"]
     )
@@ -486,7 +498,9 @@ def test_receive_purchase_order_success(
     )
 
     assert transaction is not None
-    assert transaction["quantity"] == 12
+    assert _decimal(
+        transaction["quantity"]
+    ) == Decimal("12.000")
 
 
 def test_receive_purchase_order_twice(
@@ -598,7 +612,9 @@ def test_receive_po_invalid_batch_date(
         product["id"],
     )
 
-    assert product_after["stock_qty"] == 0
+    assert _decimal(
+        product_after["stock_qty"]
+    ) == Decimal("0.000")
 
 
 def test_receive_po_missing_item(
@@ -816,3 +832,4 @@ def test_create_purchase_order_without_token(
     )
 
     assert response.status_code == 401
+

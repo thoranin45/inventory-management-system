@@ -1,3 +1,4 @@
+from decimal import Decimal
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import (
@@ -19,7 +20,7 @@ from app.schemas.stock_schema import (
 
 def _deduct_from_batches(
     batches: list[ProductBatch],
-    requested_quantity: int,
+    requested_quantity: Decimal,
 ) -> None:
     remaining_quantity = requested_quantity
 

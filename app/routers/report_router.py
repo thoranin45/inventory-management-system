@@ -1,3 +1,4 @@
+from decimal import Decimal
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -26,7 +27,7 @@ def stock_balance(db: Session = Depends(get_db)):
             "product_name": p.product_name,
             "stock_qty": p.stock_qty,
             "price": float(p.price),
-            "stock_value": float(p.price) * p.stock_qty,
+            "stock_value": float(p.price * p.stock_qty),
             "category_id": p.category_id,
         }
         for p in products
@@ -57,7 +58,7 @@ def stock_movement(db: Session = Depends(get_db)):
 
 @router.get("/low-stock")
 def low_stock_report(
-    threshold: int = 10,
+    threshold: Decimal = Decimal("10.000"),
     db: Session = Depends(get_db)
 ):
     products = db.query(Product).filter(
@@ -199,7 +200,7 @@ def export_stock_report(
             p.product_name,
             p.stock_qty,
             float(p.price),
-            float(p.price) * p.stock_qty
+            float(p.price * p.stock_qty)
         ])
 
     wb.save(file_path)
@@ -255,7 +256,7 @@ def export_sales_report(
 
 @router.get("/export/low-stock")
 def export_low_stock_report(
-    threshold: int = 10,
+    threshold: Decimal = Decimal("10.000"),
     db: Session = Depends(get_db)
 ):
     products = db.query(Product).filter(

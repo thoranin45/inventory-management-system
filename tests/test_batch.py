@@ -1,3 +1,4 @@
+from decimal import Decimal
 from datetime import date, timedelta
 from uuid import uuid4
 
@@ -120,8 +121,12 @@ def test_create_batch_success(
 
     assert batch["product_id"] == product["id"]
     assert batch["lot_no"] == payload["lot_no"]
-    assert batch["quantity"] == 25
-    assert body["data"]["current_stock"] == 25
+    assert Decimal(
+        batch["quantity"]
+    ) == Decimal("25.000")
+    assert Decimal(
+        body["data"]["current_stock"]
+    ) == Decimal("25.000")
 
 
 def test_create_batch_updates_product_stock(
@@ -149,7 +154,9 @@ def test_create_batch_updates_product_stock(
 
     body = response.json()
 
-    assert body["data"]["stock_qty"] == 15
+    assert Decimal(
+        body["data"]["stock_qty"]
+    ) == Decimal("15.000")
 
 
 def test_create_duplicate_lot_number(

@@ -1,8 +1,11 @@
+from decimal import Decimal
 from datetime import date, timedelta
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
+def _decimal(value) -> Decimal:
+    return Decimal(str(value))
 
 def _product_payload(
     *,
@@ -200,9 +203,9 @@ def test_stock_in_success(
     data = body["data"]
 
     assert data["product_id"] == product["id"]
-    assert data["previous_stock"] == 0
-    assert data["current_stock"] == 20
-    assert data["difference"] == 20
+    assert _decimal(data["previous_stock"]) == Decimal("0.000")
+    assert _decimal(data["current_stock"]) == Decimal("20.000")
+    assert _decimal(data["difference"]) == Decimal("20.000")
 
     updated_product = _get_product(
         client=client,
@@ -210,7 +213,9 @@ def test_stock_in_success(
         product_id=product["id"],
     )
 
-    assert updated_product["stock_qty"] == 20
+    assert _decimal(
+        updated_product["stock_qty"]
+    ) == Decimal("20.000")
 
     history = _get_stock_history(client)
 
@@ -228,7 +233,9 @@ def test_stock_in_success(
     )
 
     assert transaction is not None
-    assert transaction["quantity"] == 20
+    assert _decimal(
+        transaction["quantity"]
+    ) == Decimal("20.000")
 
 
 def test_stock_in_product_not_found(
@@ -299,9 +306,9 @@ def test_stock_out_fifo_success(
 
     data = body["data"]
 
-    assert data["previous_stock"] == 30
-    assert data["current_stock"] == 15
-    assert data["difference"] == -15
+    assert _decimal(data["previous_stock"]) == Decimal("30.000")
+    assert _decimal(data["current_stock"]) == Decimal("15.000")
+    assert _decimal(data["difference"]) == Decimal("-15.000")
 
     first_batch_after = _get_batch_by_id(
         client=client,
@@ -313,8 +320,13 @@ def test_stock_out_fifo_success(
         batch_id=second_batch["id"],
     )
 
-    assert first_batch_after["quantity"] == 0
-    assert second_batch_after["quantity"] == 15
+    assert _decimal(
+        first_batch_after["quantity"]
+    ) == Decimal("0.000")
+
+    assert _decimal(
+        second_batch_after["quantity"]
+    ) == Decimal("15.000")
 
     history = _get_stock_history(client)
 
@@ -331,7 +343,9 @@ def test_stock_out_fifo_success(
     )
 
     assert transaction is not None
-    assert transaction["quantity"] == -15
+    assert _decimal(
+        transaction["quantity"]
+    ) == Decimal("-15.000")
 
 
 def test_stock_out_fifo_insufficient_stock(
@@ -415,9 +429,9 @@ def test_stock_out_fefo_success(
 
     data = body["data"]
 
-    assert data["previous_stock"] == 30
-    assert data["current_stock"] == 15
-    assert data["difference"] == -15
+    assert _decimal(data["previous_stock"]) == Decimal("30.000")
+    assert _decimal(data["current_stock"]) == Decimal("15.000")
+    assert _decimal(data["difference"]) == Decimal("-15.000")
 
     earlier_batch_after = _get_batch_by_id(
         client=client,
@@ -429,8 +443,13 @@ def test_stock_out_fefo_success(
         batch_id=later_expiry_batch["id"],
     )
 
-    assert earlier_batch_after["quantity"] == 0
-    assert later_batch_after["quantity"] == 15
+    assert _decimal(
+        earlier_batch_after["quantity"]
+    ) == Decimal("0.000")
+
+    assert _decimal(
+        later_batch_after["quantity"]
+    ) == Decimal("15.000")
 
     history = _get_stock_history(client)
 
@@ -447,7 +466,9 @@ def test_stock_out_fefo_success(
     )
 
     assert transaction is not None
-    assert transaction["quantity"] == -15
+    assert _decimal(
+        transaction["quantity"]
+    ) == Decimal("-15.000")
 
 
 def test_stock_out_batch_stock_not_enough(
@@ -490,7 +511,9 @@ def test_stock_out_batch_stock_not_enough(
     )
 
     # ต้องไม่ถูกหัก เพราะ operation ไม่สำเร็จ
-    assert product_after["stock_qty"] == 10
+    assert _decimal(
+        product_after["stock_qty"]
+    ) == Decimal("10.000")
 
 
 def test_stock_adjust_success(
@@ -524,9 +547,9 @@ def test_stock_adjust_success(
 
     data = body["data"]
 
-    assert data["previous_stock"] == 5
-    assert data["current_stock"] == 12
-    assert data["difference"] == 7
+    assert _decimal(data["previous_stock"]) == Decimal("5.000")
+    assert _decimal(data["current_stock"]) == Decimal("12.000")
+    assert _decimal(data["difference"]) == Decimal("7.000")
 
     history = _get_stock_history(client)
 
@@ -543,7 +566,9 @@ def test_stock_adjust_success(
     )
 
     assert transaction is not None
-    assert transaction["quantity"] == 7
+    assert _decimal(
+        transaction["quantity"]
+    ) == Decimal("7.000")
 
 
 def test_stock_adjust_with_active_batch_fails(
@@ -589,7 +614,9 @@ def test_stock_adjust_with_active_batch_fails(
         product_id=product["id"],
     )
 
-    assert product_after["stock_qty"] == 10
+    assert _decimal(
+        product_after["stock_qty"]
+    ) == Decimal("10.000")
 
 
 def test_stock_history_sorted_latest_first(
