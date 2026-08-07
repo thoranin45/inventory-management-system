@@ -1,48 +1,58 @@
-import os
-import sys
 import logging
-
+import os
 from logging.handlers import RotatingFileHandler
 
-os.makedirs("logs", exist_ok=True)
 
-LOG_FILE = "logs/app.log"
+LOG_DIR = "logs"
+LOG_FILE = os.path.join(
+    LOG_DIR,
+    "app.log",
+)
 
-logger = logging.getLogger("inventory_system")
-logger.setLevel(logging.INFO)
+os.makedirs(
+    LOG_DIR,
+    exist_ok=True,
+)
 
-if logger.hasHandlers():
-    logger.handlers.clear()
+
+logger = logging.getLogger(
+    "inventory_system"
+)
+
+logger.setLevel(
+    logging.INFO
+)
+
+logger.propagate = False
+
 
 formatter = logging.Formatter(
     "%(asctime)s | %(levelname)s | %(message)s"
 )
 
-# ==========================
-# File Handler
-# ==========================
 
-file_handler = RotatingFileHandler(
-    LOG_FILE,
-    maxBytes=5 * 1024 * 1024,
-    backupCount=5,
-    encoding="utf-8",
-)
+if not logger.handlers:
+    console_handler = logging.StreamHandler()
 
-file_handler.setFormatter(formatter)
+    console_handler.setFormatter(
+        formatter
+    )
 
-# ==========================
-# Console Handler
-# ==========================
+    file_handler = RotatingFileHandler(
+        LOG_FILE,
+        maxBytes=10 * 1024 * 1024,
+        backupCount=5,
+        encoding="utf-8",
+    )
 
-console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setFormatter(formatter)
+    file_handler.setFormatter(
+        formatter
+    )
 
-# ==========================
-# Register
-# ==========================
+    logger.addHandler(
+        console_handler
+    )
 
-logger.addHandler(file_handler)
-logger.addHandler(console_handler)
-
-logger.propagate = False
+    logger.addHandler(
+        file_handler
+    )

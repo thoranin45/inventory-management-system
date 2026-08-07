@@ -7,10 +7,10 @@ services:
     restart: unless-stopped
 
     env_file:
-      - .env.db
+      - .env.production
 
     expose:
-    - "5432"
+      - "5432"
 
     volumes:
       - inventory_postgres_data:/var/lib/postgresql
@@ -19,7 +19,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "pg_isready -U postgres -d inventory_db"
+          "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"
         ]
       interval: 5s
       timeout: 5s
@@ -27,18 +27,19 @@ services:
       start_period: 15s
 
   api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-
+    image: ghcr.io/thoranin45/inventory-management-system:latest
     container_name: inventory-api
     restart: unless-stopped
 
     env_file:
-      - .env.api
+      - .env.production
 
     expose:
       - "8081"
+
+    depends_on:
+      db:
+        condition: service_healthy
 
     healthcheck:
       test:
@@ -53,16 +54,6 @@ services:
       retries: 5
       start_period: 20s
 
-    volumes:
-      - inventory_uploads:/app/uploads
-      - inventory_exports:/app/exports
-      - inventory_logs:/app/logs
-      - inventory_invoices:/app/app/static/invoices
-
-    depends_on:
-      db:
-        condition: service_healthy
-
     command: >
       sh -c "
       alembic upgrade head &&
@@ -70,6 +61,13 @@ services:
       --host 0.0.0.0
       --port 8081
       "
+
+    volumes:
+      - inventory_uploads:/app/uploads
+      - inventory_exports:/app/exports
+      - inventory_logs:/app/logs
+      - inventory_invoices:/app/app/static/invoices
+
   nginx:
     image: nginx:1.27-alpine
     container_name: inventory-nginx
@@ -84,33 +82,10 @@ services:
     depends_on:
       api:
         condition: service_healthy
-        
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "wget",
-          "-q",
-          "--spider",
-          "http://127.0.0.1/"
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
 
 volumes:
   inventory_postgres_data:
-    name: inventory-postgres-data
-
   inventory_uploads:
-    name: inventory-uploads
-
   inventory_exports:
-    name: inventory-exports
-
   inventory_logs:
-    name: inventory-logs
-
   inventory_invoices:
-    name: inventory-invoices  
