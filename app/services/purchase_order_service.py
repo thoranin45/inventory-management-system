@@ -14,6 +14,7 @@ from app.core.exceptions import (
     PurchaseOrderNotFoundException,
     SupplierNotFoundException,
     UnexpectedPurchaseOrderReceiveItemException,
+    PurchaseOrderOverReceiveException,
 )
 from app.core.unit_of_work import UnitOfWork
 from app.models import (
@@ -22,6 +23,7 @@ from app.models import (
     PurchaseOrder,
     PurchaseOrderItem,
     StockTransaction,
+    InventoryMovement,
 )
 from app.repositories.batch_repository import BatchRepository
 from app.repositories.product_repository import ProductRepository
@@ -40,18 +42,24 @@ from app.schemas.purchase_order_schema import (
     ReceivePO,
     ReceivedBatchResponse,
 )
-
+from app.repositories.inventory_movement_repository import (
+    InventoryMovementRepository,
+)
+from app.repositories.stock_balance_repository import (
+    StockBalanceRepository,
+)
 
 PO_STATUS_PENDING = "PENDING"
+PO_STATUS_PARTIALLY_RECEIVED = "PARTIALLY_RECEIVED"
 PO_STATUS_RECEIVED = "RECEIVED"
 PO_STATUS_CANCELLED = "CANCELLED"
 
 
 def _calculate_item_total(
-    quantity: int,
+    quantity: Decimal,
     unit_price: Decimal,
 ) -> Decimal:
-    return Decimal(quantity) * unit_price
+    return quantity * unit_price
 
 
 def _build_po_response(
@@ -78,6 +86,13 @@ def _build_po_response(
                 po_id=item.po_id,
                 product_id=item.product_id,
                 quantity=item.quantity,
+                received_quantity=(
+                    item.received_quantity
+                ),
+                remaining_quantity=(
+                    item.quantity
+                    - item.received_quantity
+                ),
                 unit_price=item.unit_price,
                 total_price=item_total,
             )
@@ -231,10 +246,13 @@ def receive_purchase_order_service(
     product_repo: ProductRepository,
     batch_repo: BatchRepository,
     stock_repo: StockRepository,
+    balance_repo: StockBalanceRepository,
+    movement_repo: InventoryMovementRepository,
     po_id: int,
     data: ReceivePO,
     current_user: Any,
 ) -> PurchaseOrderReceiveResponse:
+
     po = po_repo.get_by_id(po_id)
 
     if po is None:
@@ -246,82 +264,130 @@ def receive_purchase_order_service(
     if po.status == PO_STATUS_CANCELLED:
         raise PurchaseOrderCancelledException()
 
-    if po.status != PO_STATUS_PENDING:
+    if po.status not in {
+        PO_STATUS_PENDING,
+        PO_STATUS_PARTIALLY_RECEIVED,
+    }:
         raise InvalidPurchaseOrderStatusException()
 
-    po_items = po_repo.get_items(po.id)
+    po_items = po_repo.get_items(
+        po.id
+    )
 
-    receive_items_by_product = {
+    po_items_by_product = {
         item.product_id: item
-        for item in data.items
-    }
-
-    po_product_ids = {
-        item.product_id
         for item in po_items
     }
-
-    for receive_item in data.items:
-        if receive_item.product_id not in po_product_ids:
-            raise UnexpectedPurchaseOrderReceiveItemException(
-                receive_item.product_id
-            )
-
-    for po_item in po_items:
-        if (
-            po_item.product_id
-            not in receive_items_by_product
-        ):
-            raise MissingPurchaseOrderReceiveItemException(
-                po_item.product_id
-            )
 
     received_batches: list[
         ReceivedBatchResponse
     ] = []
 
+    # --------------------------------
+    # Validate request first
+    # --------------------------------
+
+    for receive_item in data.items:
+
+        po_item = po_items_by_product.get(
+            receive_item.product_id
+        )
+
+        if po_item is None:
+            raise (
+                UnexpectedPurchaseOrderReceiveItemException(
+                    receive_item.product_id
+                )
+            )
+
+        remaining_quantity = (
+            po_item.quantity
+            - po_item.received_quantity
+        )
+
+        if (
+            receive_item.quantity
+            > remaining_quantity
+        ):
+            raise PurchaseOrderOverReceiveException(
+                receive_item.product_id
+            )
+
+        if (
+            receive_item.expiry_date
+            <= receive_item.mfg_date
+        ):
+            raise InvalidBatchDateException()
+
+        existing_batch = (
+            batch_repo.get_by_lot_no(
+                receive_item.lot_no
+            )
+        )
+
+        if existing_batch is not None:
+            raise DuplicateLotNumberException()
+
+    # --------------------------------
+    # Apply receive
+    # --------------------------------
+
     with UnitOfWork(db) as uow:
-        for po_item in po_items:
-            receive_item = receive_items_by_product[
-                po_item.product_id
+
+        for receive_item in data.items:
+
+            po_item = po_items_by_product[
+                receive_item.product_id
             ]
 
             product = product_repo.get_by_id(
-                po_item.product_id
+                receive_item.product_id
             )
 
             if product is None:
                 raise ProductNotFoundException()
 
-            if (
-                receive_item.expiry_date
-                <= receive_item.mfg_date
-            ):
-                raise InvalidBatchDateException()
-
-            existing_batch = batch_repo.get_by_lot_no(
-                receive_item.lot_no
-            )
-
-            if existing_batch is not None:
-                raise DuplicateLotNumberException()
-
             batch = ProductBatch(
                 product_id=product.id,
                 lot_no=receive_item.lot_no,
                 mfg_date=receive_item.mfg_date,
-                expiry_date=receive_item.expiry_date,
-                quantity=po_item.quantity,
+                expiry_date=(
+                    receive_item.expiry_date
+                ),
+                quantity=(
+                    receive_item.quantity
+                ),
             )
 
-            batch_repo.create(batch)
+            batch_repo.create(
+                batch
+            )
 
-            product.stock_qty += po_item.quantity
+            product.stock_qty += (
+                receive_item.quantity
+            )
+
+            po_item.received_quantity += (
+                receive_item.quantity
+            )
+
+            balance = (
+                balance_repo
+                .create_default_batch_balance(
+                    product_id=product.id,
+                    batch_id=batch.id,
+                    on_hand_qty=(
+                        receive_item.quantity
+                    ),
+                )
+            )
 
             transaction = StockTransaction(
                 product_id=product.id,
                 transaction_type="IN_PO",
-                quantity=po_item.quantity,
+                quantity=(
+                    receive_item.quantity
+                ),
                 remark=(
                     f"Receive from {po.po_number}; "
                     f"Lot: {receive_item.lot_no}"
@@ -332,20 +398,77 @@ def receive_purchase_order_service(
                 transaction
             )
 
-            db.flush()
+            movement = InventoryMovement(
+                product_id=product.id,
+                batch_id=batch.id,
+                warehouse_id=(
+                    balance.warehouse_id
+                ),
+                location_id=(
+                    balance.location_id
+                ),
+                movement_type=(
+                    "PURCHASE_RECEIPT"
+                ),
+                quantity=(
+                    receive_item.quantity
+                ),
+                balance_before=Decimal(
+                    "0"
+                ),
+                balance_after=(
+                    receive_item.quantity
+                ),
+                reference_type=(
+                    "PURCHASE_ORDER"
+                ),
+                reference_id=po.id,
+                reference_number=(
+                    po.po_number
+                ),
+                remark=(
+                    f"Lot: "
+                    f"{receive_item.lot_no}"
+                ),
+                created_by_user_id=(
+                    current_user.id
+                ),
+            )
+
+            movement_repo.create(
+                movement
+            )
 
             received_batches.append(
                 ReceivedBatchResponse(
                     batch_id=batch.id,
                     product_id=product.id,
                     lot_no=batch.lot_no,
-                    received_quantity=po_item.quantity,
-                    current_stock=product.stock_qty,
+                    received_quantity=(
+                        receive_item.quantity
+                    ),
+                    current_stock=(
+                        product.stock_qty
+                    ),
                 )
             )
 
-        po.status = PO_STATUS_RECEIVED
-        po_repo.update(po)
+        all_received = all(
+            item.received_quantity
+            >= item.quantity
+            for item in po_items
+        )
+
+        if all_received:
+            po.status = PO_STATUS_RECEIVED
+        else:
+            po.status = (
+                PO_STATUS_PARTIALLY_RECEIVED
+            )
+
+        po_repo.update(
+            po
+        )
 
         audit = AuditLog(
             username=current_user.username,
@@ -354,13 +477,19 @@ def receive_purchase_order_service(
             record_id=po.id,
             description=(
                 f"Receive {po.po_number}; "
-                f"{len(received_batches)} batch(es)"
+                f"{len(received_batches)} "
+                "batch(es); "
+                f"status={po.status}"
             ),
         )
 
-        db.add(audit)
+        db.add(
+            audit
+        )
 
-    uow.refresh(po)
+    uow.refresh(
+        po
+    )
 
     return PurchaseOrderReceiveResponse(
         id=po.id,

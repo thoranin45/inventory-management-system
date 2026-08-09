@@ -7,7 +7,11 @@ from app.core.exceptions import (
     ProductNotFoundException,
 )
 from app.core.unit_of_work import UnitOfWork
-from app.models import ProductBatch, StockTransaction
+from app.models import (
+    InventoryMovement,
+    ProductBatch,
+    StockTransaction,
+)
 from app.repositories.batch_repository import (
     BatchRepository,
 )
@@ -22,6 +26,9 @@ from app.schemas.batch_schema import (
     BatchCreateResponse,
     BatchResponse,
 )
+from app.repositories.inventory_movement_repository import (
+    InventoryMovementRepository,
+)
 
 
 def create_batch_service(
@@ -29,7 +36,9 @@ def create_batch_service(
     stock_repo: StockRepository,
     batch_repo: BatchRepository,
     balance_repo: StockBalanceRepository,
+    movement_repo: InventoryMovementRepository,
     data: BatchCreate,
+    created_by_user_id: int | None,
 ) -> BatchCreateResponse:
     product = stock_repo.get_active_product(
         data.product_id
@@ -48,11 +57,6 @@ def create_batch_service(
     if existing_batch is not None:
         raise DuplicateLotNumberException()
 
-    storage = balance_repo.get_default_storage()
-
-    if storage is None:
-        raise DefaultStorageNotConfiguredException()
-
     batch = ProductBatch(
         product_id=data.product_id,
         lot_no=data.lot_no,
@@ -64,16 +68,15 @@ def create_batch_service(
     with UnitOfWork(db) as uow:
         batch_repo.create(batch)
 
-        # ต้องมี batch.id ก่อนสร้าง StockBalance
-        db.flush()
-
-        balance_repo.create_default_batch_balance(
-            product_id=product.id,
-            batch_id=batch.id,
-            on_hand_qty=data.quantity,
-        )
-
         product.stock_qty += data.quantity
+
+        balance = (
+            balance_repo.create_default_batch_balance(
+                product_id=product.id,
+                batch_id=batch.id,
+                on_hand_qty=data.quantity,
+            )
+        )
 
         transaction = StockTransaction(
             product_id=product.id,
@@ -86,13 +89,33 @@ def create_batch_service(
             transaction
         )
 
+        movement = InventoryMovement(
+            product_id=product.id,
+            batch_id=batch.id,
+            warehouse_id=balance.warehouse_id,
+            location_id=balance.location_id,
+            movement_type="BATCH_IN",
+            quantity=data.quantity,
+            balance_before=0,
+            balance_after=data.quantity,
+            reference_type="STOCK_TRANSACTION",
+            reference_id=transaction.id,
+            reference_number=data.lot_no,
+            remark=f"Lot: {data.lot_no}",
+            created_by_user_id=(
+                created_by_user_id
+            ),
+        )
+
+        movement_repo.create(
+            movement
+        )
+
     uow.refresh(batch)
     uow.refresh(product)
 
     return BatchCreateResponse(
-        batch=BatchResponse.model_validate(
-            batch
-        ),
+        batch=BatchResponse.model_validate(batch),
         current_stock=product.stock_qty,
     )
 

@@ -7,6 +7,8 @@ from app.core.dependencies import (
     PurchaseOrderRepositoryDependency,
     StockRepositoryDependency,
     SupplierRepositoryDependency,
+    InventoryMovementRepositoryDependency,
+    StockBalanceRepositoryDependency,
     require_admin,
 )
 from app.models import User
@@ -122,21 +124,33 @@ def receive_purchase_order(
     product_repo: ProductRepositoryDependency,
     batch_repo: BatchRepositoryDependency,
     stock_repo: StockRepositoryDependency,
-    current_user: User = Depends(require_admin),
-) -> ApiResponse[PurchaseOrderReceiveResponse]:
+    balance_repo: StockBalanceRepositoryDependency,
+    movement_repo: InventoryMovementRepositoryDependency,
+    current_user: User = Depends(
+        require_admin
+    ),
+) -> ApiResponse[
+    PurchaseOrderReceiveResponse
+]:
+
     result = receive_purchase_order_service(
         db=db,
         po_repo=po_repo,
         product_repo=product_repo,
         batch_repo=batch_repo,
         stock_repo=stock_repo,
+        balance_repo=balance_repo,
+        movement_repo=movement_repo,
         po_id=po_id,
         data=data,
         current_user=current_user,
     )
 
     return ApiResponse(
-        message="Purchase order received successfully",
+        message=(
+            "Purchase order received "
+            "successfully"
+        ),
         data=result,
     )
 

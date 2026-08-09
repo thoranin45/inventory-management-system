@@ -11,7 +11,12 @@ from pydantic import (
 
 class PurchaseOrderItemCreate(BaseModel):
     product_id: int = Field(..., gt=0)
-    quantity: int = Field(..., gt=0)
+    quantity: Decimal = Field(
+        ...,
+        gt=0,
+        max_digits=18,
+        decimal_places=3,
+    )
     unit_price: Decimal = Field(..., ge=0)
 
 
@@ -39,7 +44,17 @@ class PurchaseOrderCreate(BaseModel):
 
 
 class ReceivePOItem(BaseModel):
-    product_id: int = Field(..., gt=0)
+    product_id: int = Field(
+        ...,
+        gt=0,
+    )
+
+    quantity: Decimal = Field(
+        ...,
+        gt=0,
+        max_digits=18,
+        decimal_places=3,
+    )
 
     lot_no: str = Field(
         ...,
@@ -86,7 +101,9 @@ class PurchaseOrderItemResponse(BaseModel):
     id: int
     po_id: int
     product_id: int
-    quantity: int
+    quantity: Decimal
+    received_quantity: Decimal
+    remaining_quantity: Decimal
     unit_price: Decimal
     total_price: Decimal
 
@@ -124,8 +141,8 @@ class ReceivedBatchResponse(BaseModel):
     batch_id: int
     product_id: int
     lot_no: str
-    received_quantity: int
-    current_stock: int
+    received_quantity: Decimal
+    current_stock: Decimal
 
 
 class PurchaseOrderReceiveResponse(BaseModel):

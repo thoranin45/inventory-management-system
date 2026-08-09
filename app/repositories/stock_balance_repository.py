@@ -263,3 +263,74 @@ class StockBalanceRepository:
         self.db.flush()
 
         return balance
+
+def get_exact_for_update(
+    self,
+    *,
+    product_id: int,
+    warehouse_id: int,
+    location_id: int,
+    batch_id: int | None,
+) -> StockBalance | None:
+
+    query = (
+        self.db.query(StockBalance)
+        .filter(
+            StockBalance.product_id
+            == product_id,
+            StockBalance.warehouse_id
+            == warehouse_id,
+            StockBalance.location_id
+            == location_id,
+        )
+        .with_for_update()
+    )
+
+    if batch_id is None:
+        query = query.filter(
+            StockBalance.batch_id.is_(None)
+        )
+    else:
+        query = query.filter(
+            StockBalance.batch_id
+            == batch_id
+        )
+
+    return query.first()
+
+def get_default_batch_balance_for_update(
+    self,
+    product_id: int,
+    batch_id: int,
+) -> StockBalance | None:
+    storage = self.get_default_storage()
+
+    if storage is None:
+        return None
+
+    warehouse, location = storage
+
+    return self.get_exact_for_update(
+        product_id=product_id,
+        warehouse_id=warehouse.id,
+        location_id=location.id,
+        batch_id=batch_id,
+    )
+
+def get_default_product_balance_for_update(
+    self,
+    product_id: int,
+) -> StockBalance | None:
+    storage = self.get_default_storage()
+
+    if storage is None:
+        return None
+
+    warehouse, location = storage
+
+    return self.get_exact_for_update(
+        product_id=product_id,
+        warehouse_id=warehouse.id,
+        location_id=location.id,
+        batch_id=None,
+    )

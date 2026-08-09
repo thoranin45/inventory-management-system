@@ -5,6 +5,7 @@ from app.core.dependencies import (
     DatabaseSession,
     StockBalanceRepositoryDependency,
     StockRepositoryDependency,
+    InventoryMovementRepositoryDependency,
     require_warehouse,
 )
 from app.models import User
@@ -37,6 +38,7 @@ def create_batch(
     db: DatabaseSession,
     stock_repo: StockRepositoryDependency,
     batch_repo: BatchRepositoryDependency,
+    movement_repo: InventoryMovementRepositoryDependency,
     balance_repo: StockBalanceRepositoryDependency,
     current_user: User = Depends(require_warehouse),
 ) -> ApiResponse[BatchCreateResponse]:
@@ -45,7 +47,9 @@ def create_batch(
         stock_repo=stock_repo,
         batch_repo=batch_repo,
         balance_repo=balance_repo,
+        movement_repo=movement_repo,
         data=data,
+        created_by_user_id=current_user.id,
     )
 
     return ApiResponse(

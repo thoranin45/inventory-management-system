@@ -64,6 +64,18 @@ class SalesOrderRepository:
             .first()
         )
 
+    def get_product_by_id_for_update(
+        self,
+        product_id: int,
+    ) -> Product | None:
+        return (
+            self.db.query(Product)
+            .filter(
+                Product.id == product_id
+            )
+            .with_for_update()
+            .first()
+        )
     # =========================================================
     # Sales Order
     # =========================================================
@@ -97,6 +109,19 @@ class SalesOrderRepository:
             .first()
         )
 
+    def get_sales_order_by_id_for_update(
+        self,
+        sales_order_id: int,
+    ) -> SalesOrder | None:
+        return (
+            self.db.query(SalesOrder)
+            .filter(
+                SalesOrder.id == sales_order_id
+            )
+            .with_for_update()
+            .first()
+        )
+    
     def get_all_sales_orders(
         self,
     ) -> list[SalesOrder]:
@@ -189,6 +214,19 @@ class SalesOrderRepository:
             .first()
         )
 
+    def get_batch_by_id_for_update(
+        self,
+        batch_id: int,
+    ) -> ProductBatch | None:
+        return (
+            self.db.query(ProductBatch)
+            .filter(
+                ProductBatch.id == batch_id
+            )
+            .with_for_update()
+            .first()
+        )
+    
     # =========================================================
     # Batch Allocation
     # =========================================================

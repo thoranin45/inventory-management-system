@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 
 from app.core.dependencies import (
     DatabaseSession,
+    InventoryMovementRepositoryDependency,
     StockBalanceRepositoryDependency,
     StockRepositoryDependency,
     require_warehouse,
@@ -36,11 +37,19 @@ router = APIRouter(
         StockOperationResponse
     ],
 )
+
+@router.post(
+    "/in",
+    response_model=ApiResponse[
+        StockOperationResponse
+    ],
+)
 def stock_in(
     data: StockIn,
     db: DatabaseSession,
     stock_repo: StockRepositoryDependency,
     balance_repo: StockBalanceRepositoryDependency,
+    movement_repo: InventoryMovementRepositoryDependency,
     current_user: User = Depends(
         require_warehouse
     ),
@@ -50,13 +59,13 @@ def stock_in(
         db=db,
         stock_repo=stock_repo,
         balance_repo=balance_repo,
+        movement_repo=movement_repo,
         data=data,
+        created_by_user_id=current_user.id,
     )
 
     return ApiResponse(
-        message=(
-            "Stock in completed successfully"
-        ),
+        message="Stock in completed successfully",
         data=result,
     )
 
@@ -72,6 +81,7 @@ def stock_out_fifo(
     db: DatabaseSession,
     stock_repo: StockRepositoryDependency,
     balance_repo: StockBalanceRepositoryDependency,
+    movement_repo: InventoryMovementRepositoryDependency,
     current_user: User = Depends(
         require_warehouse
     ),
@@ -81,7 +91,9 @@ def stock_out_fifo(
         db=db,
         stock_repo=stock_repo,
         balance_repo=balance_repo,
+        movement_repo=movement_repo,
         data=data,
+        created_by_user_id=current_user.id,
     )
 
     return ApiResponse(
@@ -104,6 +116,7 @@ def stock_out_fefo(
     db: DatabaseSession,
     stock_repo: StockRepositoryDependency,
     balance_repo: StockBalanceRepositoryDependency,
+    movement_repo: InventoryMovementRepositoryDependency,
     current_user: User = Depends(
         require_warehouse
     ),
@@ -113,7 +126,9 @@ def stock_out_fefo(
         db=db,
         stock_repo=stock_repo,
         balance_repo=balance_repo,
+        movement_repo=movement_repo,
         data=data,
+        created_by_user_id=current_user.id,
     )
 
     return ApiResponse(
@@ -136,6 +151,7 @@ def stock_adjust(
     db: DatabaseSession,
     stock_repo: StockRepositoryDependency,
     balance_repo: StockBalanceRepositoryDependency,
+    movement_repo: InventoryMovementRepositoryDependency,
     current_user: User = Depends(
         require_warehouse
     ),
@@ -145,7 +161,9 @@ def stock_adjust(
         db=db,
         stock_repo=stock_repo,
         balance_repo=balance_repo,
+        movement_repo=movement_repo,
         data=data,
+        created_by_user_id=current_user.id,
     )
 
     return ApiResponse(

@@ -13,9 +13,11 @@ class SalesOrderItemCreate(BaseModel):
         gt=0,
     )
 
-    quantity: int = Field(
+    quantity: Decimal = Field(
         ...,
         gt=0,
+        max_digits=18,
+        decimal_places=3,
     )
 
     unit_price: Decimal = Field(

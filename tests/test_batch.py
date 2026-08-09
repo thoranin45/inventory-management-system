@@ -1,10 +1,18 @@
 from decimal import Decimal
+from app.models import InventoryMovement
 from datetime import date, timedelta
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
-
+from app.models import (
+    InventoryMovement,
+    Product,
+    ProductBatch,
+    StockBalance,
+    StockTransaction,
+)
 def _product_payload() -> dict:
     unique_value = uuid4().hex[:10].upper()
 
@@ -371,3 +379,164 @@ def test_create_batch_without_token(
     )
 
     assert response.status_code == 401
+
+def test_create_batch_creates_inventory_movement(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    db_session: Session,
+) -> None:
+    product = _create_product(
+        client=client,
+        admin_headers=admin_headers,
+    )
+
+    payload = _batch_payload(
+        product_id=product["id"],
+        quantity=25,
+    )
+
+    response = client.post(
+        "/api/v1/batches",
+        headers=admin_headers,
+        json=payload,
+    )
+
+    assert response.status_code == 201
+
+    batch = response.json()["data"]["batch"]
+
+    db_session.expire_all()
+
+    movement = (
+        db_session.query(InventoryMovement)
+        .filter(
+            InventoryMovement.batch_id
+            == batch["id"],
+            InventoryMovement.movement_type
+            == "BATCH_IN",
+        )
+        .first()
+    )
+
+    assert movement is not None
+
+    assert Decimal(
+        str(movement.quantity)
+    ) == Decimal("25.000")
+
+    assert Decimal(
+        str(movement.balance_before)
+    ) == Decimal("0.000")
+
+    assert Decimal(
+        str(movement.balance_after)
+    ) == Decimal("25.000")
+
+    assert movement.reference_type == (
+        "STOCK_TRANSACTION"
+    )
+
+    assert movement.reference_id is not None
+
+def test_batch_inventory_consistency(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    db_session: Session,
+) -> None:
+    product = _create_product(
+        client=client,
+        admin_headers=admin_headers,
+    )
+
+    payload = _batch_payload(
+        product_id=product["id"],
+        quantity=25,
+    )
+
+    response = client.post(
+        "/api/v1/batches",
+        headers=admin_headers,
+        json=payload,
+    )
+
+    assert response.status_code == 201
+
+    batch = response.json()["data"]["batch"]
+
+    db_session.expire_all()
+
+    product_row = (
+        db_session.query(Product)
+        .filter(Product.id == product["id"])
+        .first()
+    )
+
+    batch_row = (
+        db_session.query(ProductBatch)
+        .filter(ProductBatch.id == batch["id"])
+        .first()
+    )
+
+    balance = (
+        db_session.query(StockBalance)
+        .filter(
+            StockBalance.product_id == product["id"],
+            StockBalance.batch_id == batch["id"],
+        )
+        .first()
+    )
+
+    transaction = (
+        db_session.query(StockTransaction)
+        .filter(
+            StockTransaction.product_id == product["id"],
+            StockTransaction.transaction_type == "IN_BATCH",
+        )
+        .order_by(StockTransaction.id.desc())
+        .first()
+    )
+
+    movement = (
+        db_session.query(InventoryMovement)
+        .filter(
+            InventoryMovement.product_id == product["id"],
+            InventoryMovement.batch_id == batch["id"],
+            InventoryMovement.movement_type == "BATCH_IN",
+        )
+        .first()
+    )
+
+    assert product_row is not None
+    assert batch_row is not None
+    assert balance is not None
+    assert transaction is not None
+    assert movement is not None
+
+    assert Decimal(
+        str(product_row.stock_qty)
+    ) == Decimal("25.000")
+
+    assert Decimal(
+        str(batch_row.quantity)
+    ) == Decimal("25.000")
+
+    assert Decimal(
+        str(balance.on_hand_qty)
+    ) == Decimal("25.000")
+
+    assert Decimal(
+        str(transaction.quantity)
+    ) == Decimal("25.000")
+
+    assert Decimal(
+        str(movement.quantity)
+    ) == Decimal("25.000")
+
+    assert Decimal(
+        str(movement.balance_before)
+    ) == Decimal("0.000")
+
+    assert Decimal(
+        str(movement.balance_after)
+    ) == Decimal("25.000")
+

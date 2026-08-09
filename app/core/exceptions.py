@@ -359,3 +359,38 @@ class InventoryTransferCannotCancelException(
             ),
             status_code=status.HTTP_409_CONFLICT,
         )
+
+class PurchaseOrderOverReceiveException(
+    AppException
+):
+    def __init__(
+        self,
+        product_id: int,
+    ):
+        super().__init__(
+            message=(
+                "Received quantity exceeds "
+                "remaining purchase order quantity "
+                f"for product_id {product_id}"
+            ),
+            status_code=status.HTTP_409_CONFLICT,
+        )
+
+class InsufficientAvailableStockException(
+    AppException
+):
+    def __init__(self):
+        super().__init__(
+            message="Insufficient available stock",
+            status_code=status.HTTP_409_CONFLICT,
+        )
+
+
+class SalesOrderAlreadyCompletedException(
+    AppException
+):
+    def __init__(self):
+        super().__init__(
+            message="Sales order already completed",
+            status_code=status.HTTP_409_CONFLICT,
+        )

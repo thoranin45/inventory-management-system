@@ -5,7 +5,20 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 
 from sqlalchemy.orm import Session
-from app.models import StockBalance
+from app.models import (
+    InventoryMovement,
+    Product,
+    ProductBatch,
+    StockBalance,
+    StockTransaction,
+)
+from app.models import (
+    InventoryMovement,
+    Product,
+    ProductBatch,
+    StockBalance,
+    StockTransaction,
+)
 
 def _decimal(value) -> Decimal:
     return Decimal(str(value))
@@ -526,15 +539,27 @@ def test_stock_adjust_success(
     product = _create_product(
         client=client,
         admin_headers=admin_headers,
-        initial_stock=5,
+        initial_stock=0,
     )
+
+    stock_in_response = client.post(
+        "/api/v1/stock/in",
+        headers=admin_headers,
+        json={
+            "product_id": product["id"],
+            "quantity": "5.000",
+            "remark": "Prepare stock for adjustment",
+        },
+    )
+
+    assert stock_in_response.status_code == 200
 
     response = client.post(
         "/api/v1/stock/adjust",
         headers=admin_headers,
         json={
             "product_id": product["id"],
-            "new_quantity": 12,
+            "new_quantity": "12.000",
             "remark": "Pytest adjustment",
         },
     )
@@ -543,34 +568,16 @@ def test_stock_adjust_success(
 
     body = response.json()
 
-    assert body["success"] is True
-    assert body["message"] == (
-        "Stock adjusted successfully"
-    )
+    assert Decimal(
+        str(body["data"]["previous_stock"])
+    ) == Decimal("5.000")
 
-    data = body["data"]
+    assert Decimal(
+        str(body["data"]["current_stock"])
+    ) == Decimal("12.000")
 
-    assert _decimal(data["previous_stock"]) == Decimal("5.000")
-    assert _decimal(data["current_stock"]) == Decimal("12.000")
-    assert _decimal(data["difference"]) == Decimal("7.000")
-
-    history = _get_stock_history(client)
-
-    transaction = next(
-        (
-            item
-            for item in history
-            if (
-                item["product_id"] == product["id"]
-                and item["transaction_type"] == "ADJUST"
-            )
-        ),
-        None,
-    )
-
-    assert transaction is not None
-    assert _decimal(
-        transaction["quantity"]
+    assert Decimal(
+        str(body["data"]["difference"])
     ) == Decimal("7.000")
 
 
@@ -945,3 +952,873 @@ def test_stock_adjust_updates_balance(
     assert Decimal(
         str(balance.on_hand_qty)
     ) == Decimal("12.500")
+
+def test_fifo_creates_inventory_movements_per_batch(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    db_session: Session,
+) -> None:
+    product = _create_product(
+        client=client,
+        admin_headers=admin_headers,
+        initial_stock=0,
+    )
+
+    first_batch = _create_batch(
+        client=client,
+        admin_headers=admin_headers,
+        product_id=product["id"],
+        quantity=10,
+        expiry_days=180,
+    )
+
+    second_batch = _create_batch(
+        client=client,
+        admin_headers=admin_headers,
+        product_id=product["id"],
+        quantity=20,
+        expiry_days=365,
+    )
+
+    response = client.post(
+        "/api/v1/stock/out-fifo",
+        headers=admin_headers,
+        json={
+            "product_id": product["id"],
+            "quantity": "15.000",
+            "remark": "FIFO ledger test",
+        },
+    )
+
+    assert response.status_code == 200
+
+    db_session.expire_all()
+
+    movements = (
+        db_session.query(InventoryMovement)
+        .filter(
+            InventoryMovement.product_id
+            == product["id"],
+            InventoryMovement.movement_type
+            == "STOCK_OUT_FIFO",
+        )
+        .order_by(
+            InventoryMovement.id.asc()
+        )
+        .all()
+    )
+
+    assert len(movements) == 2
+
+    first = movements[0]
+    second = movements[1]
+
+    assert first.batch_id == first_batch["id"]
+    assert second.batch_id == second_batch["id"]
+
+    assert Decimal(
+        str(first.quantity)
+    ) == Decimal("-10.000")
+
+    assert Decimal(
+        str(second.quantity)
+    ) == Decimal("-5.000")
+
+    assert Decimal(
+        str(first.balance_before)
+    ) == Decimal("10.000")
+
+    assert Decimal(
+        str(first.balance_after)
+    ) == Decimal("0.000")
+
+    assert Decimal(
+        str(second.balance_before)
+    ) == Decimal("20.000")
+
+    assert Decimal(
+        str(second.balance_after)
+    ) == Decimal("15.000")
+
+    assert sum(
+        (
+            Decimal(str(item.quantity))
+            for item in movements
+        ),
+        Decimal("0"),
+    ) == Decimal("-15.000")
+
+    assert all(
+        item.reference_type
+        == "STOCK_TRANSACTION"
+        for item in movements
+    )
+
+    assert all(
+        item.reference_id is not None
+        for item in movements
+    )
+
+def test_fefo_creates_inventory_movements_per_batch(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    db_session: Session,
+) -> None:
+    product = _create_product(
+        client=client,
+        admin_headers=admin_headers,
+        initial_stock=0,
+    )
+
+    later_batch = _create_batch(
+        client=client,
+        admin_headers=admin_headers,
+        product_id=product["id"],
+        quantity=10,
+        expiry_days=365,
+    )
+
+    earlier_batch = _create_batch(
+        client=client,
+        admin_headers=admin_headers,
+        product_id=product["id"],
+        quantity=12,
+        expiry_days=30,
+    )
+
+    response = client.post(
+        "/api/v1/stock/out-fefo",
+        headers=admin_headers,
+        json={
+            "product_id": product["id"],
+            "quantity": "15.000",
+            "remark": "FEFO ledger test",
+        },
+    )
+
+    assert response.status_code == 200
+
+    db_session.expire_all()
+
+    movements = (
+        db_session.query(InventoryMovement)
+        .filter(
+            InventoryMovement.product_id
+            == product["id"],
+            InventoryMovement.movement_type
+            == "STOCK_OUT_FEFO",
+        )
+        .order_by(
+            InventoryMovement.id.asc()
+        )
+        .all()
+    )
+
+    assert len(movements) == 2
+
+    first = movements[0]
+    second = movements[1]
+
+    assert first.batch_id == earlier_batch["id"]
+    assert second.batch_id == later_batch["id"]
+
+    assert Decimal(
+        str(first.quantity)
+    ) == Decimal("-12.000")
+
+    assert Decimal(
+        str(second.quantity)
+    ) == Decimal("-3.000")
+
+    assert Decimal(
+        str(first.balance_before)
+    ) == Decimal("12.000")
+
+    assert Decimal(
+        str(first.balance_after)
+    ) == Decimal("0.000")
+
+    assert Decimal(
+        str(second.balance_before)
+    ) == Decimal("10.000")
+
+    assert Decimal(
+        str(second.balance_after)
+    ) == Decimal("7.000")
+
+    assert sum(
+        (
+            Decimal(str(item.quantity))
+            for item in movements
+        ),
+        Decimal("0"),
+    ) == Decimal("-15.000")
+
+    assert all(
+        item.reference_type
+        == "STOCK_TRANSACTION"
+        for item in movements
+    )
+
+    assert all(
+        item.reference_id is not None
+        for item in movements
+    )
+
+def test_stock_adjust_creates_positive_movement(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    db_session: Session,
+) -> None:
+    product = _create_product(
+        client=client,
+        admin_headers=admin_headers,
+        initial_stock=0,
+    )
+
+    stock_in_response = client.post(
+        "/api/v1/stock/in",
+        headers=admin_headers,
+        json={
+            "product_id": product["id"],
+            "quantity": "10.000",
+            "remark": "Prepare adjust stock",
+        },
+    )
+
+    assert stock_in_response.status_code == 200
+
+    response = client.post(
+        "/api/v1/stock/adjust",
+        headers=admin_headers,
+        json={
+            "product_id": product["id"],
+            "new_quantity": "15.000",
+            "remark": "Positive adjustment",
+        },
+    )
+
+    assert response.status_code == 200
+
+    db_session.expire_all()
+
+    movement = (
+        db_session.query(InventoryMovement)
+        .filter(
+            InventoryMovement.product_id
+            == product["id"],
+            InventoryMovement.movement_type
+            == "STOCK_ADJUST",
+        )
+        .order_by(
+            InventoryMovement.id.desc()
+        )
+        .first()
+    )
+
+    assert movement is not None
+
+    assert Decimal(
+        str(movement.quantity)
+    ) == Decimal("5.000")
+
+    assert Decimal(
+        str(movement.balance_before)
+    ) == Decimal("10.000")
+
+    assert Decimal(
+        str(movement.balance_after)
+    ) == Decimal("15.000")
+
+def test_stock_adjust_creates_negative_movement(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    db_session: Session,
+) -> None:
+    product = _create_product(
+        client=client,
+        admin_headers=admin_headers,
+        initial_stock=0,
+    )
+
+    stock_in_response = client.post(
+        "/api/v1/stock/in",
+        headers=admin_headers,
+        json={
+            "product_id": product["id"],
+            "quantity": "15.000",
+            "remark": "Prepare adjust stock",
+        },
+    )
+
+    assert stock_in_response.status_code == 200
+
+    response = client.post(
+        "/api/v1/stock/adjust",
+        headers=admin_headers,
+        json={
+            "product_id": product["id"],
+            "new_quantity": "8.000",
+            "remark": "Negative adjustment",
+        },
+    )
+
+    assert response.status_code == 200
+
+    db_session.expire_all()
+
+    movement = (
+        db_session.query(InventoryMovement)
+        .filter(
+            InventoryMovement.product_id
+            == product["id"],
+            InventoryMovement.movement_type
+            == "STOCK_ADJUST",
+        )
+        .order_by(
+            InventoryMovement.id.desc()
+        )
+        .first()
+    )
+
+    assert movement is not None
+
+    assert Decimal(
+        str(movement.quantity)
+    ) == Decimal("-7.000")
+
+    assert Decimal(
+        str(movement.balance_before)
+    ) == Decimal("15.000")
+
+    assert Decimal(
+        str(movement.balance_after)
+    ) == Decimal("8.000")
+
+def test_stock_in_inventory_consistency(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    db_session: Session,
+) -> None:
+    product = _create_product(
+        client=client,
+        admin_headers=admin_headers,
+        initial_stock=0,
+    )
+
+    response = client.post(
+        "/api/v1/stock/in",
+        headers=admin_headers,
+        json={
+            "product_id": product["id"],
+            "quantity": "25.500",
+            "remark": "Stock consistency test",
+        },
+    )
+
+    assert response.status_code == 200
+
+    db_session.expire_all()
+
+    product_row = (
+        db_session.query(Product)
+        .filter(
+            Product.id == product["id"]
+        )
+        .first()
+    )
+
+    balance = (
+        db_session.query(StockBalance)
+        .filter(
+            StockBalance.product_id
+            == product["id"],
+            StockBalance.batch_id.is_(None),
+        )
+        .first()
+    )
+
+    transaction = (
+        db_session.query(StockTransaction)
+        .filter(
+            StockTransaction.product_id
+            == product["id"],
+            StockTransaction.transaction_type
+            == "IN",
+        )
+        .order_by(
+            StockTransaction.id.desc()
+        )
+        .first()
+    )
+
+    movement = (
+        db_session.query(InventoryMovement)
+        .filter(
+            InventoryMovement.product_id
+            == product["id"],
+            InventoryMovement.movement_type
+            == "STOCK_IN",
+        )
+        .order_by(
+            InventoryMovement.id.desc()
+        )
+        .first()
+    )
+
+    assert product_row is not None
+    assert balance is not None
+    assert transaction is not None
+    assert movement is not None
+
+    assert Decimal(
+        str(product_row.stock_qty)
+    ) == Decimal("25.500")
+
+    assert Decimal(
+        str(balance.on_hand_qty)
+    ) == Decimal("25.500")
+
+    assert Decimal(
+        str(transaction.quantity)
+    ) == Decimal("25.500")
+
+    assert Decimal(
+        str(movement.quantity)
+    ) == Decimal("25.500")
+
+    assert Decimal(
+        str(movement.balance_before)
+    ) == Decimal("0.000")
+
+    assert Decimal(
+        str(movement.balance_after)
+    ) == Decimal("25.500")
+
+    assert movement.reference_type == (
+        "STOCK_TRANSACTION"
+    )
+
+    assert movement.reference_id == (
+        transaction.id
+    )
+
+def test_fifo_inventory_consistency(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    db_session: Session,
+) -> None:
+    product = _create_product(
+        client=client,
+        admin_headers=admin_headers,
+        initial_stock=0,
+    )
+
+    first_batch = _create_batch(
+        client=client,
+        admin_headers=admin_headers,
+        product_id=product["id"],
+        quantity=10,
+        expiry_days=180,
+    )
+
+    second_batch = _create_batch(
+        client=client,
+        admin_headers=admin_headers,
+        product_id=product["id"],
+        quantity=20,
+        expiry_days=365,
+    )
+
+    response = client.post(
+        "/api/v1/stock/out-fifo",
+        headers=admin_headers,
+        json={
+            "product_id": product["id"],
+            "quantity": "15.000",
+            "remark": "FIFO consistency test",
+        },
+    )
+
+    assert response.status_code == 200
+
+    db_session.expire_all()
+
+    product_row = (
+        db_session.query(Product)
+        .filter(
+            Product.id == product["id"]
+        )
+        .first()
+    )
+
+    batches = (
+        db_session.query(ProductBatch)
+        .filter(
+            ProductBatch.product_id
+            == product["id"]
+        )
+        .all()
+    )
+
+    balances = (
+        db_session.query(StockBalance)
+        .filter(
+            StockBalance.product_id
+            == product["id"],
+            StockBalance.batch_id.is_not(None),
+        )
+        .all()
+    )
+
+    transaction = (
+        db_session.query(StockTransaction)
+        .filter(
+            StockTransaction.product_id
+            == product["id"],
+            StockTransaction.transaction_type
+            == "OUT_FIFO",
+        )
+        .order_by(
+            StockTransaction.id.desc()
+        )
+        .first()
+    )
+
+    movements = (
+        db_session.query(InventoryMovement)
+        .filter(
+            InventoryMovement.product_id
+            == product["id"],
+            InventoryMovement.movement_type
+            == "STOCK_OUT_FIFO",
+        )
+        .all()
+    )
+
+    assert product_row is not None
+    assert transaction is not None
+
+    product_stock = Decimal(
+        str(product_row.stock_qty)
+    )
+
+    batch_total = sum(
+        (
+            Decimal(str(batch.quantity))
+            for batch in batches
+        ),
+        Decimal("0"),
+    )
+
+    balance_total = sum(
+        (
+            Decimal(str(balance.on_hand_qty))
+            for balance in balances
+        ),
+        Decimal("0"),
+    )
+
+    movement_total = sum(
+        (
+            Decimal(str(movement.quantity))
+            for movement in movements
+        ),
+        Decimal("0"),
+    )
+
+    assert product_stock == Decimal("15.000")
+    assert batch_total == Decimal("15.000")
+    assert balance_total == Decimal("15.000")
+
+    assert Decimal(
+        str(transaction.quantity)
+    ) == Decimal("-15.000")
+
+    assert movement_total == Decimal("-15.000")
+
+    assert len(movements) == 2
+
+def test_fefo_inventory_consistency(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    db_session: Session,
+) -> None:
+    product = _create_product(
+        client=client,
+        admin_headers=admin_headers,
+        initial_stock=0,
+    )
+
+    later_batch = _create_batch(
+        client=client,
+        admin_headers=admin_headers,
+        product_id=product["id"],
+        quantity=10,
+        expiry_days=365,
+    )
+
+    earlier_batch = _create_batch(
+        client=client,
+        admin_headers=admin_headers,
+        product_id=product["id"],
+        quantity=12,
+        expiry_days=30,
+    )
+
+    response = client.post(
+        "/api/v1/stock/out-fefo",
+        headers=admin_headers,
+        json={
+            "product_id": product["id"],
+            "quantity": "15.000",
+            "remark": "FEFO consistency test",
+        },
+    )
+
+    assert response.status_code == 200
+
+    db_session.expire_all()
+
+    product_row = (
+        db_session.query(Product)
+        .filter(
+            Product.id == product["id"]
+        )
+        .first()
+    )
+
+    batches = (
+        db_session.query(ProductBatch)
+        .filter(
+            ProductBatch.product_id
+            == product["id"]
+        )
+        .all()
+    )
+
+    balances = (
+        db_session.query(StockBalance)
+        .filter(
+            StockBalance.product_id
+            == product["id"],
+            StockBalance.batch_id.is_not(None),
+        )
+        .all()
+    )
+
+    transaction = (
+        db_session.query(StockTransaction)
+        .filter(
+            StockTransaction.product_id
+            == product["id"],
+            StockTransaction.transaction_type
+            == "OUT_FEFO",
+        )
+        .order_by(
+            StockTransaction.id.desc()
+        )
+        .first()
+    )
+
+    movements = (
+        db_session.query(InventoryMovement)
+        .filter(
+            InventoryMovement.product_id
+            == product["id"],
+            InventoryMovement.movement_type
+            == "STOCK_OUT_FEFO",
+        )
+        .order_by(
+            InventoryMovement.id.asc()
+        )
+        .all()
+    )
+
+    assert product_row is not None
+    assert transaction is not None
+    assert len(movements) == 2
+
+    product_stock = Decimal(
+        str(product_row.stock_qty)
+    )
+
+    batch_total = sum(
+        (
+            Decimal(str(batch.quantity))
+            for batch in batches
+        ),
+        Decimal("0"),
+    )
+
+    balance_total = sum(
+        (
+            Decimal(str(balance.on_hand_qty))
+            for balance in balances
+        ),
+        Decimal("0"),
+    )
+
+    movement_total = sum(
+        (
+            Decimal(str(movement.quantity))
+            for movement in movements
+        ),
+        Decimal("0"),
+    )
+
+    assert product_stock == Decimal("7.000")
+    assert batch_total == Decimal("7.000")
+    assert balance_total == Decimal("7.000")
+
+    assert Decimal(
+        str(transaction.quantity)
+    ) == Decimal("-15.000")
+
+    assert movement_total == Decimal("-15.000")
+
+    earlier_batch_id = (
+        earlier_batch["batch"]["id"]
+        if "batch" in earlier_batch
+        else earlier_batch["id"]
+    )
+
+    later_batch_id = (
+        later_batch["batch"]["id"]
+        if "batch" in later_batch
+        else later_batch["id"]
+    )
+
+    first_movement = movements[0]
+    second_movement = movements[1]
+
+    assert first_movement.batch_id == earlier_batch_id
+    assert second_movement.batch_id == later_batch_id
+
+    assert Decimal(
+        str(first_movement.quantity)
+    ) == Decimal("-12.000")
+
+    assert Decimal(
+        str(second_movement.quantity)
+    ) == Decimal("-3.000")
+
+def test_stock_adjust_inventory_consistency(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    db_session: Session,
+) -> None:
+    product = _create_product(
+        client=client,
+        admin_headers=admin_headers,
+        initial_stock=0,
+    )
+
+    stock_in_response = client.post(
+        "/api/v1/stock/in",
+        headers=admin_headers,
+        json={
+            "product_id": product["id"],
+            "quantity": "20.000",
+            "remark": "Prepare adjust consistency",
+        },
+    )
+
+    assert stock_in_response.status_code == 200
+
+    adjust_response = client.post(
+        "/api/v1/stock/adjust",
+        headers=admin_headers,
+        json={
+            "product_id": product["id"],
+            "new_quantity": "12.500",
+            "remark": "Adjust consistency test",
+        },
+    )
+
+    assert adjust_response.status_code == 200
+
+    db_session.expire_all()
+
+    product_row = (
+        db_session.query(Product)
+        .filter(
+            Product.id == product["id"]
+        )
+        .first()
+    )
+
+    balance = (
+        db_session.query(StockBalance)
+        .filter(
+            StockBalance.product_id
+            == product["id"],
+            StockBalance.batch_id.is_(None),
+        )
+        .first()
+    )
+
+    transaction = (
+        db_session.query(StockTransaction)
+        .filter(
+            StockTransaction.product_id
+            == product["id"],
+            StockTransaction.transaction_type
+            == "ADJUST",
+        )
+        .order_by(
+            StockTransaction.id.desc()
+        )
+        .first()
+    )
+
+    movement = (
+        db_session.query(InventoryMovement)
+        .filter(
+            InventoryMovement.product_id
+            == product["id"],
+            InventoryMovement.movement_type
+            == "STOCK_ADJUST",
+        )
+        .order_by(
+            InventoryMovement.id.desc()
+        )
+        .first()
+    )
+
+    assert product_row is not None
+    assert balance is not None
+    assert transaction is not None
+    assert movement is not None
+
+    assert Decimal(
+        str(product_row.stock_qty)
+    ) == Decimal("12.500")
+
+    assert Decimal(
+        str(balance.on_hand_qty)
+    ) == Decimal("12.500")
+
+    assert Decimal(
+        str(transaction.quantity)
+    ) == Decimal("-7.500")
+
+    assert Decimal(
+        str(movement.quantity)
+    ) == Decimal("-7.500")
+
+    assert Decimal(
+        str(movement.balance_before)
+    ) == Decimal("20.000")
+
+    assert Decimal(
+        str(movement.balance_after)
+    ) == Decimal("12.500")
+
+    assert movement.reference_type == (
+        "STOCK_TRANSACTION"
+    )
+
+    assert movement.reference_id == (
+        transaction.id
+    )

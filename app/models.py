@@ -585,25 +585,38 @@ class PurchaseOrder(Base):
 class PurchaseOrderItem(Base):
     __tablename__ = "purchase_order_items"
 
-    id = Column(Integer, primary_key=True)
+    id = Column(
+        Integer,
+        primary_key=True,
+    )
 
     po_id = Column(
         Integer,
-        ForeignKey("purchase_orders.id")
+        ForeignKey("purchase_orders.id"),
+        nullable=False,
     )
 
     product_id = Column(
         Integer,
-        ForeignKey("products.id")
+        ForeignKey("products.id"),
+        nullable=False,
     )
 
     quantity = Column(
-    Numeric(18, 3),
-    nullable=False,
+        Numeric(18, 3),
+        nullable=False,
     )
 
-    unit_price = Column(Numeric(10, 2))
+    received_quantity = Column(
+        Numeric(18, 3),
+        nullable=False,
+        server_default="0",
+    )
 
+    unit_price = Column(
+        Numeric(10, 2),
+        nullable=False,
+    )
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"

@@ -17,7 +17,9 @@ from reportlab.platypus import (
 
 from app.core.dependencies import (
     DatabaseSession,
+    InventoryMovementRepositoryDependency,
     SalesOrderRepositoryDependency,
+    StockBalanceRepositoryDependency,
     require_admin,
 )
 from app.core.response import success_response
@@ -34,6 +36,7 @@ from app.services.sales_order_service import (
     get_sales_order_service,
     get_sales_orders_service,
     return_sales_order_items_service,
+    ship_sales_order_service,
 )
 
 
@@ -48,11 +51,13 @@ def create_sales_order(
     data: SalesOrderCreate,
     db: DatabaseSession,
     sales_order_repo: SalesOrderRepositoryDependency,
+    balance_repo: StockBalanceRepositoryDependency,
     current_user: User = Depends(require_admin),
 ):
     result = create_sales_order_service(
         db=db,
         sales_order_repo=sales_order_repo,
+        balance_repo=balance_repo,
         data=data,
         current_user=current_user,
     )
@@ -285,11 +290,13 @@ def cancel_sales_order(
     sales_order_id: int,
     db: DatabaseSession,
     sales_order_repo: SalesOrderRepositoryDependency,
+    balance_repo: StockBalanceRepositoryDependency,
     current_user: User = Depends(require_admin),
 ):
     result = cancel_sales_order_service(
         db=db,
         sales_order_repo=sales_order_repo,
+        balance_repo=balance_repo,
         sales_order_id=sales_order_id,
         current_user=current_user,
     )
@@ -299,18 +306,21 @@ def cancel_sales_order(
         result,
     )
 
-
 @router.post("/{sales_order_id}/return")
 def return_sales_order_items(
     sales_order_id: int,
     data: SalesReturnCreate,
     db: DatabaseSession,
     sales_order_repo: SalesOrderRepositoryDependency,
+    balance_repo: StockBalanceRepositoryDependency,
+    movement_repo: InventoryMovementRepositoryDependency,
     current_user: User = Depends(require_admin),
 ):
     result = return_sales_order_items_service(
         db=db,
         sales_order_repo=sales_order_repo,
+        balance_repo=balance_repo,
+        movement_repo=movement_repo,
         sales_order_id=sales_order_id,
         data=data,
         current_user=current_user,
@@ -318,5 +328,28 @@ def return_sales_order_items(
 
     return success_response(
         "Sales return completed",
+        result,
+    )
+
+@router.post("/{sales_order_id}/ship")
+def ship_sales_order(
+    sales_order_id: int,
+    db: DatabaseSession,
+    sales_order_repo: SalesOrderRepositoryDependency,
+    balance_repo: StockBalanceRepositoryDependency,
+    movement_repo: InventoryMovementRepositoryDependency,
+    current_user: User = Depends(require_admin),
+):
+    result = ship_sales_order_service(
+        db=db,
+        sales_order_repo=sales_order_repo,
+        balance_repo=balance_repo,
+        movement_repo=movement_repo,
+        sales_order_id=sales_order_id,
+        current_user=current_user,
+    )
+
+    return success_response(
+        "Sales Order Shipped",
         result,
     )
