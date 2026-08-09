@@ -250,24 +250,27 @@ def complete_inventory_transfer_service(
     completed_by_user_id: int | None,
 ) -> InventoryTransfer:
 
-    transfer = transfer_repo.get_by_id(
-        transfer_id
-    )
+    with UnitOfWork(db) as uow:
+        transfer = (
+            transfer_repo.get_by_id_for_update(
+                transfer_id
+            )
+        )
 
-    if transfer is None:
-        raise InventoryTransferNotFoundException()
+        if transfer is None:
+            raise InventoryTransferNotFoundException()
 
-    if transfer.status == "COMPLETED":
-        raise InventoryTransferAlreadyCompletedException()
+        if transfer.status == "COMPLETED":
+            raise (
+                InventoryTransferAlreadyCompletedException()
+            )
 
-    if transfer.status == "CANCELLED":
-        raise InventoryTransferCancelledException()
+        if transfer.status == "CANCELLED":
+            raise InventoryTransferCancelledException()
 
-    with UnitOfWork(db):
         for item in transfer.items:
-
             source_balance = (
-                balance_repo.get_balance(
+                balance_repo.get_balance_for_update(
                     product_id=item.product_id,
                     warehouse_id=(
                         transfer.source_warehouse_id
@@ -289,7 +292,7 @@ def complete_inventory_transfer_service(
                 raise InsufficientStockException()
 
             destination_balance = (
-                balance_repo.get_balance(
+                balance_repo.get_or_create_balance(
                     product_id=item.product_id,
                     warehouse_id=(
                         transfer.destination_warehouse_id
@@ -298,18 +301,6 @@ def complete_inventory_transfer_service(
                     batch_id=item.batch_id,
                 )
             )
-
-            if destination_balance is None:
-                destination_balance = (
-                    balance_repo.create_balance(
-                        product_id=item.product_id,
-                        warehouse_id=(
-                            transfer.destination_warehouse_id
-                        ),
-                        location_id=item.to_location_id,
-                        batch_id=item.batch_id,
-                    )
-                )
 
             source_before = (
                 source_balance.on_hand_qty
@@ -327,15 +318,7 @@ def complete_inventory_transfer_service(
                 item.quantity
             )
 
-            source_after = (
-                source_balance.on_hand_qty
-            )
-
-            destination_after = (
-                destination_balance.on_hand_qty
-            )
-
-            movement_out = InventoryMovement(
+            source_movement = InventoryMovement(
                 product_id=item.product_id,
                 batch_id=item.batch_id,
                 warehouse_id=(
@@ -345,30 +328,12 @@ def complete_inventory_transfer_service(
                 movement_type="TRANSFER_OUT",
                 quantity=-item.quantity,
                 balance_before=source_before,
-                balance_after=source_after,
-                reference_type="INVENTORY_TRANSFER",
-                reference_id=transfer.id,
-                reference_number=(
-                    transfer.transfer_number
+                balance_after=(
+                    source_balance.on_hand_qty
                 ),
-                remark=transfer.remark,
-                created_by_user_id=(
-                    completed_by_user_id
+                reference_type=(
+                    "INVENTORY_TRANSFER"
                 ),
-            )
-
-            movement_in = InventoryMovement(
-                product_id=item.product_id,
-                batch_id=item.batch_id,
-                warehouse_id=(
-                    transfer.destination_warehouse_id
-                ),
-                location_id=item.to_location_id,
-                movement_type="TRANSFER_IN",
-                quantity=item.quantity,
-                balance_before=destination_before,
-                balance_after=destination_after,
-                reference_type="INVENTORY_TRANSFER",
                 reference_id=transfer.id,
                 reference_number=(
                     transfer.transfer_number
@@ -380,11 +345,41 @@ def complete_inventory_transfer_service(
             )
 
             movement_repo.create(
-                movement_out
+                source_movement
+            )
+
+            destination_movement = (
+                InventoryMovement(
+                    product_id=item.product_id,
+                    batch_id=item.batch_id,
+                    warehouse_id=(
+                        transfer.destination_warehouse_id
+                    ),
+                    location_id=item.to_location_id,
+                    movement_type="TRANSFER_IN",
+                    quantity=item.quantity,
+                    balance_before=(
+                        destination_before
+                    ),
+                    balance_after=(
+                        destination_balance.on_hand_qty
+                    ),
+                    reference_type=(
+                        "INVENTORY_TRANSFER"
+                    ),
+                    reference_id=transfer.id,
+                    reference_number=(
+                        transfer.transfer_number
+                    ),
+                    remark=transfer.remark,
+                    created_by_user_id=(
+                        completed_by_user_id
+                    ),
+                )
             )
 
             movement_repo.create(
-                movement_in
+                destination_movement
             )
 
         transfer.status = "COMPLETED"
@@ -395,7 +390,9 @@ def complete_inventory_transfer_service(
 
         db.flush()
 
-    db.refresh(transfer)
+    uow.refresh(
+        transfer
+    )
 
     return transfer
 
@@ -404,21 +401,33 @@ def cancel_inventory_transfer_service(
     transfer_repo: InventoryTransferRepository,
     transfer_id: int,
 ) -> InventoryTransfer:
-    transfer = transfer_repo.get_by_id(
-        transfer_id
-    )
+    with UnitOfWork(db) as uow:
+        transfer = (
+            transfer_repo.get_by_id_for_update(
+                transfer_id
+            )
+        )
 
-    if transfer is None:
-        raise InventoryTransferNotFoundException()
+        if transfer is None:
+            raise InventoryTransferNotFoundException()
 
-    if transfer.status != "DRAFT":
-        raise InventoryTransferCannotCancelException()
+        if transfer.status == "COMPLETED":
+            raise (
+                InventoryTransferAlreadyCompletedException()
+            )
 
-    with UnitOfWork(db):
+        if transfer.status == "CANCELLED":
+            raise InventoryTransferCancelledException()
+
+        if transfer.status != "DRAFT":
+            raise InventoryTransferCancelledException()
+
         transfer.status = "CANCELLED"
 
         db.flush()
 
-    db.refresh(transfer)
+    uow.refresh(
+        transfer
+    )
 
     return transfer

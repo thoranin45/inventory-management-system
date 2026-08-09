@@ -30,6 +30,8 @@ def _create_product(
             "price": price,
             "stock_qty": stock_qty,
             "category_id": None,
+            "track_batch": True,
+            "track_expiry": True,
         },
     )
 

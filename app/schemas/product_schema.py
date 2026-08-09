@@ -3,6 +3,12 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    model_validator,
+)
 
 class ProductCreate(BaseModel):
     sku: str = Field(
@@ -34,6 +40,18 @@ class ProductCreate(BaseModel):
     )
 
     category_id: int | None = None
+
+    track_batch: bool = False
+    track_expiry: bool = False
+
+    @model_validator(mode="after")
+    def validate_tracking(self):
+        if self.track_expiry and not self.track_batch:
+            raise ValueError(
+                "track_expiry requires track_batch=True"
+            )
+
+        return self
 
 
 class ProductUpdate(BaseModel):
@@ -67,6 +85,9 @@ class ProductUpdate(BaseModel):
 
     category_id: int | None = None
 
+    track_batch: bool | None = None
+    track_expiry: bool | None = None
+
 
 class ProductResponse(BaseModel):
     id: int
@@ -79,7 +100,8 @@ class ProductResponse(BaseModel):
     image_url: str | None = None
     is_active: bool
     created_at: datetime | None = None
-
+    track_batch: bool = False
+    track_expiry: bool = False
     model_config = ConfigDict(
         from_attributes=True,
     )

@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -242,6 +243,92 @@ class StockBalanceRepository:
             batch_id=batch_id,
         )
 
+    def get_balance_for_update(
+        self,
+        *,
+        product_id: int,
+        warehouse_id: int,
+        location_id: int,
+        batch_id: int | None,
+    ) -> StockBalance | None:
+        return self.get_exact_for_update(
+            product_id=product_id,
+            warehouse_id=warehouse_id,
+            location_id=location_id,
+            batch_id=batch_id,
+        )
+
+    def get_exact_for_update(
+        self,
+        *,
+        product_id: int,
+        warehouse_id: int,
+        location_id: int,
+        batch_id: int | None,
+    ) -> StockBalance | None:
+
+        query = (
+            self.db.query(StockBalance)
+            .filter(
+                StockBalance.product_id
+                == product_id,
+                StockBalance.warehouse_id
+                == warehouse_id,
+                StockBalance.location_id
+                == location_id,
+            )
+            .with_for_update()
+        )
+
+        if batch_id is None:
+            query = query.filter(
+                StockBalance.batch_id.is_(None)
+            )
+        else:
+            query = query.filter(
+                StockBalance.batch_id
+                == batch_id
+            )
+
+        return query.first()
+
+    def get_default_batch_balance_for_update(
+        self,
+        product_id: int,
+        batch_id: int,
+    ) -> StockBalance | None:
+        storage = self.get_default_storage()
+
+        if storage is None:
+            return None
+
+        warehouse, location = storage
+
+        return self.get_exact_for_update(
+            product_id=product_id,
+            warehouse_id=warehouse.id,
+            location_id=location.id,
+            batch_id=batch_id,
+        )
+
+    def get_default_product_balance_for_update(
+        self,
+        product_id: int,
+    ) -> StockBalance | None:
+        storage = self.get_default_storage()
+
+        if storage is None:
+            return None
+
+        warehouse, location = storage
+
+        return self.get_exact_for_update(
+            product_id=product_id,
+            warehouse_id=warehouse.id,
+            location_id=location.id,
+            batch_id=None,
+        )
+
     def create_balance(
         self,
         *,
@@ -264,73 +351,69 @@ class StockBalanceRepository:
 
         return balance
 
-def get_exact_for_update(
-    self,
-    *,
-    product_id: int,
-    warehouse_id: int,
-    location_id: int,
-    batch_id: int | None,
-) -> StockBalance | None:
+    def get_or_create_balance(
+        self,
+        *,
+        product_id: int,
+        warehouse_id: int,
+        location_id: int,
+        batch_id: int | None,
+    ) -> StockBalance:
+        values = {
+            "product_id": product_id,
+            "warehouse_id": warehouse_id,
+            "location_id": location_id,
+            "batch_id": batch_id,
+            "on_hand_qty": Decimal("0"),
+            "reserved_qty": Decimal("0"),
+        }
 
-    query = (
-        self.db.query(StockBalance)
-        .filter(
-            StockBalance.product_id
-            == product_id,
-            StockBalance.warehouse_id
-            == warehouse_id,
-            StockBalance.location_id
-            == location_id,
-        )
-        .with_for_update()
-    )
-
-    if batch_id is None:
-        query = query.filter(
-            StockBalance.batch_id.is_(None)
-        )
-    else:
-        query = query.filter(
-            StockBalance.batch_id
-            == batch_id
+        statement = insert(
+            StockBalance
+        ).values(
+            **values
         )
 
-    return query.first()
+        if batch_id is None:
+            statement = statement.on_conflict_do_nothing(
+                index_elements=[
+                    StockBalance.product_id,
+                    StockBalance.warehouse_id,
+                    StockBalance.location_id,
+                ],
+                index_where=(
+                    StockBalance.batch_id.is_(None)
+                ),
+            )
+        else:
+            statement = statement.on_conflict_do_nothing(
+                index_elements=[
+                    StockBalance.product_id,
+                    StockBalance.warehouse_id,
+                    StockBalance.location_id,
+                    StockBalance.batch_id,
+                ],
+                index_where=(
+                    StockBalance.batch_id.is_not(None)
+                ),
+            )
 
-def get_default_batch_balance_for_update(
-    self,
-    product_id: int,
-    batch_id: int,
-) -> StockBalance | None:
-    storage = self.get_default_storage()
+        self.db.execute(
+            statement
+        )
 
-    if storage is None:
-        return None
+        self.db.flush()
 
-    warehouse, location = storage
+        balance = self.get_balance_for_update(
+            product_id=product_id,
+            warehouse_id=warehouse_id,
+            location_id=location_id,
+            batch_id=batch_id,
+        )
 
-    return self.get_exact_for_update(
-        product_id=product_id,
-        warehouse_id=warehouse.id,
-        location_id=location.id,
-        batch_id=batch_id,
-    )
+        if balance is None:
+            raise RuntimeError(
+                "Failed to get or create stock balance"
+            )
 
-def get_default_product_balance_for_update(
-    self,
-    product_id: int,
-) -> StockBalance | None:
-    storage = self.get_default_storage()
-
-    if storage is None:
-        return None
-
-    warehouse, location = storage
-
-    return self.get_exact_for_update(
-        product_id=product_id,
-        warehouse_id=warehouse.id,
-        location_id=location.id,
-        batch_id=None,
-    )
+        return balance

@@ -15,6 +15,20 @@ class ProductRepository(BaseRepository):
     def get_by_id(self, product_id: int):
         return self.get_active_by_id(product_id)
 
+    def get_by_id_for_update(
+        self,
+        product_id: int,
+    ) -> Product | None:
+        return (
+            self.db.query(Product)
+            .filter(
+                Product.id == product_id,
+                Product.is_active.is_(True),
+            )
+            .with_for_update()
+            .first()
+        )
+
     def get_by_sku(self, sku: str):
         return self.db.query(Product).filter(
             Product.sku == sku

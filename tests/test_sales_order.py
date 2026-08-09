@@ -1,12 +1,14 @@
+from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
-from datetime import date, timedelta
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
+
 def _decimal(value) -> Decimal:
     return Decimal(str(value))
+
 
 def _create_customer(
     client: TestClient,
@@ -53,6 +55,8 @@ def _create_product(
             "price": 100.00,
             "stock_qty": 0,
             "category_id": None,
+            "track_batch": True,
+            "track_expiry": True,
         },
     )
 
@@ -77,11 +81,15 @@ def _create_batch(
         json={
             "product_id": product_id,
             "lot_no": (
-                f"SO-LOT-{uuid4().hex[:12].upper()}"
+                f"SO-LOT-"
+                f"{uuid4().hex[:12].upper()}"
             ),
-            "mfg_date": mfg_date.isoformat(),
+            "mfg_date": (
+                mfg_date.isoformat()
+            ),
             "expiry_date": (
-                mfg_date + timedelta(days=expiry_days)
+                mfg_date
+                + timedelta(days=expiry_days)
             ).isoformat(),
             "quantity": quantity,
         },
@@ -121,7 +129,34 @@ def _create_sales_order(
     body = response.json()
 
     assert body["success"] is True
-    assert body["message"] == "Sales Order Created"
+    assert body["message"] == (
+        "Sales Order Created"
+    )
+
+    return body["data"]
+
+
+def _ship_sales_order(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    sales_order_id: int,
+) -> dict:
+    response = client.post(
+        (
+            "/api/v1/sales-orders/"
+            f"{sales_order_id}/ship"
+        ),
+        headers=admin_headers,
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert body["success"] is True
+    assert body["message"] == (
+        "Sales Order Shipped"
+    )
 
     return body["data"]
 
@@ -144,7 +179,9 @@ def _get_product(
 def _get_batches(
     client: TestClient,
 ) -> list[dict]:
-    response = client.get("/api/v1/batches")
+    response = client.get(
+        "/api/v1/batches"
+    )
 
     assert response.status_code == 200
 
@@ -155,7 +192,9 @@ def _get_batch(
     client: TestClient,
     batch_id: int,
 ) -> dict:
-    batches = _get_batches(client)
+    batches = _get_batches(
+        client
+    )
 
     batch = next(
         (
@@ -213,15 +252,21 @@ def test_create_sales_order_success(
     body = response.json()
 
     assert body["success"] is True
-    assert body["message"] == "Sales Order Created"
+    assert body["message"] == (
+        "Sales Order Created"
+    )
 
     data = body["data"]
 
     assert data["sales_order_id"] > 0
-    assert data["so_number"].startswith("SO-")
+    assert data["so_number"].startswith(
+        "SO-"
+    )
     assert data["status"] == "CONFIRMED"
     assert data["total_amount"] == 627.50
 
+    # Creating an SO only reserves stock.
+    # Physical stock must not decrease yet.
     product_after = _get_product(
         client,
         admin_headers,
@@ -230,7 +275,7 @@ def test_create_sales_order_success(
 
     assert _decimal(
         product_after["stock_qty"]
-    ) == Decimal("15.000")
+    ) == Decimal("20.000")
 
 
 def test_sales_order_uses_fefo(
@@ -279,27 +324,43 @@ def test_sales_order_uses_fefo(
         )
     )
 
-    assert detail_response.status_code == 200
+    assert (
+        detail_response.status_code
+        == 200
+    )
 
-    detail = detail_response.json()["data"]
-    allocations = detail["items"][0][
-        "batch_allocations"
-    ]
+    detail = (
+        detail_response.json()["data"]
+    )
+
+    allocations = (
+        detail["items"][0][
+            "batch_allocations"
+        ]
+    )
 
     assert len(allocations) == 2
-    assert allocations[0]["batch_id"] == (
-        earlier_batch["id"]
+
+    assert (
+        allocations[0]["batch_id"]
+        == earlier_batch["id"]
     )
+
     assert _decimal(
         allocations[0]["quantity"]
     ) == Decimal("8.000")
-    assert allocations[1]["batch_id"] == (
-        later_batch["id"]
+
+    assert (
+        allocations[1]["batch_id"]
+        == later_batch["id"]
     )
+
     assert _decimal(
         allocations[1]["quantity"]
     ) == Decimal("4.000")
 
+    # Allocation reserves stock only.
+    # Batch physical quantities remain unchanged.
     earlier_after = _get_batch(
         client,
         earlier_batch["id"],
@@ -312,11 +373,12 @@ def test_sales_order_uses_fefo(
 
     assert _decimal(
         earlier_after["quantity"]
-    ) == Decimal("0.000")
+    ) == Decimal("8.000")
 
     assert _decimal(
         later_after["quantity"]
-    ) == Decimal("6.000")
+    ) == Decimal("10.000")
+
 
 def test_create_sales_order_customer_not_found(
     client: TestClient,
@@ -351,6 +413,7 @@ def test_create_sales_order_customer_not_found(
     )
 
     assert response.status_code == 404
+
     assert response.json()["message"] == (
         "Customer not found"
     )
@@ -398,8 +461,9 @@ def test_create_sales_order_insufficient_stock(
     body = response.json()
 
     assert body["success"] is False
-    assert body["message"].startswith(
-        "Not enough stock for"
+
+    assert body["message"] == (
+        "Insufficient available stock"
     )
 
 
@@ -484,7 +548,9 @@ def test_get_sales_orders_and_detail(
 
     sales_order_ids = [
         item["id"]
-        for item in list_body["data"]["items"]
+        for item in (
+            list_body["data"]["items"]
+        )
     ]
 
     assert created["sales_order_id"] in (
@@ -498,13 +564,19 @@ def test_get_sales_orders_and_detail(
         )
     )
 
-    assert detail_response.status_code == 200
+    assert (
+        detail_response.status_code
+        == 200
+    )
 
-    detail = detail_response.json()["data"]
+    detail = (
+        detail_response.json()["data"]
+    )
 
     assert detail["id"] == (
         created["sales_order_id"]
     )
+
     assert detail["total_amount"] == 398
     assert len(detail["items"]) == 1
 
@@ -543,14 +615,20 @@ def test_cancel_sales_order_restores_stock(
     cancel_response = client.put(
         (
             "/api/v1/sales-orders/"
-            f"{created['sales_order_id']}/cancel"
+            f"{created['sales_order_id']}"
+            "/cancel"
         ),
         headers=admin_headers,
     )
 
-    assert cancel_response.status_code == 200
+    assert (
+        cancel_response.status_code
+        == 200
+    )
 
-    data = cancel_response.json()["data"]
+    data = (
+        cancel_response.json()["data"]
+    )
 
     assert data["status"] == "CANCELLED"
 
@@ -565,6 +643,9 @@ def test_cancel_sales_order_restores_stock(
         batch["id"],
     )
 
+    # Cancelling a CONFIRMED order releases
+    # reservation only. Physical stock was
+    # never deducted.
     assert _decimal(
         product_after["stock_qty"]
     ) == Decimal("10.000")
@@ -607,7 +688,8 @@ def test_cancel_sales_order_twice(
 
     url = (
         "/api/v1/sales-orders/"
-        f"{created['sales_order_id']}/cancel"
+        f"{created['sales_order_id']}"
+        "/cancel"
     )
 
     first_response = client.put(
@@ -615,16 +697,24 @@ def test_cancel_sales_order_twice(
         headers=admin_headers,
     )
 
-    assert first_response.status_code == 200
+    assert (
+        first_response.status_code
+        == 200
+    )
 
     second_response = client.put(
         url,
         headers=admin_headers,
     )
 
-    assert second_response.status_code == 409
-    assert second_response.json()["message"] == (
-        "Sales Order already cancelled"
+    assert (
+        second_response.status_code
+        == 409
+    )
+
+    assert (
+        second_response.json()["message"]
+        == "Sales Order already cancelled"
     )
 
 
@@ -659,18 +749,30 @@ def test_partial_sales_return(
         unit_price=100,
     )
 
+    # Return is allowed only after shipment.
+    _ship_sales_order(
+        client,
+        admin_headers,
+        created["sales_order_id"],
+    )
+
     response = client.post(
         (
             "/api/v1/sales-orders/"
-            f"{created['sales_order_id']}/return"
+            f"{created['sales_order_id']}"
+            "/return"
         ),
         headers=admin_headers,
         json={
             "items": [
                 {
-                    "product_id": product["id"],
+                    "product_id": (
+                        product["id"]
+                    ),
                     "quantity": 2,
-                    "reason": "Damaged package",
+                    "reason": (
+                        "Damaged package"
+                    ),
                 }
             ]
         },
@@ -681,15 +783,26 @@ def test_partial_sales_return(
     body = response.json()
 
     assert body["success"] is True
+
     assert body["message"] == (
         "Sales return completed"
     )
 
-    returned = body["data"]["returned_items"][0]
+    returned = (
+        body["data"]["returned_items"][0]
+    )
 
-    assert returned["returned_quantity"] == 2
-    assert returned["total_returned"] == 2
-    assert returned["remaining_returnable"] == 4
+    assert _decimal(
+        returned["returned_quantity"]
+    ) == Decimal("2.000")
+
+    assert _decimal(
+        returned["total_returned"]
+    ) == Decimal("2.000")
+
+    assert _decimal(
+        returned["remaining_returnable"]
+    ) == Decimal("4.000")
 
     product_after = _get_product(
         client,
@@ -702,6 +815,10 @@ def test_partial_sales_return(
         batch["id"],
     )
 
+    # 10 initial
+    # -6 shipment
+    # +2 return
+    # =6
     assert _decimal(
         product_after["stock_qty"]
     ) == Decimal("6.000")
@@ -742,18 +859,30 @@ def test_return_quantity_exceeds_remaining(
         unit_price=100,
     )
 
+    # Order must be completed before return.
+    _ship_sales_order(
+        client,
+        admin_headers,
+        created["sales_order_id"],
+    )
+
     response = client.post(
         (
             "/api/v1/sales-orders/"
-            f"{created['sales_order_id']}/return"
+            f"{created['sales_order_id']}"
+            "/return"
         ),
         headers=admin_headers,
         json={
             "items": [
                 {
-                    "product_id": product["id"],
+                    "product_id": (
+                        product["id"]
+                    ),
                     "quantity": 4,
-                    "reason": "Invalid return",
+                    "reason": (
+                        "Invalid return"
+                    ),
                 }
             ]
         },
@@ -761,8 +890,11 @@ def test_return_quantity_exceeds_remaining(
 
     assert response.status_code == 409
 
-    assert response.json()["message"].startswith(
-        "Return quantity exceeds"
+    assert (
+        response.json()["message"]
+        .startswith(
+            "Return quantity exceeds"
+        )
     )
 
 
@@ -797,37 +929,60 @@ def test_cancel_after_return_fails(
         unit_price=100,
     )
 
+    # Complete the order before returning.
+    _ship_sales_order(
+        client,
+        admin_headers,
+        created["sales_order_id"],
+    )
+
     return_response = client.post(
         (
             "/api/v1/sales-orders/"
-            f"{created['sales_order_id']}/return"
+            f"{created['sales_order_id']}"
+            "/return"
         ),
         headers=admin_headers,
         json={
             "items": [
                 {
-                    "product_id": product["id"],
+                    "product_id": (
+                        product["id"]
+                    ),
                     "quantity": 1,
-                    "reason": "Test return",
+                    "reason": (
+                        "Test return"
+                    ),
                 }
             ]
         },
     )
 
-    assert return_response.status_code == 200
+    assert (
+        return_response.status_code
+        == 200
+    )
 
     cancel_response = client.put(
         (
             "/api/v1/sales-orders/"
-            f"{created['sales_order_id']}/cancel"
+            f"{created['sales_order_id']}"
+            "/cancel"
         ),
         headers=admin_headers,
     )
 
-    assert cancel_response.status_code == 409
-    assert cancel_response.json()["message"] == (
-        "Cannot cancel a sales order "
-        "that already has returned items"
+    assert (
+        cancel_response.status_code
+        == 409
+    )
+
+    assert (
+        cancel_response.json()["message"]
+        ==
+        "Completed Sales Order cannot "
+        "be cancelled. "
+        "Use sales return instead."
     )
 
 
@@ -849,6 +1004,7 @@ def test_create_sales_order_without_token(
     )
 
     assert response.status_code == 401
+
 
 def test_generate_sales_order_invoice(
     client: TestClient,
@@ -881,7 +1037,10 @@ def test_generate_sales_order_invoice(
         unit_price=199,
     )
 
-    sales_order_id = created["sales_order_id"]
+    sales_order_id = (
+        created["sales_order_id"]
+    )
+
     so_number = created["so_number"]
 
     invoice_path = Path(
@@ -900,7 +1059,9 @@ def test_generate_sales_order_invoice(
 
         assert response.headers[
             "content-type"
-        ].startswith("application/pdf")
+        ].startswith(
+            "application/pdf"
+        )
 
         assert response.content.startswith(
             b"%PDF"
@@ -913,12 +1074,17 @@ def test_generate_sales_order_invoice(
             )
         )
 
-        assert f"{so_number}.pdf" in (
-            content_disposition
+        assert (
+            f"{so_number}.pdf"
+            in content_disposition
         )
 
         assert invoice_path.exists()
-        assert invoice_path.stat().st_size > 0
+
+        assert (
+            invoice_path.stat().st_size
+            > 0
+        )
 
     finally:
         if invoice_path.exists():
@@ -940,6 +1106,7 @@ def test_generate_invoice_sales_order_not_found(
     body = response.json()
 
     assert body["success"] is False
+
     assert body["message"] == (
         "Sales Order not found"
-    )    
+    )

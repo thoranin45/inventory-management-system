@@ -284,11 +284,6 @@ app.include_router(
 )
 
 app.include_router(
-    stock_balance_router,
-    prefix="/api/v1",
-)
-
-app.include_router(
     inventory_transfer_router,
     prefix="/api/v1",
 )

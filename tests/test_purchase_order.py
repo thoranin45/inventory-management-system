@@ -96,10 +96,10 @@ def _create_purchase_order(
 
     return body["data"]
 
-
 def _receive_payload(
     product_id: int,
     *,
+    quantity: int | float | Decimal,
     lot_no: str | None = None,
 ) -> dict:
     manufacturing_date = date.today()
@@ -108,9 +108,13 @@ def _receive_payload(
         "items": [
             {
                 "product_id": product_id,
+                "quantity": quantity,
                 "lot_no": (
                     lot_no
-                    or f"PO-LOT-{uuid4().hex[:12].upper()}"
+                    or (
+                        "PO-LOT-"
+                        f"{uuid4().hex[:12].upper()}"
+                    )
                 ),
                 "mfg_date": (
                     manufacturing_date.isoformat()
@@ -122,7 +126,6 @@ def _receive_payload(
             }
         ]
     }
-
 
 def _get_product(
     client: TestClient,
@@ -208,7 +211,9 @@ def test_create_purchase_order_success(
     item = data["items"][0]
 
     assert item["product_id"] == product["id"]
-    assert item["quantity"] == 4
+    assert _decimal(
+        item["quantity"]
+    ) == Decimal("4.000")
     assert float(item["unit_price"]) == 150.25
     assert float(item["total_price"]) == 601.00
 
@@ -413,7 +418,8 @@ def test_receive_purchase_order_success(
     )
 
     payload = _receive_payload(
-        product["id"]
+        product["id"],
+        quantity=12,
     )
 
     response = client.post(
@@ -525,7 +531,8 @@ def test_receive_purchase_order_twice(
     )
 
     first_payload = _receive_payload(
-        product["id"]
+        product["id"],
+        quantity=10,
     )
 
     first_response = client.post(
@@ -546,7 +553,8 @@ def test_receive_purchase_order_twice(
         ),
         headers=admin_headers,
         json=_receive_payload(
-            product["id"]
+            product["id"],
+            quantity=10,
         ),
     )
 
@@ -590,6 +598,7 @@ def test_receive_po_invalid_batch_date(
             "items": [
                 {
                     "product_id": product["id"],
+                    "quantity": 10,
                     "lot_no": (
                         f"INVALID-{uuid4().hex[:10]}"
                     ),
@@ -617,7 +626,7 @@ def test_receive_po_invalid_batch_date(
     ) == Decimal("0.000")
 
 
-def test_receive_po_missing_item(
+def test_partial_receive_purchase_order(
     client: TestClient,
     admin_headers: dict[str, str],
 ) -> None:
@@ -667,18 +676,38 @@ def test_receive_po_missing_item(
         ),
         headers=admin_headers,
         json=_receive_payload(
-            first_product["id"]
+            first_product["id"],
+            quantity=5,
         ),
     )
 
-    assert receive_response.status_code == 400
+    assert receive_response.status_code == 200
 
     body = receive_response.json()
 
-    assert body["message"].startswith(
-        "Missing receive information for product_id"
+    assert body["success"] is True
+
+    data = body["data"]
+
+    assert data["id"] == po_id
+    assert data["status"] == "PARTIALLY_RECEIVED"
+
+    assert len(
+        data["received_batches"]
+    ) == 1
+
+    received_batch = (
+        data["received_batches"][0]
     )
 
+    assert (
+        received_batch["product_id"]
+        == first_product["id"]
+    )
+
+    assert _decimal(
+        received_batch["received_quantity"]
+    ) == Decimal("5.000")
 
 def test_cancel_purchase_order_success(
     client: TestClient,
@@ -803,7 +832,8 @@ def test_receive_cancelled_purchase_order(
         ),
         headers=admin_headers,
         json=_receive_payload(
-            product["id"]
+            product["id"],
+            quantity=10,
         ),
     )
 

@@ -253,115 +253,116 @@ def receive_purchase_order_service(
     current_user: Any,
 ) -> PurchaseOrderReceiveResponse:
 
-    po = po_repo.get_by_id(po_id)
-
-    if po is None:
-        raise PurchaseOrderNotFoundException()
-
-    if po.status == PO_STATUS_RECEIVED:
-        raise PurchaseOrderAlreadyReceivedException()
-
-    if po.status == PO_STATUS_CANCELLED:
-        raise PurchaseOrderCancelledException()
-
-    if po.status not in {
-        PO_STATUS_PENDING,
-        PO_STATUS_PARTIALLY_RECEIVED,
-    }:
-        raise InvalidPurchaseOrderStatusException()
-
-    po_items = po_repo.get_items(
-        po.id
-    )
-
-    po_items_by_product = {
-        item.product_id: item
-        for item in po_items
-    }
-
     received_batches: list[
         ReceivedBatchResponse
     ] = []
 
-    # --------------------------------
-    # Validate request first
-    # --------------------------------
-
-    for receive_item in data.items:
-
-        po_item = po_items_by_product.get(
-            receive_item.product_id
+    with UnitOfWork(db) as uow:
+        # =====================================================
+        # Lock Purchase Order
+        # =====================================================
+        po = po_repo.get_by_id_for_update(
+            po_id
         )
 
-        if po_item is None:
-            raise (
-                UnexpectedPurchaseOrderReceiveItemException(
-                    receive_item.product_id
-                )
-            )
+        if po is None:
+            raise PurchaseOrderNotFoundException()
 
-        remaining_quantity = (
-            po_item.quantity
-            - po_item.received_quantity
+        if po.status == PO_STATUS_RECEIVED:
+            raise PurchaseOrderAlreadyReceivedException()
+
+        if po.status == PO_STATUS_CANCELLED:
+            raise PurchaseOrderCancelledException()
+
+        if po.status not in {
+            PO_STATUS_PENDING,
+            PO_STATUS_PARTIALLY_RECEIVED,
+        }:
+            raise InvalidPurchaseOrderStatusException()
+
+        po_items = po_repo.get_items_for_update(
+            po.id
         )
 
-        if (
-            receive_item.quantity
-            > remaining_quantity
-        ):
-            raise PurchaseOrderOverReceiveException(
+        po_items_by_product = {
+            item.product_id: item
+            for item in po_items
+        }
+
+        # =====================================================
+        # Validate request
+        # =====================================================
+        for receive_item in data.items:
+            po_item = po_items_by_product.get(
                 receive_item.product_id
             )
 
-        if (
-            receive_item.expiry_date
-            <= receive_item.mfg_date
-        ):
-            raise InvalidBatchDateException()
+            if po_item is None:
+                raise (
+                    UnexpectedPurchaseOrderReceiveItemException(
+                        receive_item.product_id
+                    )
+                )
 
-        existing_batch = (
-            batch_repo.get_by_lot_no(
-                receive_item.lot_no
+            remaining_quantity = (
+                po_item.quantity
+                - po_item.received_quantity
             )
-        )
 
-        if existing_batch is not None:
-            raise DuplicateLotNumberException()
+            if (
+                receive_item.quantity
+                > remaining_quantity
+            ):
+                raise PurchaseOrderOverReceiveException(
+                    receive_item.product_id
+                )
 
-    # --------------------------------
-    # Apply receive
-    # --------------------------------
+            if (
+                receive_item.expiry_date
+                <= receive_item.mfg_date
+            ):
+                raise InvalidBatchDateException()
 
-    with UnitOfWork(db) as uow:
+            existing_batch = (
+                batch_repo.get_by_lot_no(
+                    receive_item.lot_no
+                )
+            )
 
+            if existing_batch is not None:
+                raise DuplicateLotNumberException()
+
+        # =====================================================
+        # Apply receive
+        # =====================================================
         for receive_item in data.items:
-
             po_item = po_items_by_product[
                 receive_item.product_id
             ]
 
-            product = product_repo.get_by_id(
+            product = product_repo.get_by_id_for_update(
                 receive_item.product_id
             )
 
             if product is None:
                 raise ProductNotFoundException()
 
-            batch = ProductBatch(
+            new_batch = ProductBatch(
                 product_id=product.id,
                 lot_no=receive_item.lot_no,
                 mfg_date=receive_item.mfg_date,
-                expiry_date=(
-                    receive_item.expiry_date
-                ),
-                quantity=(
-                    receive_item.quantity
-                ),
+                expiry_date=receive_item.expiry_date,
+                quantity=receive_item.quantity,
             )
 
-            batch_repo.create(
-                batch
+            batch = (
+                batch_repo.create_if_lot_not_exists(
+                    new_batch
+                )
             )
+
+            if batch is None:
+                raise DuplicateLotNumberException()
 
             product.stock_qty += (
                 receive_item.quantity
@@ -385,9 +386,7 @@ def receive_purchase_order_service(
             transaction = StockTransaction(
                 product_id=product.id,
                 transaction_type="IN_PO",
-                quantity=(
-                    receive_item.quantity
-                ),
+                quantity=receive_item.quantity,
                 remark=(
                     f"Receive from {po.po_number}; "
                     f"Lot: {receive_item.lot_no}"
@@ -401,38 +400,19 @@ def receive_purchase_order_service(
             movement = InventoryMovement(
                 product_id=product.id,
                 batch_id=batch.id,
-                warehouse_id=(
-                    balance.warehouse_id
-                ),
-                location_id=(
-                    balance.location_id
-                ),
-                movement_type=(
-                    "PURCHASE_RECEIPT"
-                ),
-                quantity=(
-                    receive_item.quantity
-                ),
-                balance_before=Decimal(
-                    "0"
-                ),
-                balance_after=(
-                    receive_item.quantity
-                ),
-                reference_type=(
-                    "PURCHASE_ORDER"
-                ),
+                warehouse_id=balance.warehouse_id,
+                location_id=balance.location_id,
+                movement_type="PURCHASE_RECEIPT",
+                quantity=receive_item.quantity,
+                balance_before=Decimal("0"),
+                balance_after=receive_item.quantity,
+                reference_type="PURCHASE_ORDER",
                 reference_id=po.id,
-                reference_number=(
-                    po.po_number
-                ),
+                reference_number=po.po_number,
                 remark=(
-                    f"Lot: "
-                    f"{receive_item.lot_no}"
+                    f"Lot: {receive_item.lot_no}"
                 ),
-                created_by_user_id=(
-                    current_user.id
-                ),
+                created_by_user_id=current_user.id,
             )
 
             movement_repo.create(
@@ -453,6 +433,9 @@ def receive_purchase_order_service(
                 )
             )
 
+        # =====================================================
+        # Update PO status
+        # =====================================================
         all_received = all(
             item.received_quantity
             >= item.quantity
@@ -470,6 +453,9 @@ def receive_purchase_order_service(
             po
         )
 
+        # =====================================================
+        # Audit
+        # =====================================================
         audit = AuditLog(
             username=current_user.username,
             action="RECEIVE_PURCHASE_ORDER",
@@ -505,35 +491,52 @@ def cancel_purchase_order_service(
     po_id: int,
     current_user: Any,
 ) -> PurchaseOrderActionResponse:
-    po = po_repo.get_by_id(po_id)
-
-    if po is None:
-        raise PurchaseOrderNotFoundException()
-
-    if po.status == PO_STATUS_RECEIVED:
-        raise PurchaseOrderAlreadyReceivedException()
-
-    if po.status == PO_STATUS_CANCELLED:
-        raise PurchaseOrderCancelledException()
-
-    if po.status != PO_STATUS_PENDING:
-        raise InvalidPurchaseOrderStatusException()
 
     with UnitOfWork(db) as uow:
+        po = po_repo.get_by_id_for_update(
+            po_id
+        )
+
+        if po is None:
+            raise PurchaseOrderNotFoundException()
+
+        if po.status == PO_STATUS_RECEIVED:
+            raise PurchaseOrderAlreadyReceivedException()
+
+        if po.status == PO_STATUS_CANCELLED:
+            raise PurchaseOrderCancelledException()
+
+        # PO ที่รับของไปบางส่วนแล้ว
+        # ไม่ควร Cancel ตรง ๆ เพราะมี stock เข้าไปแล้ว
+        if po.status == PO_STATUS_PARTIALLY_RECEIVED:
+            raise InvalidPurchaseOrderStatusException()
+
+        if po.status != PO_STATUS_PENDING:
+            raise InvalidPurchaseOrderStatusException()
+
         po.status = PO_STATUS_CANCELLED
-        po_repo.update(po)
+
+        po_repo.update(
+            po
+        )
 
         audit = AuditLog(
             username=current_user.username,
             action="CANCEL_PURCHASE_ORDER",
             table_name="purchase_orders",
             record_id=po.id,
-            description=f"Cancel {po.po_number}",
+            description=(
+                f"Cancel {po.po_number}"
+            ),
         )
 
-        db.add(audit)
+        db.add(
+            audit
+        )
 
-    uow.refresh(po)
+    uow.refresh(
+        po
+    )
 
     return PurchaseOrderActionResponse(
         id=po.id,

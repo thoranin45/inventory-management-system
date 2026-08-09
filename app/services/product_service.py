@@ -67,6 +67,8 @@ def create_product_service(
         price=data.price,
         stock_qty=data.stock_qty,
         category_id=data.category_id,
+        track_batch=data.track_batch,
+        track_expiry=data.track_expiry,
         is_active=True,
     )
 
@@ -195,6 +197,27 @@ def update_product_service(
         f"category_id={product.category_id}"
     )
 
+    new_track_batch = (
+        data.track_batch
+        if data.track_batch is not None
+        else product.track_batch
+    )
+
+    new_track_expiry = (
+        data.track_expiry
+        if data.track_expiry is not None
+        else product.track_expiry
+    )
+
+    if new_track_expiry and not new_track_batch:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "track_expiry requires "
+                "track_batch=True"
+            ),
+        )
+    
     update_data = data.model_dump(
         exclude_unset=True
     )

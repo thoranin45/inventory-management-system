@@ -4,7 +4,6 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import (
     BatchStockAdjustmentException,
-    DefaultStorageNotConfiguredException,
     InsufficientBatchStockException,
     InsufficientStockException,
     ProductNotFoundException,
@@ -15,6 +14,9 @@ from app.models import (
     InventoryMovement,
     ProductBatch,
     StockTransaction,
+)
+from app.repositories.inventory_movement_repository import (
+    InventoryMovementRepository,
 )
 from app.repositories.stock_balance_repository import (
     StockBalanceRepository,
@@ -28,9 +30,7 @@ from app.schemas.stock_schema import (
     StockOperationResponse,
     StockOut,
 )
-from app.repositories.inventory_movement_repository import (
-    InventoryMovementRepository,
-)
+
 
 def _deduct_from_batches(
     batches: list[ProductBatch],
@@ -62,40 +62,46 @@ def stock_in_service(
     data: StockIn,
     created_by_user_id: int | None,
 ) -> StockOperationResponse:
-    product = stock_repo.get_active_product(
-        data.product_id
-    )
-
-    if product is None:
-        raise ProductNotFoundException()
-
-    previous_stock = product.stock_qty
 
     with UnitOfWork(db):
+        product = (
+            stock_repo
+            .get_active_product_for_update(
+                data.product_id
+            )
+        )
+
+        if product is None:
+            raise ProductNotFoundException()
+
+        previous_stock = product.stock_qty
+
         balance = (
-            balance_repo.get_default_product_balance(
+            balance_repo
+            .get_default_product_balance_for_update(
                 product.id
             )
         )
 
         if balance is None:
-            storage = balance_repo.get_default_storage()
-
-            if storage is None:
-                raise DefaultStorageNotConfiguredException()
-
             balance = (
-                balance_repo.create_default_product_balance(
+                balance_repo
+                .create_default_product_balance(
                     product.id
                 )
             )
 
-        balance_before = balance.on_hand_qty
+        balance_before = (
+            balance.on_hand_qty
+        )
 
-        product.stock_qty += data.quantity
-        balance.on_hand_qty += data.quantity
+        product.stock_qty += (
+            data.quantity
+        )
 
-        balance_after = balance.on_hand_qty
+        balance.on_hand_qty += (
+            data.quantity
+        )
 
         transaction = StockTransaction(
             product_id=product.id,
@@ -116,12 +122,14 @@ def stock_in_service(
             movement_type="STOCK_IN",
             quantity=data.quantity,
             balance_before=balance_before,
-            balance_after=balance_after,
+            balance_after=balance.on_hand_qty,
             reference_type="STOCK_TRANSACTION",
             reference_id=transaction.id,
             reference_number=None,
             remark=data.remark,
-            created_by_user_id=created_by_user_id,
+            created_by_user_id=(
+                created_by_user_id
+            ),
         )
 
         movement_repo.create(
@@ -145,35 +153,48 @@ def stock_out_fifo_service(
     data: StockOut,
     created_by_user_id: int | None,
 ) -> StockOperationResponse:
-    product = stock_repo.get_active_product(
-        data.product_id
-    )
-
-    if product is None:
-        raise ProductNotFoundException()
-
-    if product.stock_qty < data.quantity:
-        raise InsufficientStockException()
-
-    batches = stock_repo.get_fifo_batches(
-        data.product_id
-    )
-
-    batch_stock_total = sum(
-        (
-            batch.quantity
-            for batch in batches
-        ),
-        Decimal("0"),
-    )
-
-    if batch_stock_total < data.quantity:
-        raise InsufficientBatchStockException()
-
-    previous_stock = product.stock_qty
-    remaining_quantity = data.quantity
 
     with UnitOfWork(db):
+        product = (
+            stock_repo
+            .get_active_product_for_update(
+                data.product_id
+            )
+        )
+
+        if product is None:
+            raise ProductNotFoundException()
+
+        if product.stock_qty < data.quantity:
+            raise InsufficientStockException()
+
+        previous_stock = product.stock_qty
+
+        batches = (
+            stock_repo
+            .get_fifo_batches_for_update(
+                product.id
+            )
+        )
+
+        batch_stock_total = sum(
+            (
+                batch.quantity
+                for batch in batches
+            ),
+            Decimal("0"),
+        )
+
+        if (
+            batch_stock_total
+            < data.quantity
+        ):
+            raise InsufficientBatchStockException()
+
+        remaining_quantity = (
+            data.quantity
+        )
+
         transaction = StockTransaction(
             product_id=product.id,
             transaction_type="OUT_FIFO",
@@ -190,7 +211,8 @@ def stock_out_fifo_service(
                 break
 
             balance = (
-                balance_repo.get_default_batch_balance(
+                balance_repo
+                .get_default_batch_balance_for_update(
                     product_id=product.id,
                     batch_id=batch.id,
                 )
@@ -199,52 +221,81 @@ def stock_out_fifo_service(
             if balance is None:
                 raise StockBalanceNotFoundException()
 
-            quantity_to_deduct = min(
-                batch.quantity,
-                remaining_quantity,
-            )
-
             available_qty = (
                 balance.on_hand_qty
                 - balance.reserved_qty
             )
 
-            if available_qty < quantity_to_deduct:
-                raise InsufficientStockException()
+            if available_qty <= 0:
+                continue
 
-            balance_before = balance.on_hand_qty
+            quantity_to_deduct = min(
+                batch.quantity,
+                available_qty,
+                remaining_quantity,
+            )
 
-            batch.quantity -= quantity_to_deduct
-            balance.on_hand_qty -= quantity_to_deduct
+            if quantity_to_deduct <= 0:
+                continue
 
-            balance_after = balance.on_hand_qty
+            balance_before = (
+                balance.on_hand_qty
+            )
+
+            batch.quantity -= (
+                quantity_to_deduct
+            )
+
+            balance.on_hand_qty -= (
+                quantity_to_deduct
+            )
+
+            product.stock_qty -= (
+                quantity_to_deduct
+            )
 
             movement = InventoryMovement(
                 product_id=product.id,
                 batch_id=batch.id,
-                warehouse_id=balance.warehouse_id,
-                location_id=balance.location_id,
-                movement_type="STOCK_OUT_FIFO",
-                quantity=-quantity_to_deduct,
-                balance_before=balance_before,
-                balance_after=balance_after,
-                reference_type="STOCK_TRANSACTION",
+                warehouse_id=(
+                    balance.warehouse_id
+                ),
+                location_id=(
+                    balance.location_id
+                ),
+                movement_type=(
+                    "STOCK_OUT_FIFO"
+                ),
+                quantity=(
+                    -quantity_to_deduct
+                ),
+                balance_before=(
+                    balance_before
+                ),
+                balance_after=(
+                    balance.on_hand_qty
+                ),
+                reference_type=(
+                    "STOCK_TRANSACTION"
+                ),
                 reference_id=transaction.id,
                 reference_number=None,
                 remark=data.remark,
-                created_by_user_id=created_by_user_id,
+                created_by_user_id=(
+                    created_by_user_id
+                ),
             )
 
             movement_repo.create(
                 movement
             )
 
-            remaining_quantity -= quantity_to_deduct
+            remaining_quantity -= (
+                quantity_to_deduct
+            )
 
         if remaining_quantity > 0:
-            raise InsufficientBatchStockException()
-
-        product.stock_qty -= data.quantity
+            raise InsufficientStockException()
 
     return StockOperationResponse(
         product_id=product.id,
@@ -263,35 +314,48 @@ def stock_out_fefo_service(
     data: StockOut,
     created_by_user_id: int | None,
 ) -> StockOperationResponse:
-    product = stock_repo.get_active_product(
-        data.product_id
-    )
-
-    if product is None:
-        raise ProductNotFoundException()
-
-    if product.stock_qty < data.quantity:
-        raise InsufficientStockException()
-
-    batches = stock_repo.get_fefo_batches(
-        data.product_id
-    )
-
-    batch_stock_total = sum(
-        (
-            batch.quantity
-            for batch in batches
-        ),
-        Decimal("0"),
-    )
-
-    if batch_stock_total < data.quantity:
-        raise InsufficientBatchStockException()
-
-    previous_stock = product.stock_qty
-    remaining_quantity = data.quantity
 
     with UnitOfWork(db):
+        product = (
+            stock_repo
+            .get_active_product_for_update(
+                data.product_id
+            )
+        )
+
+        if product is None:
+            raise ProductNotFoundException()
+
+        if product.stock_qty < data.quantity:
+            raise InsufficientStockException()
+
+        previous_stock = product.stock_qty
+
+        batches = (
+            stock_repo
+            .get_fefo_batches_for_update(
+                product.id
+            )
+        )
+
+        batch_stock_total = sum(
+            (
+                batch.quantity
+                for batch in batches
+            ),
+            Decimal("0"),
+        )
+
+        if (
+            batch_stock_total
+            < data.quantity
+        ):
+            raise InsufficientBatchStockException()
+
+        remaining_quantity = (
+            data.quantity
+        )
+
         transaction = StockTransaction(
             product_id=product.id,
             transaction_type="OUT_FEFO",
@@ -308,7 +372,8 @@ def stock_out_fefo_service(
                 break
 
             balance = (
-                balance_repo.get_default_batch_balance(
+                balance_repo
+                .get_default_batch_balance_for_update(
                     product_id=product.id,
                     batch_id=batch.id,
                 )
@@ -317,52 +382,81 @@ def stock_out_fefo_service(
             if balance is None:
                 raise StockBalanceNotFoundException()
 
-            quantity_to_deduct = min(
-                batch.quantity,
-                remaining_quantity,
-            )
-
             available_qty = (
                 balance.on_hand_qty
                 - balance.reserved_qty
             )
 
-            if available_qty < quantity_to_deduct:
-                raise InsufficientStockException()
+            if available_qty <= 0:
+                continue
 
-            balance_before = balance.on_hand_qty
+            quantity_to_deduct = min(
+                batch.quantity,
+                available_qty,
+                remaining_quantity,
+            )
 
-            batch.quantity -= quantity_to_deduct
-            balance.on_hand_qty -= quantity_to_deduct
+            if quantity_to_deduct <= 0:
+                continue
 
-            balance_after = balance.on_hand_qty
+            balance_before = (
+                balance.on_hand_qty
+            )
+
+            batch.quantity -= (
+                quantity_to_deduct
+            )
+
+            balance.on_hand_qty -= (
+                quantity_to_deduct
+            )
+
+            product.stock_qty -= (
+                quantity_to_deduct
+            )
 
             movement = InventoryMovement(
                 product_id=product.id,
                 batch_id=batch.id,
-                warehouse_id=balance.warehouse_id,
-                location_id=balance.location_id,
-                movement_type="STOCK_OUT_FEFO",
-                quantity=-quantity_to_deduct,
-                balance_before=balance_before,
-                balance_after=balance_after,
-                reference_type="STOCK_TRANSACTION",
+                warehouse_id=(
+                    balance.warehouse_id
+                ),
+                location_id=(
+                    balance.location_id
+                ),
+                movement_type=(
+                    "STOCK_OUT_FEFO"
+                ),
+                quantity=(
+                    -quantity_to_deduct
+                ),
+                balance_before=(
+                    balance_before
+                ),
+                balance_after=(
+                    balance.on_hand_qty
+                ),
+                reference_type=(
+                    "STOCK_TRANSACTION"
+                ),
                 reference_id=transaction.id,
                 reference_number=None,
                 remark=data.remark,
-                created_by_user_id=created_by_user_id,
+                created_by_user_id=(
+                    created_by_user_id
+                ),
             )
 
             movement_repo.create(
                 movement
             )
 
-            remaining_quantity -= quantity_to_deduct
+            remaining_quantity -= (
+                quantity_to_deduct
+            )
 
         if remaining_quantity > 0:
-            raise InsufficientBatchStockException()
-
-        product.stock_qty -= data.quantity
+            raise InsufficientStockException()
 
     return StockOperationResponse(
         product_id=product.id,
@@ -381,42 +475,68 @@ def stock_adjust_service(
     data: StockAdjust,
     created_by_user_id: int | None,
 ) -> StockOperationResponse:
-    product = stock_repo.get_active_product(
-        data.product_id
-    )
-
-    if product is None:
-        raise ProductNotFoundException()
-
-    batch_stock_total = (
-        stock_repo.get_batch_stock_total(
-            data.product_id
-        )
-    )
-
-    if batch_stock_total > 0:
-        raise BatchStockAdjustmentException()
-
-    balance = (
-        balance_repo.get_default_product_balance(
-            product.id
-        )
-    )
-
-    if balance is None:
-        raise StockBalanceNotFoundException()
-
-    previous_stock = product.stock_qty
-    difference = (
-        data.new_quantity
-        - previous_stock
-    )
-
-    balance_before = balance.on_hand_qty
 
     with UnitOfWork(db):
-        product.stock_qty = data.new_quantity
-        balance.on_hand_qty = data.new_quantity
+        product = (
+            stock_repo
+            .get_active_product_for_update(
+                data.product_id
+            )
+        )
+
+        if product is None:
+            raise ProductNotFoundException()
+
+        batch_stock_total = (
+            stock_repo.get_batch_stock_total(
+                data.product_id
+            )
+        )
+
+        if batch_stock_total > 0:
+            raise BatchStockAdjustmentException()
+
+        previous_stock = (
+            product.stock_qty
+        )
+
+        balance = (
+            balance_repo
+            .get_default_product_balance_for_update(
+                product.id
+            )
+        )
+
+        if balance is None:
+            balance = (
+                balance_repo
+                .create_default_product_balance(
+                    product.id
+                )
+            )
+
+        if (
+            data.new_quantity
+            < balance.reserved_qty
+        ):
+            raise InsufficientStockException()
+
+        balance_before = (
+            balance.on_hand_qty
+        )
+
+        difference = (
+            Decimal(str(data.new_quantity))
+            - Decimal(str(balance_before))
+        )
+
+        balance.on_hand_qty = (
+            data.new_quantity
+        )
+
+        product.stock_qty = (
+            data.new_quantity
+        )
 
         transaction = StockTransaction(
             product_id=product.id,
@@ -429,21 +549,30 @@ def stock_adjust_service(
             transaction
         )
 
-        # ถ้า quantity ไม่เปลี่ยน ไม่ควรสร้าง
-        # InventoryMovement เพราะ DB กำหนด
-        # quantity <> 0
         if difference != Decimal("0"):
             movement = InventoryMovement(
                 product_id=product.id,
                 batch_id=None,
-                warehouse_id=balance.warehouse_id,
-                location_id=balance.location_id,
+                warehouse_id=(
+                    balance.warehouse_id
+                ),
+                location_id=(
+                    balance.location_id
+                ),
                 movement_type="STOCK_ADJUST",
                 quantity=difference,
-                balance_before=balance_before,
-                balance_after=balance.on_hand_qty,
-                reference_type="STOCK_TRANSACTION",
-                reference_id=transaction.id,
+                balance_before=(
+                    balance_before
+                ),
+                balance_after=(
+                    balance.on_hand_qty
+                ),
+                reference_type=(
+                    "STOCK_TRANSACTION"
+                ),
+                reference_id=(
+                    transaction.id
+                ),
                 reference_number=None,
                 remark=data.remark,
                 created_by_user_id=(

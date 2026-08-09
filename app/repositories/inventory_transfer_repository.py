@@ -26,6 +26,19 @@ class InventoryTransferRepository:
             .first()
         )
 
+    def get_by_id_for_update(
+        self,
+        transfer_id: int,
+    ) -> InventoryTransfer | None:
+        return (
+            self.db.query(InventoryTransfer)
+            .filter(
+                InventoryTransfer.id == transfer_id
+            )
+            .with_for_update()
+            .first()
+        )
+
     def get_by_transfer_number(
         self,
         transfer_number: str,

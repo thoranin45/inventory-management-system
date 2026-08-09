@@ -43,6 +43,19 @@ class PurchaseOrderRepository:
             .first()
         )
 
+    def get_by_id_for_update(
+        self,
+        po_id: int,
+    ) -> PurchaseOrder | None:
+        return (
+            self.db.query(PurchaseOrder)
+            .filter(
+                PurchaseOrder.id == po_id
+            )
+            .with_for_update()
+            .first()
+        )
+
     def get_all(
         self,
     ) -> list[PurchaseOrder]:
@@ -70,6 +83,22 @@ class PurchaseOrderRepository:
             .all()
         )
 
+    def get_items_for_update(
+        self,
+        po_id: int,
+    ) -> list[PurchaseOrderItem]:
+        return (
+            self.db.query(PurchaseOrderItem)
+            .filter(
+                PurchaseOrderItem.po_id == po_id
+            )
+            .order_by(
+                PurchaseOrderItem.id.asc()
+            )
+            .with_for_update()
+            .all()
+        )
+    
     def update(
         self,
         purchase_order: PurchaseOrder,

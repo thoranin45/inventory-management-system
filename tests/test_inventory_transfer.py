@@ -1027,8 +1027,7 @@ def test_cancel_completed_transfer_fails(
     assert cancel_response.status_code == 409
 
     assert cancel_response.json()["message"] == (
-        "Only draft inventory transfer "
-        "can be cancelled"
+        "Inventory transfer already completed"
     )
 
 def test_cancel_inventory_transfer_twice(

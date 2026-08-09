@@ -1,3 +1,4 @@
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.models import ProductBatch
@@ -56,4 +57,42 @@ class BatchRepository:
                 ProductBatch.id.asc(),
             )
             .all()
+        )
+
+    def create_if_lot_not_exists(
+        self,
+        batch: ProductBatch,
+    ) -> ProductBatch | None:
+        statement = (
+            insert(ProductBatch)
+            .values(
+                product_id=batch.product_id,
+                lot_no=batch.lot_no,
+                mfg_date=batch.mfg_date,
+                expiry_date=batch.expiry_date,
+                quantity=batch.quantity,
+            )
+            .on_conflict_do_nothing(
+                index_elements=[
+                    ProductBatch.lot_no,
+                ]
+            )
+            .returning(
+                ProductBatch.id
+            )
+        )
+
+        batch_id = self.db.execute(
+            statement
+        ).scalar_one_or_none()
+
+        if batch_id is None:
+            return None
+
+        return (
+            self.db.query(ProductBatch)
+            .filter(
+                ProductBatch.id == batch_id
+            )
+            .first()
         )

@@ -24,6 +24,11 @@ class Product(Base):
     __tablename__ = "products"
 
     __table_args__ = (
+        CheckConstraint(
+            "stock_qty >= 0",
+            name="ck_products_stock_qty_non_negative",
+        ),
+
         Index(
             "ix_products_category_id",
             "category_id",
@@ -512,32 +517,46 @@ class User(Base):
 class ProductBatch(Base):
     __tablename__ = "product_batches"
 
-    id = Column(Integer, primary_key=True)
+    __table_args__ = (
+        CheckConstraint(
+            "quantity >= 0",
+            name="ck_product_batches_quantity_non_negative",
+        ),
+    )
+
+    id = Column(
+        Integer,
+        primary_key=True,
+    )
 
     product_id = Column(
         Integer,
-        ForeignKey("products.id")
+        ForeignKey("products.id"),
+        nullable=False,
     )
 
-    lot_no = Column(String(100), unique=True)
+    lot_no = Column(
+        String(100),
+        unique=True,
+    )
 
     mfg_date = Column(Date)
 
     expiry_date = Column(Date)
 
     quantity = Column(
-    Numeric(18, 3),
-    nullable=False,
+        Numeric(18, 3),
+        nullable=False,
     )
 
     created_at = Column(
         DateTime,
-        server_default=func.now()
+        server_default=func.now(),
     )
 
     product = relationship(
         "Product",
-        back_populates="batches"
+        back_populates="batches",
     )
 
 
@@ -584,6 +603,27 @@ class PurchaseOrder(Base):
 
 class PurchaseOrderItem(Base):
     __tablename__ = "purchase_order_items"
+
+    __table_args__ = (
+        CheckConstraint(
+            "quantity > 0",
+            name="ck_purchase_order_items_quantity_positive",
+        ),
+        CheckConstraint(
+            "received_quantity >= 0",
+            name=(
+                "ck_purchase_order_items_"
+                "received_quantity_non_negative"
+            ),
+        ),
+        CheckConstraint(
+            "received_quantity <= quantity",
+            name=(
+                "ck_purchase_order_items_"
+                "received_quantity_lte_quantity"
+            ),
+        ),
+    )
 
     id = Column(
         Integer,
@@ -667,6 +707,13 @@ class SalesOrder(Base):
 class SalesOrderItem(Base):
     __tablename__ = "sales_order_items"
 
+    __table_args__ = (
+        CheckConstraint(
+            "quantity > 0",
+            name="ck_sales_order_items_quantity_positive",
+        ),
+    )
+
     id = Column(Integer, primary_key=True)
 
     sales_order_id = Column(
@@ -688,6 +735,16 @@ class SalesOrderItem(Base):
 
 class SalesOrderBatchAllocation(Base):
     __tablename__ = "sales_order_batch_allocations"
+
+    __table_args__ = (
+        CheckConstraint(
+            "quantity > 0",
+            name=(
+                "ck_sales_order_batch_allocations_"
+                "quantity_positive"
+            ),
+        ),
+    )
 
     id = Column(Integer, primary_key=True)
 
