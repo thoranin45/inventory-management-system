@@ -22,7 +22,7 @@ from app.services.batch_service import (
 )
 
 
-router = APIRouter(
+router = APIRouter(dependencies=[Depends(require_warehouse)],
     prefix="/batches",
     tags=["Batches"],
 )

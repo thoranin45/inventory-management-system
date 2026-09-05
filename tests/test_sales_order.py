@@ -279,21 +279,21 @@ def test_create_sales_order_success(
 
 
 def test_sales_order_uses_fefo(
-    client: TestClient,
+    warehouse_client: TestClient,
     admin_headers: dict[str, str],
 ) -> None:
     customer = _create_customer(
-        client,
+        warehouse_client,
         admin_headers,
     )
 
     product = _create_product(
-        client,
+        warehouse_client,
         admin_headers,
     )
 
     later_batch = _create_batch(
-        client,
+        warehouse_client,
         admin_headers,
         product["id"],
         quantity=10,
@@ -301,7 +301,7 @@ def test_sales_order_uses_fefo(
     )
 
     earlier_batch = _create_batch(
-        client,
+        warehouse_client,
         admin_headers,
         product["id"],
         quantity=8,
@@ -309,7 +309,7 @@ def test_sales_order_uses_fefo(
     )
 
     sales_order = _create_sales_order(
-        client,
+        warehouse_client,
         admin_headers,
         customer["id"],
         product["id"],
@@ -317,7 +317,7 @@ def test_sales_order_uses_fefo(
         unit_price=100,
     )
 
-    detail_response = client.get(
+    detail_response = warehouse_client.get(
         (
             "/api/v1/sales-orders/"
             f"{sales_order['sales_order_id']}"
@@ -362,12 +362,12 @@ def test_sales_order_uses_fefo(
     # Allocation reserves stock only.
     # Batch physical quantities remain unchanged.
     earlier_after = _get_batch(
-        client,
+        warehouse_client,
         earlier_batch["id"],
     )
 
     later_after = _get_batch(
-        client,
+        warehouse_client,
         later_batch["id"],
     )
 
@@ -505,21 +505,21 @@ def test_duplicate_product_validation(
 
 
 def test_get_sales_orders_and_detail(
-    client: TestClient,
+    warehouse_client: TestClient,
     admin_headers: dict[str, str],
 ) -> None:
     customer = _create_customer(
-        client,
+        warehouse_client,
         admin_headers,
     )
 
     product = _create_product(
-        client,
+        warehouse_client,
         admin_headers,
     )
 
     _create_batch(
-        client,
+        warehouse_client,
         admin_headers,
         product["id"],
         quantity=10,
@@ -527,7 +527,7 @@ def test_get_sales_orders_and_detail(
     )
 
     created = _create_sales_order(
-        client,
+        warehouse_client,
         admin_headers,
         customer["id"],
         product["id"],
@@ -535,7 +535,7 @@ def test_get_sales_orders_and_detail(
         unit_price=199,
     )
 
-    list_response = client.get(
+    list_response = warehouse_client.get(
         "/api/v1/sales-orders/"
     )
 
@@ -557,7 +557,7 @@ def test_get_sales_orders_and_detail(
         sales_order_ids
     )
 
-    detail_response = client.get(
+    detail_response = warehouse_client.get(
         (
             "/api/v1/sales-orders/"
             f"{created['sales_order_id']}"
@@ -582,21 +582,21 @@ def test_get_sales_orders_and_detail(
 
 
 def test_cancel_sales_order_restores_stock(
-    client: TestClient,
+    warehouse_client: TestClient,
     admin_headers: dict[str, str],
 ) -> None:
     customer = _create_customer(
-        client,
+        warehouse_client,
         admin_headers,
     )
 
     product = _create_product(
-        client,
+        warehouse_client,
         admin_headers,
     )
 
     batch = _create_batch(
-        client,
+        warehouse_client,
         admin_headers,
         product["id"],
         quantity=10,
@@ -604,7 +604,7 @@ def test_cancel_sales_order_restores_stock(
     )
 
     created = _create_sales_order(
-        client,
+        warehouse_client,
         admin_headers,
         customer["id"],
         product["id"],
@@ -612,7 +612,7 @@ def test_cancel_sales_order_restores_stock(
         unit_price=100,
     )
 
-    cancel_response = client.put(
+    cancel_response = warehouse_client.put(
         (
             "/api/v1/sales-orders/"
             f"{created['sales_order_id']}"
@@ -633,13 +633,13 @@ def test_cancel_sales_order_restores_stock(
     assert data["status"] == "CANCELLED"
 
     product_after = _get_product(
-        client,
+        warehouse_client,
         admin_headers,
         product["id"],
     )
 
     batch_after = _get_batch(
-        client,
+        warehouse_client,
         batch["id"],
     )
 
@@ -719,21 +719,21 @@ def test_cancel_sales_order_twice(
 
 
 def test_partial_sales_return(
-    client: TestClient,
+    warehouse_client: TestClient,
     admin_headers: dict[str, str],
 ) -> None:
     customer = _create_customer(
-        client,
+        warehouse_client,
         admin_headers,
     )
 
     product = _create_product(
-        client,
+        warehouse_client,
         admin_headers,
     )
 
     batch = _create_batch(
-        client,
+        warehouse_client,
         admin_headers,
         product["id"],
         quantity=10,
@@ -741,7 +741,7 @@ def test_partial_sales_return(
     )
 
     created = _create_sales_order(
-        client,
+        warehouse_client,
         admin_headers,
         customer["id"],
         product["id"],
@@ -751,12 +751,12 @@ def test_partial_sales_return(
 
     # Return is allowed only after shipment.
     _ship_sales_order(
-        client,
+        warehouse_client,
         admin_headers,
         created["sales_order_id"],
     )
 
-    response = client.post(
+    response = warehouse_client.post(
         (
             "/api/v1/sales-orders/"
             f"{created['sales_order_id']}"
@@ -805,13 +805,13 @@ def test_partial_sales_return(
     ) == Decimal("4.000")
 
     product_after = _get_product(
-        client,
+        warehouse_client,
         admin_headers,
         product["id"],
     )
 
     batch_after = _get_batch(
-        client,
+        warehouse_client,
         batch["id"],
     )
 
@@ -1007,21 +1007,21 @@ def test_create_sales_order_without_token(
 
 
 def test_generate_sales_order_invoice(
-    client: TestClient,
+    warehouse_client: TestClient,
     admin_headers: dict[str, str],
 ) -> None:
     customer = _create_customer(
-        client,
+        warehouse_client,
         admin_headers,
     )
 
     product = _create_product(
-        client,
+        warehouse_client,
         admin_headers,
     )
 
     _create_batch(
-        client,
+        warehouse_client,
         admin_headers,
         product["id"],
         quantity=10,
@@ -1029,7 +1029,7 @@ def test_generate_sales_order_invoice(
     )
 
     created = _create_sales_order(
-        client,
+        warehouse_client,
         admin_headers,
         customer["id"],
         product["id"],
@@ -1048,7 +1048,7 @@ def test_generate_sales_order_invoice(
     ) / f"{so_number}.pdf"
 
     try:
-        response = client.get(
+        response = warehouse_client.get(
             (
                 "/api/v1/sales-orders/"
                 f"{sales_order_id}/invoice"
@@ -1092,9 +1092,9 @@ def test_generate_sales_order_invoice(
 
 
 def test_generate_invoice_sales_order_not_found(
-    client: TestClient,
+    warehouse_client: TestClient,
 ) -> None:
-    response = client.get(
+    response = warehouse_client.get(
         (
             "/api/v1/sales-orders/"
             "999999999/invoice"

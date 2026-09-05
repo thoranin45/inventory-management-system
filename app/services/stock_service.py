@@ -11,6 +11,8 @@ from app.core.exceptions import (
 )
 from app.core.unit_of_work import UnitOfWork
 from app.models import (
+    AuditLog,
+    User,
     InventoryMovement,
     ProductBatch,
     StockTransaction,
@@ -473,7 +475,7 @@ def stock_adjust_service(
     balance_repo: StockBalanceRepository,
     movement_repo: InventoryMovementRepository,
     data: StockAdjust,
-    created_by_user_id: int | None,
+    created_by_user_id: int,
 ) -> StockOperationResponse:
 
     with UnitOfWork(db):
@@ -548,6 +550,22 @@ def stock_adjust_service(
         stock_repo.create_transaction(
             transaction
         )
+
+        actor = db.get(User, created_by_user_id) if created_by_user_id is not None else None
+        if actor is None:
+            raise ValueError("Authenticated adjustment actor is required")
+
+        db.add(AuditLog(
+            username=actor.username,
+            action="STOCK_ADJUST",
+            table_name="stock_transactions",
+            record_id=transaction.id,
+            description=(
+                f"Product {product.id}; actor_id={actor.id}; "
+                f"before={balance_before}; after={data.new_quantity}; "
+                f"reason={data.remark}"
+            ),
+        ))
 
         if difference != Decimal("0"):
             movement = InventoryMovement(

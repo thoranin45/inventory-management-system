@@ -1,3 +1,5 @@
+from app.core.dependencies import require_admin
+from app.core.dependencies import require_warehouse
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
@@ -17,7 +19,7 @@ from app.services.stock_balance_service import (
     get_stock_balances_service,
 )
 
-router = APIRouter(
+router = APIRouter(dependencies=[Depends(require_warehouse)],
     prefix="/stock-balances",
     tags=["Stock Balances"],
 )
@@ -56,7 +58,9 @@ def get_product_stock_balances(
     "",
     response_model=StockBalanceResponse,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_admin)],
 )
+# Phase 2: replace raw balance mutation with audited business operations.
 def create_stock_balance(
     data: StockBalanceCreate,
     db: Session = Depends(get_db),
@@ -72,6 +76,7 @@ def create_stock_balance(
 
 @router.patch(
     "/{balance_id}",
+    dependencies=[Depends(require_admin)],
     response_model=StockBalanceResponse,
 )
 def adjust_stock_balance(

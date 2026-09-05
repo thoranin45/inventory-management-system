@@ -188,16 +188,16 @@ def _get_stock_history(
 
 
 def test_stock_in_success(
-    client: TestClient,
+    warehouse_client: TestClient,
     admin_headers: dict[str, str],
 ) -> None:
     product = _create_product(
-        client=client,
+        client=warehouse_client,
         admin_headers=admin_headers,
         initial_stock=0,
     )
 
-    response = client.post(
+    response = warehouse_client.post(
         "/api/v1/stock/in",
         headers=admin_headers,
         json={
@@ -224,7 +224,7 @@ def test_stock_in_success(
     assert _decimal(data["difference"]) == Decimal("20.000")
 
     updated_product = _get_product(
-        client=client,
+        client=warehouse_client,
         admin_headers=admin_headers,
         product_id=product["id"],
     )
@@ -233,7 +233,7 @@ def test_stock_in_success(
         updated_product["stock_qty"]
     ) == Decimal("20.000")
 
-    history = _get_stock_history(client)
+    history = _get_stock_history(warehouse_client)
 
     transaction = next(
         (
@@ -277,16 +277,16 @@ def test_stock_in_product_not_found(
 
 
 def test_stock_out_fifo_success(
-    client: TestClient,
+    warehouse_client: TestClient,
     admin_headers: dict[str, str],
 ) -> None:
     product = _create_product(
-        client=client,
+        client=warehouse_client,
         admin_headers=admin_headers,
     )
 
     first_batch = _create_batch(
-        client=client,
+        client=warehouse_client,
         admin_headers=admin_headers,
         product_id=product["id"],
         quantity=10,
@@ -294,14 +294,14 @@ def test_stock_out_fifo_success(
     )
 
     second_batch = _create_batch(
-        client=client,
+        client=warehouse_client,
         admin_headers=admin_headers,
         product_id=product["id"],
         quantity=20,
         expiry_days=365,
     )
 
-    response = client.post(
+    response = warehouse_client.post(
         "/api/v1/stock/out-fifo",
         headers=admin_headers,
         json={
@@ -327,12 +327,12 @@ def test_stock_out_fifo_success(
     assert _decimal(data["difference"]) == Decimal("-15.000")
 
     first_batch_after = _get_batch_by_id(
-        client=client,
+        client=warehouse_client,
         batch_id=first_batch["id"],
     )
 
     second_batch_after = _get_batch_by_id(
-        client=client,
+        client=warehouse_client,
         batch_id=second_batch["id"],
     )
 
@@ -344,7 +344,7 @@ def test_stock_out_fifo_success(
         second_batch_after["quantity"]
     ) == Decimal("15.000")
 
-    history = _get_stock_history(client)
+    history = _get_stock_history(warehouse_client)
 
     transaction = next(
         (
@@ -400,16 +400,16 @@ def test_stock_out_fifo_insufficient_stock(
 
 
 def test_stock_out_fefo_success(
-    client: TestClient,
+    warehouse_client: TestClient,
     admin_headers: dict[str, str],
 ) -> None:
     product = _create_product(
-        client=client,
+        client=warehouse_client,
         admin_headers=admin_headers,
     )
 
     later_expiry_batch = _create_batch(
-        client=client,
+        client=warehouse_client,
         admin_headers=admin_headers,
         product_id=product["id"],
         quantity=20,
@@ -417,14 +417,14 @@ def test_stock_out_fefo_success(
     )
 
     earlier_expiry_batch = _create_batch(
-        client=client,
+        client=warehouse_client,
         admin_headers=admin_headers,
         product_id=product["id"],
         quantity=10,
         expiry_days=30,
     )
 
-    response = client.post(
+    response = warehouse_client.post(
         "/api/v1/stock/out-fefo",
         headers=admin_headers,
         json={
@@ -450,12 +450,12 @@ def test_stock_out_fefo_success(
     assert _decimal(data["difference"]) == Decimal("-15.000")
 
     earlier_batch_after = _get_batch_by_id(
-        client=client,
+        client=warehouse_client,
         batch_id=earlier_expiry_batch["id"],
     )
 
     later_batch_after = _get_batch_by_id(
-        client=client,
+        client=warehouse_client,
         batch_id=later_expiry_batch["id"],
     )
 
@@ -467,7 +467,7 @@ def test_stock_out_fefo_success(
         later_batch_after["quantity"]
     ) == Decimal("15.000")
 
-    history = _get_stock_history(client)
+    history = _get_stock_history(warehouse_client)
 
     transaction = next(
         (
@@ -630,15 +630,15 @@ def test_stock_adjust_with_active_batch_fails(
 
 
 def test_stock_history_sorted_latest_first(
-    client: TestClient,
+    warehouse_client: TestClient,
     admin_headers: dict[str, str],
 ) -> None:
     product = _create_product(
-        client=client,
+        client=warehouse_client,
         admin_headers=admin_headers,
     )
 
-    first_response = client.post(
+    first_response = warehouse_client.post(
         "/api/v1/stock/in",
         headers=admin_headers,
         json={
@@ -650,7 +650,7 @@ def test_stock_history_sorted_latest_first(
 
     assert first_response.status_code == 200
 
-    second_response = client.post(
+    second_response = warehouse_client.post(
         "/api/v1/stock/in",
         headers=admin_headers,
         json={
@@ -662,7 +662,7 @@ def test_stock_history_sorted_latest_first(
 
     assert second_response.status_code == 200
 
-    history = _get_stock_history(client)
+    history = _get_stock_history(warehouse_client)
 
     product_transactions = [
         item

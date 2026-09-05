@@ -1,3 +1,4 @@
+from app.core.dependencies import require_warehouse
 from decimal import Decimal
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -11,7 +12,7 @@ from fastapi.responses import FileResponse
 from openpyxl import Workbook
 import os
 
-router = APIRouter(prefix="/reports", tags=["Reports"])
+router = APIRouter(dependencies=[Depends(require_warehouse)], prefix="/reports", tags=["Reports"])
 
 
 @router.get("/stock-balance")

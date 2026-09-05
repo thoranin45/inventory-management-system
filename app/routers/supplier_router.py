@@ -1,3 +1,4 @@
+from app.core.dependencies import require_warehouse
 from fastapi import APIRouter, Depends, status
 
 from app.core.dependencies import (
@@ -21,7 +22,7 @@ from app.services.supplier_service import (
 )
 
 
-router = APIRouter(
+router = APIRouter(dependencies=[Depends(require_warehouse)],
     prefix="/suppliers",
     tags=["Suppliers"],
 )

@@ -117,7 +117,7 @@ def _create_balance(
 
 
 def test_create_stock_balance_success(
-    client: TestClient,
+    admin_client: TestClient,
     admin_headers: dict[str, str],
     main_storage: tuple[int, int],
 ) -> None:
@@ -125,12 +125,12 @@ def test_create_stock_balance_success(
     warehouse_id, location_id = main_storage
 
     product = _create_product(
-        client,
+        admin_client,
         admin_headers,
     )
 
     balance = _create_balance(
-        client,
+        admin_client,
         product["id"],
         warehouse_id,
         location_id,
@@ -152,7 +152,7 @@ def test_create_stock_balance_success(
 
 
 def test_get_stock_balances(
-    client: TestClient,
+    admin_client: TestClient,
     admin_headers: dict[str, str],
     main_storage: tuple[int, int],
 ) -> None:
@@ -160,18 +160,18 @@ def test_get_stock_balances(
     warehouse_id, location_id = main_storage
 
     product = _create_product(
-        client,
+        admin_client,
         admin_headers,
     )
 
     created = _create_balance(
-        client,
+        admin_client,
         product["id"],
         warehouse_id,
         location_id,
     )
 
-    response = client.get(
+    response = admin_client.get(
         "/api/v1/stock-balances"
     )
 
@@ -190,7 +190,7 @@ def test_get_stock_balances(
 
 
 def test_get_product_stock_balances(
-    client: TestClient,
+    admin_client: TestClient,
     admin_headers: dict[str, str],
     main_storage: tuple[int, int],
 ) -> None:
@@ -198,18 +198,18 @@ def test_get_product_stock_balances(
     warehouse_id, location_id = main_storage
 
     product = _create_product(
-        client,
+        admin_client,
         admin_headers,
     )
 
     created = _create_balance(
-        client,
+        admin_client,
         product["id"],
         warehouse_id,
         location_id,
     )
 
-    response = client.get(
+    response = admin_client.get(
         (
             "/api/v1/stock-balances/"
             f"product/{product['id']}"
@@ -232,7 +232,7 @@ def test_get_product_stock_balances(
 
 
 def test_duplicate_stock_balance_fails(
-    client: TestClient,
+    admin_client: TestClient,
     admin_headers: dict[str, str],
     main_storage: tuple[int, int],
 ) -> None:
@@ -240,18 +240,18 @@ def test_duplicate_stock_balance_fails(
     warehouse_id, location_id = main_storage
 
     product = _create_product(
-        client,
+        admin_client,
         admin_headers,
     )
 
     _create_balance(
-        client,
+        admin_client,
         product["id"],
         warehouse_id,
         location_id,
     )
 
-    response = client.post(
+    response = admin_client.post(
         "/api/v1/stock-balances",
         json={
             "product_id": product["id"],
@@ -273,7 +273,7 @@ def test_duplicate_stock_balance_fails(
 
 
 def test_reserved_greater_than_on_hand_fails(
-    client: TestClient,
+    admin_client: TestClient,
     admin_headers: dict[str, str],
     main_storage: tuple[int, int],
 ) -> None:
@@ -281,11 +281,11 @@ def test_reserved_greater_than_on_hand_fails(
     warehouse_id, location_id = main_storage
 
     product = _create_product(
-        client,
+        admin_client,
         admin_headers,
     )
 
-    response = client.post(
+    response = admin_client.post(
         "/api/v1/stock-balances",
         json={
             "product_id": product["id"],
@@ -306,7 +306,7 @@ def test_reserved_greater_than_on_hand_fails(
 
 
 def test_adjust_stock_balance_success(
-    client: TestClient,
+    admin_client: TestClient,
     admin_headers: dict[str, str],
     main_storage: tuple[int, int],
 ) -> None:
@@ -314,12 +314,12 @@ def test_adjust_stock_balance_success(
     warehouse_id, location_id = main_storage
 
     product = _create_product(
-        client,
+        admin_client,
         admin_headers,
     )
 
     balance = _create_balance(
-        client,
+        admin_client,
         product["id"],
         warehouse_id,
         location_id,
@@ -327,7 +327,7 @@ def test_adjust_stock_balance_success(
         reserved_qty="20.000",
     )
 
-    response = client.patch(
+    response = admin_client.patch(
         (
             "/api/v1/stock-balances/"
             f"{balance['id']}"
@@ -356,7 +356,7 @@ def test_adjust_stock_balance_success(
 
 
 def test_adjust_reserved_greater_than_on_hand_fails(
-    client: TestClient,
+    admin_client: TestClient,
     admin_headers: dict[str, str],
     main_storage: tuple[int, int],
 ) -> None:
@@ -364,12 +364,12 @@ def test_adjust_reserved_greater_than_on_hand_fails(
     warehouse_id, location_id = main_storage
 
     product = _create_product(
-        client,
+        admin_client,
         admin_headers,
     )
 
     balance = _create_balance(
-        client,
+        admin_client,
         product["id"],
         warehouse_id,
         location_id,
@@ -377,7 +377,7 @@ def test_adjust_reserved_greater_than_on_hand_fails(
         reserved_qty="10.000",
     )
 
-    response = client.patch(
+    response = admin_client.patch(
         (
             "/api/v1/stock-balances/"
             f"{balance['id']}"
@@ -396,10 +396,10 @@ def test_adjust_reserved_greater_than_on_hand_fails(
 
 
 def test_adjust_missing_stock_balance(
-    client: TestClient,
+    admin_client: TestClient,
 ) -> None:
 
-    response = client.patch(
+    response = admin_client.patch(
         "/api/v1/stock-balances/999999999",
         json={
             "on_hand_qty": "10.000",
@@ -413,9 +413,9 @@ def test_adjust_missing_stock_balance(
     )
 
 def test_get_stock_balances_missing_product(
-    client: TestClient,
+    admin_client: TestClient,
 ) -> None:
-    response = client.get(
+    response = admin_client.get(
         "/api/v1/stock-balances/product/999999999"
     )
 
@@ -427,18 +427,18 @@ def test_get_stock_balances_missing_product(
 
 
 def test_create_stock_balance_missing_warehouse(
-    client: TestClient,
+    admin_client: TestClient,
     admin_headers: dict[str, str],
     main_storage: tuple[int, int],
 ) -> None:
     _, location_id = main_storage
 
     product = _create_product(
-        client,
+        admin_client,
         admin_headers,
     )
 
-    response = client.post(
+    response = admin_client.post(
         "/api/v1/stock-balances",
         json={
             "product_id": product["id"],
@@ -458,18 +458,18 @@ def test_create_stock_balance_missing_warehouse(
 
 
 def test_create_stock_balance_missing_location(
-    client: TestClient,
+    admin_client: TestClient,
     admin_headers: dict[str, str],
     main_storage: tuple[int, int],
 ) -> None:
     warehouse_id, _ = main_storage
 
     product = _create_product(
-        client,
+        admin_client,
         admin_headers,
     )
 
-    response = client.post(
+    response = admin_client.post(
         "/api/v1/stock-balances",
         json={
             "product_id": product["id"],
@@ -489,18 +489,18 @@ def test_create_stock_balance_missing_location(
 
 
 def test_non_batch_product_rejects_batch(
-    client: TestClient,
+    admin_client: TestClient,
     admin_headers: dict[str, str],
     main_storage: tuple[int, int],
 ) -> None:
     warehouse_id, location_id = main_storage
 
     product = _create_product(
-        client,
+        admin_client,
         admin_headers,
     )
 
-    response = client.post(
+    response = admin_client.post(
         "/api/v1/stock-balances",
         json={
             "product_id": product["id"],

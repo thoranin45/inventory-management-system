@@ -278,21 +278,21 @@ def test_create_batch_quantity_zero(
 
 
 def test_get_batches(
-    client: TestClient,
+    warehouse_client: TestClient,
     admin_headers: dict[str, str],
 ) -> None:
     product = _create_product(
-        client=client,
+        client=warehouse_client,
         admin_headers=admin_headers,
     )
 
     created = _create_batch(
-        client=client,
+        client=warehouse_client,
         admin_headers=admin_headers,
         product_id=product["id"],
     )
 
-    response = client.get(
+    response = warehouse_client.get(
         "/api/v1/batches"
     )
 
@@ -315,11 +315,11 @@ def test_get_batches(
 
 
 def test_get_expiring_batches(
-    client: TestClient,
+    warehouse_client: TestClient,
     admin_headers: dict[str, str],
 ) -> None:
     product = _create_product(
-        client=client,
+        client=warehouse_client,
         admin_headers=admin_headers,
     )
 
@@ -328,7 +328,7 @@ def test_get_expiring_batches(
         expiry_date=date.today() + timedelta(days=30),
     )
 
-    create_response = client.post(
+    create_response = warehouse_client.post(
         "/api/v1/batches",
         headers=admin_headers,
         json=payload,
@@ -340,7 +340,7 @@ def test_get_expiring_batches(
         create_response.json()["data"]["batch"]["id"]
     )
 
-    response = client.get(
+    response = warehouse_client.get(
         "/api/v1/batches/expiring"
     )
 

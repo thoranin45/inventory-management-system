@@ -1,3 +1,4 @@
+from app.core.dependencies import require_warehouse
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
@@ -9,7 +10,7 @@ from barcode.writer import ImageWriter
 from app.database import get_db
 from app.models import Product
 
-router = APIRouter(prefix="/codes", tags=["Codes"])
+router = APIRouter(dependencies=[Depends(require_warehouse)], prefix="/codes", tags=["Codes"])
 
 
 @router.get("/products/{product_id}/barcode")

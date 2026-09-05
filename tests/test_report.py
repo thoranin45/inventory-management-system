@@ -129,17 +129,17 @@ def _create_sales_order(
 
 
 def test_stock_balance_report(
-    client: TestClient,
+    warehouse_client: TestClient,
     admin_headers: dict[str, str],
 ) -> None:
     product = _create_product(
-        client,
+        warehouse_client,
         admin_headers,
         stock_qty=8,
         price=12.50,
     )
 
-    response = client.get(
+    response = warehouse_client.get(
         "/api/v1/reports/stock-balance"
     )
 
@@ -164,10 +164,10 @@ def test_stock_balance_report(
 
 
 def test_sales_summary_report(
-    client: TestClient,
+    warehouse_client: TestClient,
     admin_headers: dict[str, str],
 ) -> None:
-    before = client.get(
+    before = warehouse_client.get(
         "/api/v1/reports/sales-summary"
     )
 
@@ -176,17 +176,17 @@ def test_sales_summary_report(
     before_data = before.json()
 
     customer = _create_customer(
-        client,
+        warehouse_client,
         admin_headers,
     )
 
     product = _create_product(
-        client,
+        warehouse_client,
         admin_headers,
     )
 
     _create_batch(
-        client,
+        warehouse_client,
         admin_headers,
         product["id"],
         quantity=10,
@@ -194,13 +194,13 @@ def test_sales_summary_report(
     )
 
     _create_sales_order(
-        client,
+        warehouse_client,
         admin_headers,
         customer["id"],
         product["id"],
     )
 
-    after = client.get(
+    after = warehouse_client.get(
         "/api/v1/reports/sales-summary"
     )
 
@@ -218,15 +218,15 @@ def test_sales_summary_report(
 
 
 def test_stock_movement_report(
-    client: TestClient,
+    warehouse_client: TestClient,
     admin_headers: dict[str, str],
 ) -> None:
     product = _create_product(
-        client,
+        warehouse_client,
         admin_headers,
     )
 
-    stock_response = client.post(
+    stock_response = warehouse_client.post(
         "/api/v1/stock/in",
         headers=admin_headers,
         json={
@@ -238,7 +238,7 @@ def test_stock_movement_report(
 
     assert stock_response.status_code == 200
 
-    response = client.get(
+    response = warehouse_client.get(
         "/api/v1/reports/stock-movement"
     )
 
@@ -265,22 +265,22 @@ def test_stock_movement_report(
 
 
 def test_low_stock_report(
-    client: TestClient,
+    warehouse_client: TestClient,
     admin_headers: dict[str, str],
 ) -> None:
     low_product = _create_product(
-        client,
+        warehouse_client,
         admin_headers,
         stock_qty=4,
     )
 
     high_product = _create_product(
-        client,
+        warehouse_client,
         admin_headers,
         stock_qty=20,
     )
 
-    response = client.get(
+    response = warehouse_client.get(
         "/api/v1/reports/low-stock?threshold=10"
     )
 
@@ -302,17 +302,17 @@ def test_low_stock_report(
 
 
 def test_expiring_report_excludes_expired(
-    client: TestClient,
+    warehouse_client: TestClient,
     admin_headers: dict[str, str],
     db_session: Session,
 ) -> None:
     product = _create_product(
-        client,
+        warehouse_client,
         admin_headers,
     )
 
     expiring_batch = _create_batch(
-        client,
+        warehouse_client,
         admin_headers,
         product["id"],
         quantity=5,
@@ -320,7 +320,7 @@ def test_expiring_report_excludes_expired(
     )
 
     future_batch = _create_batch(
-        client,
+        warehouse_client,
         admin_headers,
         product["id"],
         quantity=5,
@@ -346,7 +346,7 @@ def test_expiring_report_excludes_expired(
     db_session.commit()
     db_session.refresh(expired_batch)
 
-    response = client.get(
+    response = warehouse_client.get(
         "/api/v1/reports/expiring?days=90"
     )
 
@@ -365,21 +365,21 @@ def test_expiring_report_excludes_expired(
 
 
 def test_sales_chart(
-    client: TestClient,
+    warehouse_client: TestClient,
     admin_headers: dict[str, str],
 ) -> None:
     customer = _create_customer(
-        client,
+        warehouse_client,
         admin_headers,
     )
 
     product = _create_product(
-        client,
+        warehouse_client,
         admin_headers,
     )
 
     _create_batch(
-        client,
+        warehouse_client,
         admin_headers,
         product["id"],
         quantity=10,
@@ -387,13 +387,13 @@ def test_sales_chart(
     )
 
     _create_sales_order(
-        client,
+        warehouse_client,
         admin_headers,
         customer["id"],
         product["id"],
     )
 
-    response = client.get(
+    response = warehouse_client.get(
         "/api/v1/reports/chart/sales"
     )
 
@@ -411,22 +411,22 @@ def test_sales_chart(
 
 
 def test_stock_chart_sorted_descending(
-    client: TestClient,
+    warehouse_client: TestClient,
     admin_headers: dict[str, str],
 ) -> None:
     _create_product(
-        client,
+        warehouse_client,
         admin_headers,
         stock_qty=5,
     )
 
     _create_product(
-        client,
+        warehouse_client,
         admin_headers,
         stock_qty=25,
     )
 
-    response = client.get(
+    response = warehouse_client.get(
         "/api/v1/reports/chart/stock"
     )
 
@@ -446,16 +446,16 @@ def test_stock_chart_sorted_descending(
 
 
 def test_expiry_chart_sorted_ascending(
-    client: TestClient,
+    warehouse_client: TestClient,
     admin_headers: dict[str, str],
 ) -> None:
     product = _create_product(
-        client,
+        warehouse_client,
         admin_headers,
     )
 
     _create_batch(
-        client,
+        warehouse_client,
         admin_headers,
         product["id"],
         quantity=5,
@@ -463,14 +463,14 @@ def test_expiry_chart_sorted_ascending(
     )
 
     _create_batch(
-        client,
+        warehouse_client,
         admin_headers,
         product["id"],
         quantity=5,
         expiry_days=20,
     )
 
-    response = client.get(
+    response = warehouse_client.get(
         "/api/v1/reports/chart/expiry"
     )
 
@@ -514,11 +514,11 @@ def _assert_excel_response(
 
 
 def test_export_stock_report(
-    client: TestClient,
+    warehouse_client: TestClient,
     admin_headers: dict[str, str],
 ) -> None:
     _create_product(
-        client,
+        warehouse_client,
         admin_headers,
         stock_qty=5,
         price=25,
@@ -529,7 +529,7 @@ def test_export_stock_report(
     )
 
     try:
-        response = client.get(
+        response = warehouse_client.get(
             "/api/v1/reports/export/stock"
         )
 
@@ -554,21 +554,21 @@ def test_export_stock_report(
 
 
 def test_export_sales_report(
-    client: TestClient,
+    warehouse_client: TestClient,
     admin_headers: dict[str, str],
 ) -> None:
     customer = _create_customer(
-        client,
+        warehouse_client,
         admin_headers,
     )
 
     product = _create_product(
-        client,
+        warehouse_client,
         admin_headers,
     )
 
     _create_batch(
-        client,
+        warehouse_client,
         admin_headers,
         product["id"],
         quantity=10,
@@ -576,7 +576,7 @@ def test_export_sales_report(
     )
 
     _create_sales_order(
-        client,
+        warehouse_client,
         admin_headers,
         customer["id"],
         product["id"],
@@ -587,7 +587,7 @@ def test_export_sales_report(
     )
 
     try:
-        response = client.get(
+        response = warehouse_client.get(
             "/api/v1/reports/export/sales"
         )
 
@@ -610,11 +610,11 @@ def test_export_sales_report(
 
 
 def test_export_low_stock_report(
-    client: TestClient,
+    warehouse_client: TestClient,
     admin_headers: dict[str, str],
 ) -> None:
     _create_product(
-        client,
+        warehouse_client,
         admin_headers,
         stock_qty=3,
     )
@@ -624,7 +624,7 @@ def test_export_low_stock_report(
     )
 
     try:
-        response = client.get(
+        response = warehouse_client.get(
             (
                 "/api/v1/reports/"
                 "export/low-stock?threshold=10"
@@ -652,16 +652,16 @@ def test_export_low_stock_report(
 
 
 def test_export_expiring_report(
-    client: TestClient,
+    warehouse_client: TestClient,
     admin_headers: dict[str, str],
 ) -> None:
     product = _create_product(
-        client,
+        warehouse_client,
         admin_headers,
     )
 
     _create_batch(
-        client,
+        warehouse_client,
         admin_headers,
         product["id"],
         quantity=5,
@@ -673,7 +673,7 @@ def test_export_expiring_report(
     )
 
     try:
-        response = client.get(
+        response = warehouse_client.get(
             (
                 "/api/v1/reports/"
                 "export/expiring?days=90"

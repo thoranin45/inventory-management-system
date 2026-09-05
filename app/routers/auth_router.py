@@ -9,7 +9,9 @@ from fastapi import (
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
+from app.core.dependencies import require_admin
 from app.core.security import (
+    validate_user_role,
     create_access_token,
     hash_password,
     verify_password,
@@ -75,6 +77,7 @@ def authenticate_user(
             detail="Inactive user",
         )
 
+    validate_user_role(db_user)
     return db_user
 
 
@@ -111,6 +114,7 @@ def generate_token(
 @router.post(
     "/register",
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_admin)],
 )
 def register_user(
     user: UserRegister,

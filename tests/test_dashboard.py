@@ -96,27 +96,27 @@ def _get_dashboard(
 
 
 def test_dashboard_summary(
-    client: TestClient,
+    warehouse_client: TestClient,
     admin_headers: dict[str, str],
 ) -> None:
-    before = _get_dashboard(client)
+    before = _get_dashboard(warehouse_client)
 
     product = _create_product(
-        client=client,
+        client=warehouse_client,
         admin_headers=admin_headers,
         stock_qty=0,
         price=120,
     )
 
     _create_batch(
-        client=client,
+        client=warehouse_client,
         admin_headers=admin_headers,
         product_id=product["id"],
         quantity=20,
         expiry_days=180,
     )
 
-    out_response = client.post(
+    out_response = warehouse_client.post(
         "/api/v1/stock/out-fefo",
         headers=admin_headers,
         json={
@@ -128,7 +128,7 @@ def test_dashboard_summary(
 
     assert out_response.status_code == 200
 
-    after = _get_dashboard(client)
+    after = _get_dashboard(warehouse_client)
 
     assert after["total_products"] == (
         before["total_products"] + 1
@@ -150,22 +150,22 @@ def test_dashboard_summary(
 
 
 def test_dashboard_low_stock_products(
-    client: TestClient,
+    warehouse_client: TestClient,
     admin_headers: dict[str, str],
 ) -> None:
     low_stock_product = _create_product(
-        client=client,
+        client=warehouse_client,
         admin_headers=admin_headers,
         stock_qty=4,
     )
 
     high_stock_product = _create_product(
-        client=client,
+        client=warehouse_client,
         admin_headers=admin_headers,
         stock_qty=25,
     )
 
-    response = client.get(
+    response = warehouse_client.get(
         "/api/v1/dashboard/low-stock"
     )
 
@@ -193,15 +193,15 @@ def test_dashboard_low_stock_products(
 
 
 def test_dashboard_recent_transactions(
-    client: TestClient,
+    warehouse_client: TestClient,
     admin_headers: dict[str, str],
 ) -> None:
     product = _create_product(
-        client=client,
+        client=warehouse_client,
         admin_headers=admin_headers,
     )
 
-    first_response = client.post(
+    first_response = warehouse_client.post(
         "/api/v1/stock/in",
         headers=admin_headers,
         json={
@@ -213,7 +213,7 @@ def test_dashboard_recent_transactions(
 
     assert first_response.status_code == 200
 
-    second_response = client.post(
+    second_response = warehouse_client.post(
         "/api/v1/stock/in",
         headers=admin_headers,
         json={
@@ -225,7 +225,7 @@ def test_dashboard_recent_transactions(
 
     assert second_response.status_code == 200
 
-    response = client.get(
+    response = warehouse_client.get(
         "/api/v1/dashboard/recent-transactions"
     )
 
@@ -260,17 +260,17 @@ def test_dashboard_recent_transactions(
 
 
 def test_dashboard_stock_summary(
-    client: TestClient,
+    warehouse_client: TestClient,
     admin_headers: dict[str, str],
 ) -> None:
     product = _create_product(
-        client=client,
+        client=warehouse_client,
         admin_headers=admin_headers,
         stock_qty=8,
         price=12.50,
     )
 
-    response = client.get(
+    response = warehouse_client.get(
         "/api/v1/dashboard/stock-summary"
     )
 
@@ -303,22 +303,22 @@ def test_dashboard_stock_summary(
 
 
 def test_dashboard_top_stock(
-    client: TestClient,
+    warehouse_client: TestClient,
     admin_headers: dict[str, str],
 ) -> None:
     lower_product = _create_product(
-        client=client,
+        client=warehouse_client,
         admin_headers=admin_headers,
         stock_qty=40,
     )
 
     higher_product = _create_product(
-        client=client,
+        client=warehouse_client,
         admin_headers=admin_headers,
         stock_qty=80,
     )
 
-    response = client.get(
+    response = warehouse_client.get(
         "/api/v1/dashboard/top-stock"
     )
 
@@ -361,10 +361,10 @@ def test_dashboard_top_stock(
 
 
 def test_dashboard_total_stock_value(
-    client: TestClient,
+    warehouse_client: TestClient,
     admin_headers: dict[str, str],
 ) -> None:
-    before_response = client.get(
+    before_response = warehouse_client.get(
         "/api/v1/dashboard/stock-value"
     )
 
@@ -377,13 +377,13 @@ def test_dashboard_total_stock_value(
     )
 
     _create_product(
-        client=client,
+        client=warehouse_client,
         admin_headers=admin_headers,
         stock_qty=6,
         price=25.00,
     )
 
-    after_response = client.get(
+    after_response = warehouse_client.get(
         "/api/v1/dashboard/stock-value"
     )
 
@@ -404,16 +404,16 @@ def test_dashboard_total_stock_value(
 
 
 def test_dashboard_expiring_soon(
-    client: TestClient,
+    warehouse_client: TestClient,
     admin_headers: dict[str, str],
 ) -> None:
     product = _create_product(
-        client=client,
+        client=warehouse_client,
         admin_headers=admin_headers,
     )
 
     expiring_batch = _create_batch(
-        client=client,
+        client=warehouse_client,
         admin_headers=admin_headers,
         product_id=product["id"],
         quantity=10,
@@ -421,14 +421,14 @@ def test_dashboard_expiring_soon(
     )
 
     non_expiring_batch = _create_batch(
-        client=client,
+        client=warehouse_client,
         admin_headers=admin_headers,
         product_id=product["id"],
         quantity=10,
         expiry_days=180,
     )
 
-    response = client.get(
+    response = warehouse_client.get(
         "/api/v1/dashboard/expiring-soon"
     )
 
@@ -453,12 +453,12 @@ def test_dashboard_expiring_soon(
 
 
 def test_dashboard_expired_batches(
-    client: TestClient,
+    warehouse_client: TestClient,
     admin_headers: dict[str, str],
     db_session: Session,
 ) -> None:
     product = _create_product(
-        client=client,
+        client=warehouse_client,
         admin_headers=admin_headers,
     )
 
@@ -476,7 +476,7 @@ def test_dashboard_expired_batches(
     db_session.commit()
     db_session.refresh(expired_batch)
 
-    response = client.get(
+    response = warehouse_client.get(
         "/api/v1/dashboard/expired"
     )
 

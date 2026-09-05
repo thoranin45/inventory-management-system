@@ -25,7 +25,7 @@ from app.services.stock_service import (
 )
 
 
-router = APIRouter(
+router = APIRouter(dependencies=[Depends(require_warehouse)],
     prefix="/stock",
     tags=["Stock"],
 )

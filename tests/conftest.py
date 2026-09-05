@@ -1,3 +1,4 @@
+import logging
 import os
 from collections.abc import Generator
 from pathlib import Path
@@ -8,6 +9,9 @@ from dotenv import load_dotenv
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
+
+# Keep test logging out of the production logs directory.
+logging.getLogger("inventory_system").addHandler(logging.NullHandler())
 
 from app.core.security import hash_password
 from app.database import get_db
@@ -141,6 +145,12 @@ def prepare_test_database():
     )
 
 
+@pytest.fixture(autouse=True)
+def isolated_generated_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Keep report, invoice, and image output inside each test's temp directory."""
+    monkeypatch.chdir(tmp_path)
+
+
 @pytest.fixture
 def db_session() -> Generator[Session, None, None]:
     db = TestingSessionLocal()
@@ -203,3 +213,46 @@ def admin_headers(
             f"Bearer {access_token}"
         )
     }
+
+
+@pytest.fixture
+def warehouse_user(db_session: Session) -> User:
+    user = User(
+        username=f"warehouse_test_{uuid4().hex[:8]}",
+        password_hash=hash_password("WarehouseTest123!"),
+        role="WAREHOUSE",
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    return user
+
+
+@pytest.fixture
+def warehouse_headers(
+    client: TestClient,
+    warehouse_user: User,
+) -> dict[str, str]:
+    response = client.post(
+        "/api/v1/auth/token",
+        data={
+            "username": warehouse_user.username,
+            "password": "WarehouseTest123!",
+        },
+    )
+    assert response.status_code == 200
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+
+@pytest.fixture
+def admin_client(admin_headers: dict[str, str]) -> Generator[TestClient, None, None]:
+    with TestClient(app, headers=admin_headers) as test_client:
+        yield test_client
+
+
+@pytest.fixture
+def warehouse_client(
+    warehouse_headers: dict[str, str],
+) -> Generator[TestClient, None, None]:
+    with TestClient(app, headers=warehouse_headers) as test_client:
+        yield test_client

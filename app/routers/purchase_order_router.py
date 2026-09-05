@@ -1,3 +1,4 @@
+from app.core.dependencies import require_warehouse
 from fastapi import APIRouter, Depends, status
 
 from app.core.dependencies import (
@@ -30,7 +31,7 @@ from app.services.purchase_order_service import (
 )
 
 
-router = APIRouter(
+router = APIRouter(dependencies=[Depends(require_warehouse)],
     prefix="/purchase-orders",
     tags=["Purchase Orders"],
 )
@@ -127,7 +128,7 @@ def receive_purchase_order(
     balance_repo: StockBalanceRepositoryDependency,
     movement_repo: InventoryMovementRepositoryDependency,
     current_user: User = Depends(
-        require_admin
+        require_warehouse
     ),
 ) -> ApiResponse[
     PurchaseOrderReceiveResponse

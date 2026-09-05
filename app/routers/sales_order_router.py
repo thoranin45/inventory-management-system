@@ -1,3 +1,4 @@
+from app.core.dependencies import require_warehouse
 import os
 
 from fastapi import (
@@ -40,7 +41,7 @@ from app.services.sales_order_service import (
 )
 
 
-router = APIRouter(
+router = APIRouter(dependencies=[Depends(require_warehouse)],
     prefix="/sales-orders",
     tags=["Sales Orders"],
 )
@@ -291,7 +292,7 @@ def cancel_sales_order(
     db: DatabaseSession,
     sales_order_repo: SalesOrderRepositoryDependency,
     balance_repo: StockBalanceRepositoryDependency,
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_warehouse),
 ):
     result = cancel_sales_order_service(
         db=db,
@@ -314,7 +315,7 @@ def return_sales_order_items(
     sales_order_repo: SalesOrderRepositoryDependency,
     balance_repo: StockBalanceRepositoryDependency,
     movement_repo: InventoryMovementRepositoryDependency,
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_warehouse),
 ):
     result = return_sales_order_items_service(
         db=db,
@@ -338,7 +339,7 @@ def ship_sales_order(
     sales_order_repo: SalesOrderRepositoryDependency,
     balance_repo: StockBalanceRepositoryDependency,
     movement_repo: InventoryMovementRepositoryDependency,
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_warehouse),
 ):
     result = ship_sales_order_service(
         db=db,

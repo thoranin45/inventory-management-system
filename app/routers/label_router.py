@@ -1,3 +1,4 @@
+from app.core.dependencies import require_warehouse
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 
@@ -17,7 +18,7 @@ import os
 from app.database import get_db
 from app.models import Product
 
-router = APIRouter(
+router = APIRouter(dependencies=[Depends(require_warehouse)],
     prefix="/labels",
     tags=["Labels"]
 )

@@ -69,6 +69,14 @@ def create_access_token(
     )
 
 
+def validate_user_role(user: User) -> None:
+    if str(user.role).upper() not in {"ADMIN", "WAREHOUSE"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account role is not authorized",
+        )
+
+
 def get_current_user(
     token: Annotated[
         str,

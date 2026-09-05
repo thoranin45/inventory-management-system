@@ -320,21 +320,21 @@ def test_create_po_duplicate_product_validation(
 
 
 def test_get_purchase_orders_and_detail(
-    client: TestClient,
+    warehouse_client: TestClient,
     admin_headers: dict[str, str],
 ) -> None:
     supplier = _create_supplier(
-        client,
+        warehouse_client,
         admin_headers,
     )
 
     product = _create_product(
-        client,
+        warehouse_client,
         admin_headers,
     )
 
     created = _create_purchase_order(
-        client,
+        warehouse_client,
         admin_headers,
         supplier["id"],
         product["id"],
@@ -342,7 +342,7 @@ def test_get_purchase_orders_and_detail(
         unit_price=200,
     )
 
-    list_response = client.get(
+    list_response = warehouse_client.get(
         "/api/v1/purchase-orders"
     )
 
@@ -363,7 +363,7 @@ def test_get_purchase_orders_and_detail(
 
     assert created["id"] in po_ids
 
-    detail_response = client.get(
+    detail_response = warehouse_client.get(
         f"/api/v1/purchase-orders/{created['id']}"
     )
 
@@ -378,9 +378,9 @@ def test_get_purchase_orders_and_detail(
 
 
 def test_get_missing_purchase_order(
-    client: TestClient,
+    warehouse_client: TestClient,
 ) -> None:
-    response = client.get(
+    response = warehouse_client.get(
         "/api/v1/purchase-orders/999999999"
     )
 
@@ -395,21 +395,21 @@ def test_get_missing_purchase_order(
 
 
 def test_receive_purchase_order_success(
-    client: TestClient,
+    warehouse_client: TestClient,
     admin_headers: dict[str, str],
 ) -> None:
     supplier = _create_supplier(
-        client,
+        warehouse_client,
         admin_headers,
     )
 
     product = _create_product(
-        client,
+        warehouse_client,
         admin_headers,
     )
 
     created = _create_purchase_order(
-        client,
+        warehouse_client,
         admin_headers,
         supplier["id"],
         product["id"],
@@ -422,7 +422,7 @@ def test_receive_purchase_order_success(
         quantity=12,
     )
 
-    response = client.post(
+    response = warehouse_client.post(
         (
             f"/api/v1/purchase-orders/"
             f"{created['id']}/receive"
@@ -460,7 +460,7 @@ def test_receive_purchase_order_success(
     ) == Decimal("12.000")
 
     product_after = _get_product(
-        client,
+        warehouse_client,
         admin_headers,
         product["id"],
     )
@@ -469,7 +469,7 @@ def test_receive_purchase_order_success(
         product_after["stock_qty"]
     ) == Decimal("12.000")
 
-    batches = _get_batches(client)
+    batches = _get_batches(warehouse_client)
 
     created_batch = next(
         (
@@ -489,7 +489,7 @@ def test_receive_purchase_order_success(
         payload["items"][0]["lot_no"]
     )
 
-    history = _get_stock_history(client)
+    history = _get_stock_history(warehouse_client)
 
     transaction = next(
         (

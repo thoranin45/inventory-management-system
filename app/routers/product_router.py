@@ -1,5 +1,9 @@
+from app.core.dependencies import require_admin
+from app.models import User
+from app.core.dependencies import require_warehouse
 from fastapi import (
     APIRouter,
+    Depends,
     File,
     Query,
     UploadFile,
@@ -35,7 +39,7 @@ from app.services.product_service import (
 )
 
 
-router = APIRouter(
+router = APIRouter(dependencies=[Depends(require_warehouse)],
     prefix="/products",
     tags=["Products"],
 )
@@ -51,7 +55,7 @@ def create_product(
     db: DatabaseSession,
     product_repo: ProductRepositoryDependency,
     category_repo: CategoryRepositoryDependency,
-    current_user: CurrentUser,
+    current_user: User = Depends(require_admin),
 ) -> ApiResponse[ProductResponse]:
     product = create_product_service(
         db=db,
@@ -189,7 +193,7 @@ def update_product(
     db: DatabaseSession,
     product_repo: ProductRepositoryDependency,
     category_repo: CategoryRepositoryDependency,
-    current_user: CurrentUser,
+    current_user: User = Depends(require_admin),
 ) -> ApiResponse[ProductResponse]:
     product = update_product_service(
         db=db,
@@ -214,7 +218,7 @@ def delete_product(
     product_id: int,
     db: DatabaseSession,
     product_repo: ProductRepositoryDependency,
-    current_user: CurrentUser,
+    current_user: User = Depends(require_admin),
 ) -> ApiResponse[ProductResponse]:
     product = delete_product_service(
         db=db,
@@ -237,7 +241,7 @@ def restore_product(
     product_id: int,
     db: DatabaseSession,
     product_repo: ProductRepositoryDependency,
-    current_user: CurrentUser,
+    current_user: User = Depends(require_admin),
 ) -> ApiResponse[ProductResponse]:
     product = restore_product_service(
         db=db,
@@ -260,7 +264,7 @@ def upload_product_image(
     product_id: int,
     db: DatabaseSession,
     product_repo: ProductRepositoryDependency,
-    current_user: CurrentUser,
+    current_user: User = Depends(require_admin),
     file: UploadFile = File(...),
 ) -> ApiResponse[ProductResponse]:
     product = upload_product_image_service(

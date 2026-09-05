@@ -1,4 +1,5 @@
-from fastapi import APIRouter
+from app.core.dependencies import require_warehouse
+from fastapi import APIRouter, Depends
 
 from app.core.dependencies import (
     DashboardRepositoryDependency,
@@ -16,7 +17,7 @@ from app.services.dashboard_service import (
 )
 
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_warehouse)], )
 
 
 @router.get("/dashboard")

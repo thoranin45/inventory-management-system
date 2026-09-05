@@ -43,9 +43,9 @@ async def app_exception_handler(
 ) -> JSONResponse:
     logger.warning(
         "APP_EXCEPTION | "
-        f"path={request.url.path} | "
+        f"route={getattr(request.scope.get('route'), 'path', 'unmatched')} | "
         f"status={exc.status_code} | "
-        f"message={exc.message}"
+        "type=business_error"
     )
 
     return _error_response(
@@ -61,9 +61,9 @@ async def http_exception_handler(
 ) -> JSONResponse:
     logger.warning(
         "HTTP_EXCEPTION | "
-        f"path={request.url.path} | "
+        f"route={getattr(request.scope.get('route'), 'path', 'unmatched')} | "
         f"status={exc.status_code} | "
-        f"message={exc.detail}"
+        "type=http_error"
     )
 
     if isinstance(exc.detail, str):
@@ -94,8 +94,8 @@ async def validation_exception_handler(
 ) -> JSONResponse:
     logger.warning(
         "VALIDATION_ERROR | "
-        f"path={request.url.path} | "
-        f"errors={exc.errors()}"
+        f"route={getattr(request.scope.get('route'), 'path', 'unmatched')} | "
+        f"error_types={[error.get('type') for error in exc.errors()]}"
     )
 
     errors: list[ErrorDetail] = []
@@ -128,9 +128,9 @@ async def integrity_error_handler(
     request: Request,
     exc: IntegrityError,
 ) -> JSONResponse:
-    logger.exception(
+    logger.warning(
         "INTEGRITY_ERROR | "
-        f"path={request.url.path}"
+        f"route={getattr(request.scope.get('route'), 'path', 'unmatched')}"
     )
 
     error_text = str(exc.orig).lower()

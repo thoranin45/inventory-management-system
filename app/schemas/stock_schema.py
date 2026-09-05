@@ -1,7 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class StockIn(BaseModel):
@@ -40,10 +40,14 @@ class StockAdjust(BaseModel):
         ge=0,
     )
 
-    remark: str | None = Field(
-        default=None,
-        max_length=255,
-    )
+    remark: str = Field(min_length=1, max_length=255)
+
+    @field_validator("remark")
+    @classmethod
+    def require_reason(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Adjustment reason must not be blank")
+        return value.strip()
 
 
 class StockOperationResponse(BaseModel):
