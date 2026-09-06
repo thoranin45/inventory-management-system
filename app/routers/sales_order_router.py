@@ -27,7 +27,7 @@ from app.core.response import success_response
 from app.core.quantity import quantity_text
 from app.models import User
 from app.schemas.sales_order_schema import (
-    SalesOrderCreate,
+    SalesOrderCreate, CompleteFulfillment, FulfillmentScan,
 )
 from app.schemas.sales_return_schema import (
     SalesReturnCreate,
@@ -39,6 +39,7 @@ from app.services.sales_order_service import (
     get_sales_orders_service,
     return_sales_order_items_service,
     ship_sales_order_service,
+    confirm_sales_order_service, fulfillment_transition_service, scan_fulfillment_service,
 )
 
 
@@ -355,3 +356,68 @@ def ship_sales_order(
         "Sales Order Shipped",
         result,
     )
+
+# Fulfillment actions retain the router's Phase 1 authentication boundary.
+
+
+@router.post("/{sales_order_id}/confirm")
+def confirm_sales_order(sales_order_id: int, db: DatabaseSession,
+                        sales_order_repo: SalesOrderRepositoryDependency,
+                        balance_repo: StockBalanceRepositoryDependency,
+                        current_user: User = Depends(require_admin)):
+    return success_response("Sales Order Confirmed", confirm_sales_order_service(
+        db, sales_order_repo, balance_repo, sales_order_id, current_user))
+
+
+@router.post("/{sales_order_id}/start-picking")
+def start_picking(sales_order_id: int, db: DatabaseSession,
+                  sales_order_repo: SalesOrderRepositoryDependency,
+                  balance_repo: StockBalanceRepositoryDependency,
+                  current_user: User = Depends(require_warehouse)):
+    return success_response("Picking Started", fulfillment_transition_service(
+        db, sales_order_repo, balance_repo, sales_order_id, current_user, "start-picking"))
+
+
+@router.post("/{sales_order_id}/complete-picking")
+def complete_picking(sales_order_id: int, data: CompleteFulfillment, db: DatabaseSession,
+                     sales_order_repo: SalesOrderRepositoryDependency,
+                     balance_repo: StockBalanceRepositoryDependency,
+                     current_user: User = Depends(require_warehouse)):
+    return success_response("Picking Completed", fulfillment_transition_service(
+        db, sales_order_repo, balance_repo, sales_order_id, current_user, "complete-picking", data))
+
+
+@router.post("/{sales_order_id}/complete-packing")
+def complete_packing(sales_order_id: int, data: CompleteFulfillment, db: DatabaseSession,
+                     sales_order_repo: SalesOrderRepositoryDependency,
+                     balance_repo: StockBalanceRepositoryDependency,
+                     current_user: User = Depends(require_warehouse)):
+    return success_response("Packing Completed", fulfillment_transition_service(
+        db, sales_order_repo, balance_repo, sales_order_id, current_user, "complete-packing", data))
+
+
+@router.post("/{sales_order_id}/scan-pick")
+def scan_pick(sales_order_id: int, data: FulfillmentScan, db: DatabaseSession,
+              sales_order_repo: SalesOrderRepositoryDependency,
+              balance_repo: StockBalanceRepositoryDependency,
+              current_user: User = Depends(require_warehouse)):
+    return success_response("Picking Progress", scan_fulfillment_service(
+        db, sales_order_repo, balance_repo, sales_order_id, current_user, data))
+
+
+@router.post("/{sales_order_id}/scan-pack")
+def scan_pack(sales_order_id: int, data: FulfillmentScan, db: DatabaseSession,
+              sales_order_repo: SalesOrderRepositoryDependency,
+              balance_repo: StockBalanceRepositoryDependency,
+              current_user: User = Depends(require_warehouse)):
+    return success_response("Packing Progress", scan_fulfillment_service(
+        db, sales_order_repo, balance_repo, sales_order_id, current_user, data, packing=True))
+
+
+@router.post("/{sales_order_id}/complete")
+def complete_sales_order(sales_order_id: int, db: DatabaseSession,
+                         sales_order_repo: SalesOrderRepositoryDependency,
+                         balance_repo: StockBalanceRepositoryDependency,
+                         current_user: User = Depends(require_admin)):
+    return success_response("Sales Order Completed", fulfillment_transition_service(
+        db, sales_order_repo, balance_repo, sales_order_id, current_user, "complete"))

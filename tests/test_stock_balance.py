@@ -126,6 +126,9 @@ def _create_balance(
             "items": [{"product_id": product_id, "quantity": reserved_qty, "unit_price": "1"}],
         })
         assert reservation.status_code == 200
+        order_id = reservation.json()["data"]["sales_order_id"]
+        confirmation = client.post(f"/api/v1/sales-orders/{order_id}/confirm")
+        assert confirmation.status_code == 200
     return next(row for row in client.get(f"/api/v1/stock-balances/product/{product_id}").json()
                 if row["warehouse_id"] == warehouse_id and row["location_id"] == location_id)
 

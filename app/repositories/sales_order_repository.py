@@ -75,7 +75,7 @@ class SalesOrderRepository:
             .filter(
                 Product.id == product_id
             )
-            .with_for_update()
+            .populate_existing().with_for_update()
             .first()
         )
     # =========================================================
@@ -120,7 +120,7 @@ class SalesOrderRepository:
             .filter(
                 SalesOrder.id == sales_order_id
             )
-            .with_for_update()
+            .populate_existing().with_for_update()
             .first()
         )
     
@@ -224,7 +224,7 @@ class SalesOrderRepository:
             .filter(
                 ProductBatch.id == batch_id
             )
-            .with_for_update()
+            .populate_existing().with_for_update()
             .first()
         )
     
@@ -320,3 +320,8 @@ class SalesOrderRepository:
         )
 
         return transaction is not None
+
+    def get_order_allocations(self, sales_order_id):
+        return (self.db.query(SalesOrderBatchAllocation)
+                .filter(SalesOrderBatchAllocation.sales_order_id == sales_order_id)
+                .order_by(SalesOrderBatchAllocation.id).all())

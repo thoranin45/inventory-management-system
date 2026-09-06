@@ -262,10 +262,10 @@ def test_create_sales_order_success(
     assert data["so_number"].startswith(
         "SO-"
     )
-    assert data["status"] == "CONFIRMED"
+    assert data["status"] == "DRAFT"
     assert data["total_amount"] == 627.50
 
-    # Creating an SO only reserves stock.
+    # Creating a draft has no inventory effect.
     # Physical stock must not decrease yet.
     product_after = _get_product(
         client,
@@ -316,6 +316,7 @@ def test_sales_order_uses_fefo(
         quantity=12,
         unit_price=100,
     )
+    _confirm_sales_order(warehouse_client, admin_headers, sales_order['sales_order_id'])
 
     detail_response = warehouse_client.get(
         (
@@ -456,6 +457,9 @@ def test_create_sales_order_insufficient_stock(
         },
     )
 
+    assert response.status_code == 200
+    order_id = response.json()["data"]["sales_order_id"]
+    response = client.post(f"/api/v1/sales-orders/{order_id}/confirm", headers=admin_headers)
     assert response.status_code == 409
 
     body = response.json()
@@ -534,6 +538,7 @@ def test_get_sales_orders_and_detail(
         quantity=2,
         unit_price=199,
     )
+    _confirm_sales_order(warehouse_client, admin_headers, created['sales_order_id'])
 
     list_response = warehouse_client.get(
         "/api/v1/sales-orders/"
@@ -611,6 +616,7 @@ def test_cancel_sales_order_restores_stock(
         quantity=4,
         unit_price=100,
     )
+    _confirm_sales_order(warehouse_client, admin_headers, created['sales_order_id'])
 
     cancel_response = warehouse_client.put(
         (
@@ -685,6 +691,7 @@ def test_cancel_sales_order_twice(
         quantity=2,
         unit_price=100,
     )
+    _confirm_sales_order(client, admin_headers, created['sales_order_id'])
 
     url = (
         "/api/v1/sales-orders/"
@@ -748,8 +755,14 @@ def test_partial_sales_return(
         quantity=6,
         unit_price=100,
     )
+    _confirm_sales_order(warehouse_client, admin_headers, created['sales_order_id'])
 
     # Return is allowed only after shipment.
+    _ready_sales_order(
+        warehouse_client,
+        admin_headers,
+        created["sales_order_id"],
+    )
     _ship_sales_order(
         warehouse_client,
         admin_headers,
@@ -858,8 +871,14 @@ def test_return_quantity_exceeds_remaining(
         quantity=3,
         unit_price=100,
     )
+    _confirm_sales_order(client, admin_headers, created['sales_order_id'])
 
     # Order must be completed before return.
+    _ready_sales_order(
+        client,
+        admin_headers,
+        created["sales_order_id"],
+    )
     _ship_sales_order(
         client,
         admin_headers,
@@ -928,8 +947,14 @@ def test_cancel_after_return_fails(
         quantity=4,
         unit_price=100,
     )
+    _confirm_sales_order(client, admin_headers, created['sales_order_id'])
 
     # Complete the order before returning.
+    _ready_sales_order(
+        client,
+        admin_headers,
+        created["sales_order_id"],
+    )
     _ship_sales_order(
         client,
         admin_headers,
@@ -1036,6 +1061,7 @@ def test_generate_sales_order_invoice(
         quantity=2,
         unit_price=199,
     )
+    _confirm_sales_order(warehouse_client, admin_headers, created['sales_order_id'])
 
     sales_order_id = (
         created["sales_order_id"]
@@ -1110,3 +1136,24 @@ def test_generate_invoice_sales_order_not_found(
     assert body["message"] == (
         "Sales Order not found"
     )
+
+def _confirm_sales_order(client, headers, order_id):
+    response = client.post(f"/api/v1/sales-orders/{order_id}/confirm", headers=headers)
+    assert response.status_code == 200, response.text
+    return response.json()["data"]
+
+
+def _fulfillment_payload(client, headers, order_id):
+    response = client.get(f"/api/v1/sales-orders/{order_id}", headers=headers)
+    assert response.status_code == 200
+    return {"allocations": [{"allocation_id": a["id"], "quantity": a["quantity"]}
+                            for i in response.json()["data"]["items"] for a in i["fulfillment_allocations"]]}
+
+
+def _ready_sales_order(client, headers, order_id):
+    response = client.post(f"/api/v1/sales-orders/{order_id}/start-picking", headers=headers)
+    assert response.status_code == 200, response.text
+    payload = _fulfillment_payload(client, headers, order_id)
+    for action in ("complete-picking", "complete-packing"):
+        response = client.post(f"/api/v1/sales-orders/{order_id}/{action}", headers=headers, json=payload)
+        assert response.status_code == 200, response.text

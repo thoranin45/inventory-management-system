@@ -29,6 +29,8 @@ def test_warehouse_can_ship_return_and_cancel(client, admin_headers, warehouse_h
     order = sales._create_sales_order(
         client, admin_headers, customer["id"], product["id"], quantity=6, unit_price=100,
     )
+    sales._confirm_sales_order(client, admin_headers, order['sales_order_id'])
+    sales._ready_sales_order(client, warehouse_headers, order["sales_order_id"])
     sales._ship_sales_order(client, warehouse_headers, order["sales_order_id"])
     response = client.post(
         f"/api/v1/sales-orders/{order['sales_order_id']}/return", headers=warehouse_headers,
@@ -38,6 +40,7 @@ def test_warehouse_can_ship_return_and_cancel(client, admin_headers, warehouse_h
     second_order = sales._create_sales_order(
         client, admin_headers, customer["id"], product["id"], quantity=2, unit_price=100,
     )
+    sales._confirm_sales_order(client, admin_headers, second_order['sales_order_id'])
     response = client.put(
         f"/api/v1/sales-orders/{second_order['sales_order_id']}/cancel", headers=warehouse_headers,
     )

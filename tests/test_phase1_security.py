@@ -51,7 +51,7 @@ def _admin_only(method: str, path: str) -> bool:
         return True
     if path.startswith("/api/v1/purchase-orders"):
         return not path.endswith("/receive")
-    return path == "/api/v1/sales-orders/"
+    return path == "/api/v1/sales-orders/" or (path.startswith("/api/v1/sales-orders/") and path.endswith(("/confirm", "/complete")))
 
 
 def _missing_resource_url(path: str) -> str:

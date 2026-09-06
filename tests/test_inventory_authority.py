@@ -155,6 +155,7 @@ def test_sales_reservation_shipment_return_use_balances(client, admin_headers, d
     product = sales._create_product(client, admin_headers)
     batch = sales._create_batch(client, admin_headers, product["id"], quantity=10, expiry_days=90)
     order = sales._create_sales_order(client, admin_headers, customer["id"], product["id"], quantity=4, unit_price=1)
+    sales._confirm_sales_order(client, admin_headers, order['sales_order_id'])
     balance = db_session.query(StockBalance).filter_by(product_id=product["id"]).one()
     assert balance.on_hand_qty == 10
     assert balance.reserved_qty == 4
@@ -162,6 +163,7 @@ def test_sales_reservation_shipment_return_use_balances(client, admin_headers, d
     db_session.get(Product, product["id"]).stock_qty = 0
     db_session.get(ProductBatch, batch["id"]).quantity = 0
     db_session.commit()
+    sales._ready_sales_order(client, admin_headers, order["sales_order_id"])
     sales._ship_sales_order(client, admin_headers, order["sales_order_id"])
     assert_aggregates(db_session, product["id"])
     assert balance.on_hand_qty == 6

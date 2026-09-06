@@ -24,7 +24,7 @@ def migration_engine():
         yield engine
 
 
-def upgrade(engine, revision="head"):
+def upgrade(engine, revision=HEAD):
     with engine.begin() as connection:
         command.upgrade(migration_config(connection), revision)
 
@@ -56,9 +56,9 @@ def snapshot(connection):
 
 
 def test_fresh_install_and_metadata_parity(migration_engine):
-    upgrade(migration_engine)
+    upgrade(migration_engine, "head")
     with migration_engine.connect() as connection:
-        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == HEAD
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "e41a00000001"
         inspector = inspect(connection)
         assert set(inspector.get_table_names()) == set(Base.metadata.tables) | {"alembic_version"}
         migration_context = MigrationContext.configure(connection, opts={"compare_type": True, "compare_server_default": True})
@@ -254,4 +254,4 @@ def test_normal_application_fallback_uses_configured_url(migration_engine, monke
     command.upgrade(migration_config(None), "head")
     assert calls == [True]
     with migration_engine.connect() as connection:
-        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == HEAD
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "e41a00000001"

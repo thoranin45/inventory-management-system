@@ -729,6 +729,14 @@ class SalesOrder(Base):
     total_amount = Column(Numeric(10, 2))
     created_at = Column(DateTime, server_default=func.now())
 
+    picked_at = Column(DateTime(timezone=True))
+    picked_by_user_id = Column(Integer, ForeignKey("users.id"))
+    packed_at = Column(DateTime(timezone=True))
+    packed_by_user_id = Column(Integer, ForeignKey("users.id"))
+    shipped_at = Column(DateTime(timezone=True))
+    shipped_by_user_id = Column(Integer, ForeignKey("users.id"))
+    shipment_number = Column(String(100), unique=True)
+
 
 class SalesOrderItem(Base):
     __tablename__ = "sales_order_items"
@@ -764,6 +772,10 @@ class SalesOrderBatchAllocation(Base):
     __tablename__ = "sales_order_batch_allocations"
 
     __table_args__ = (
+        CheckConstraint(
+            "(picked_quantity IS NULL AND packed_quantity IS NULL) OR (picked_quantity IS NOT NULL AND packed_quantity IS NOT NULL AND packed_quantity >= 0 AND picked_quantity >= packed_quantity AND quantity >= picked_quantity)",
+            name="ck_sales_allocations_fulfillment_quantities",
+        ),
         Index("ix_sales_allocations_order_item", "sales_order_id", "sales_order_item_id", "id"),
         CheckConstraint(
             "quantity > 0",
@@ -775,6 +787,10 @@ class SalesOrderBatchAllocation(Base):
     )
 
     id = Column(Integer, primary_key=True)
+
+    stock_balance_id = Column(Integer, ForeignKey("stock_balances.id"))
+    picked_quantity = Column(Numeric(18, 3))
+    packed_quantity = Column(Numeric(18, 3))
 
     sales_order_id = Column(
         Integer,

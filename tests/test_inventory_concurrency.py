@@ -1,4 +1,4 @@
-﻿"""Real overlapping PostgreSQL requests; all inventory setup uses audited APIs."""
+"""Real overlapping PostgreSQL requests; all inventory setup uses audited APIs."""
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from datetime import date, timedelta
@@ -148,15 +148,16 @@ def test_competing_reservations(concurrent_inventory):
     product = sales._create_product(s.client, s.headers)
     customer = sales._create_customer(s.client, s.headers)
     sales._create_batch(s.client, s.headers, product["id"], quantity="1.000", expiry_days=90)
-    request = ("POST", "/api/v1/sales-orders/", {"customer_id": customer["id"], "items": [
-        {"product_id": product["id"], "quantity": "0.750", "unit_price": "1.00"}]})
-    responses = overlap(s, [request, request], "products", [product["id"]])
+    orders = [sales._create_sales_order(s.client, s.headers, customer["id"], product["id"], quantity="0.750", unit_price=1) for _ in range(2)]
+    requests = [("POST", f"/api/v1/sales-orders/{o['sales_order_id']}/confirm", None) for o in orders]
+    responses = overlap(s, requests, "products", [product["id"]])
     assert sorted(r.status_code for r in responses) == [200, 409]
     with s.sessions() as db:
         balance = db.query(StockBalance).one()
         assert balance.on_hand_qty == Decimal("1.000")
         assert balance.reserved_qty == Decimal("0.750")
-        assert db.query(SalesOrder).count() == 1
+        assert db.query(SalesOrder).filter_by(status="CONFIRMED").count() == 1
+        assert db.query(SalesOrder).filter_by(status="DRAFT").count() == 1
         assert db.query(SalesOrderBatchAllocation).one().quantity == Decimal("0.750")
         assert db.query(InventoryMovement).count() == 1
 
@@ -261,7 +262,9 @@ def test_shipment_versus_cancellation(concurrent_inventory):
     customer = sales._create_customer(s.client, s.headers)
     sales._create_batch(s.client, s.headers, product["id"], quantity="1.000", expiry_days=90)
     order = sales._create_sales_order(s.client, s.headers, customer["id"], product["id"], quantity="0.750", unit_price=1)
+    sales._confirm_sales_order(s.client, s.headers, order['sales_order_id'])
     order_id = order["sales_order_id"]
+    sales._ready_sales_order(s.client, s.headers, order_id)
     responses = overlap(s, [
         ("POST", f"/api/v1/sales-orders/{order_id}/ship", None),
         ("PUT", f"/api/v1/sales-orders/{order_id}/cancel", None),
@@ -270,10 +273,10 @@ def test_shipment_versus_cancellation(concurrent_inventory):
     with s.sessions() as db:
         status = db.get(SalesOrder, order_id).status
         balance = db.query(StockBalance).one()
-        assert status in {"COMPLETED", "CANCELLED"}
+        assert status in {"SHIPPED", "CANCELLED"}
         assert balance.reserved_qty == 0
-        assert balance.on_hand_qty == (Decimal("0.250") if status == "COMPLETED" else Decimal("1.000"))
-        assert db.query(InventoryMovement).filter(InventoryMovement.quantity < 0).count() == (1 if status == "COMPLETED" else 0)
+        assert balance.on_hand_qty == (Decimal("0.250") if status == "SHIPPED" else Decimal("1.000"))
+        assert db.query(InventoryMovement).filter(InventoryMovement.quantity < 0).count() == (1 if status == "SHIPPED" else 0)
 
 
 def test_opposite_direction_multi_product_transfers(concurrent_inventory):
@@ -315,7 +318,9 @@ def test_fractional_repeated_returns(concurrent_inventory, track_batch):
         product = _create_product(s.client, s.headers, initial_stock="1.125")
     customer = sales._create_customer(s.client, s.headers)
     order = sales._create_sales_order(s.client, s.headers, customer["id"], product["id"], quantity="1.125", unit_price=1)
+    sales._confirm_sales_order(s.client, s.headers, order['sales_order_id'])
     order_id = order["sales_order_id"]
+    sales._ready_sales_order(s.client, s.headers, order_id)
     sales._ship_sales_order(s.client, s.headers, order_id)
     for quantity in ["0.125", "0.001"]:
         response = s.client.post(f"/api/v1/sales-orders/{order_id}/return", json={"items": [
@@ -334,3 +339,47 @@ def test_fractional_repeated_returns(concurrent_inventory, track_batch):
     response = s.client.post(f"/api/v1/sales-orders/{order_id}/return", json={"items": [
         {"product_id": product["id"], "quantity": "0.001", "reason": "Over return"}]})
     assert response.status_code == 409
+
+
+@pytest.mark.parametrize("race", ["confirm", "confirm-cancel", "ship", "complete-picking", "complete-packing", "scan-pick", "scan-pack"])
+def test_fulfillment_overlap(concurrent_inventory, race):
+    from tests.test_sales_order_fulfillment import advance
+    s = concurrent_inventory
+    product = _create_product(s.client, s.headers, initial_stock="1.000")
+    customer = sales._create_customer(s.client, s.headers)
+    order = sales._create_sales_order(s.client, s.headers, customer["id"], product["id"], quantity="1.000", unit_price=1)
+    order_id = order["sales_order_id"]
+    start = {"confirm": "DRAFT", "confirm-cancel": "DRAFT", "ship": "READY_TO_SHIP",
+             "complete-picking": "PICKING", "complete-packing": "PACKING", "scan-pick": "PICKING", "scan-pack": "PACKING"}[race]
+    advance(s.client, s.headers, order_id, start)
+    endpoint = "confirm" if race == "confirm-cancel" else race
+    payload = None
+    if race.startswith("complete-"):
+        payload = sales._fulfillment_payload(s.client, s.headers, order_id)
+    if race.startswith("scan-"):
+        payload = {"barcode": product["barcode"]}
+    request = ("POST", f"/api/v1/sales-orders/{order_id}/{endpoint}", payload)
+    second = ("PUT", f"/api/v1/sales-orders/{order_id}/cancel", None) if race == "confirm-cancel" else request
+    responses = overlap(s, [request, second], "sales_orders", [order_id])
+    if race == "confirm-cancel":
+        assert sorted(r.status_code for r in responses) in ([200, 200], [200, 409])
+    else:
+        assert sorted(r.status_code for r in responses) == [200, 409]
+    with s.sessions() as db:
+        order = db.get(SalesOrder, order_id)
+        balance = db.query(StockBalance).one()
+        allocations = db.query(SalesOrderBatchAllocation).all()
+        shipped = race == "ship"
+        assert balance.on_hand_qty == (Decimal(0) if shipped else Decimal(1))
+        assert balance.reserved_qty == (Decimal(0) if shipped or race == "confirm-cancel" else Decimal(1))
+        assert len(allocations) <= 1
+        for allocation in allocations:
+            assert Decimal(0) <= allocation.packed_quantity <= allocation.picked_quantity <= allocation.quantity
+            if race == "scan-pick":
+                assert allocation.picked_quantity == Decimal(1)
+            if race == "scan-pack":
+                assert allocation.packed_quantity == Decimal(1)
+        assert db.query(InventoryMovement).filter_by(movement_type="SALES_SHIPMENT").count() == int(shipped)
+        assert db.query(StockTransaction).filter_by(transaction_type="SALE_SHIPMENT").count() == int(shipped)
+        if race == "confirm-cancel":
+            assert order.status == "CANCELLED"
