@@ -37,6 +37,7 @@ class ProductCreate(BaseModel):
     stock_qty: Decimal = Field(
         default=Decimal("0"),
         ge=0,
+        le=0,
     )
 
     category_id: int | None = None
@@ -55,6 +56,13 @@ class ProductCreate(BaseModel):
 
 
 class ProductUpdate(BaseModel):
+    @model_validator(mode="before")
+    @classmethod
+    def reject_stock_update(cls, values):
+        if isinstance(values, dict) and "stock_qty" in values:
+            raise ValueError("stock_qty is read-only; use audited stock operations")
+        return values
+
     sku: str | None = Field(
         default=None,
         min_length=1,

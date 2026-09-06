@@ -67,6 +67,8 @@ class ReceivePOItem(BaseModel):
 
 
 class ReceivePO(BaseModel):
+    warehouse_id: int | None = Field(default=None, gt=0)
+    location_id: int | None = Field(default=None, gt=0)
     items: list[ReceivePOItem] = Field(
         ...,
         min_length=1,

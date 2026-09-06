@@ -1,11 +1,18 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
-from app.models import Product
+from app.models import Product, ProductBatch, StockBalance, InventoryMovement, StockTransaction, SalesOrderBatchAllocation, SalesOrderItem
 from app.repositories.base_repository import BaseRepository
 
 
 class ProductRepository(BaseRepository):
+    def has_inventory_evidence(self, product_id: int) -> bool:
+        return any(
+            self.db.query(model.id).filter(model.product_id == product_id).first() is not None
+            for model in (ProductBatch, StockBalance, InventoryMovement, StockTransaction,
+                          SalesOrderBatchAllocation, SalesOrderItem)
+        )
+
     def __init__(self, db: Session):
         super().__init__(
             db,
@@ -61,4 +68,3 @@ class ProductRepository(BaseRepository):
             Product.is_active == False
         ).all()
 
-    

@@ -6,6 +6,7 @@ from decimal import Decimal
 from app.models import (
     Product,
     ProductBatch,
+    StockBalance,
     StockTransaction,
 )
 
@@ -52,7 +53,6 @@ class StockRepository:
             self.db.query(ProductBatch)
             .filter(
                 ProductBatch.product_id == product_id,
-                ProductBatch.quantity > 0,
             )
             .order_by(
                 ProductBatch.created_at.asc(),
@@ -69,7 +69,6 @@ class StockRepository:
             self.db.query(ProductBatch)
             .filter(
                 ProductBatch.product_id == product_id,
-                ProductBatch.quantity > 0,
             )
             .order_by(
                 ProductBatch.created_at.asc(),
@@ -87,7 +86,6 @@ class StockRepository:
             self.db.query(ProductBatch)
             .filter(
                 ProductBatch.product_id == product_id,
-                ProductBatch.quantity > 0,
             )
             .order_by(
                 ProductBatch.expiry_date.asc(),
@@ -105,7 +103,6 @@ class StockRepository:
             self.db.query(ProductBatch)
             .filter(
                 ProductBatch.product_id == product_id,
-                ProductBatch.quantity > 0,
             )
             .order_by(
                 ProductBatch.expiry_date.asc(),
@@ -119,20 +116,27 @@ class StockRepository:
     def get_batch_stock_total(
         self,
         product_id: int,
+        warehouse_id: int | None = None,
+        location_id: int | None = None,
     ) -> Decimal:
-        total = (
+        self.db.flush()
+        query = (
             self.db.query(
                 func.coalesce(
-                    func.sum(ProductBatch.quantity),
+                    func.sum(StockBalance.on_hand_qty),
                     0,
                 )
             )
             .filter(
-                ProductBatch.product_id == product_id,
-                ProductBatch.quantity > 0,
+                StockBalance.product_id == product_id,
+                StockBalance.batch_id.is_not(None),
             )
-            .scalar()
         )
+        if warehouse_id is not None:
+            query = query.filter(StockBalance.warehouse_id == warehouse_id)
+        if location_id is not None:
+            query = query.filter(StockBalance.location_id == location_id)
+        total = query.scalar()
 
         return Decimal(str(total or 0))
 

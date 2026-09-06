@@ -1,3 +1,4 @@
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import (
@@ -137,6 +138,9 @@ def create_stock_balance_service(
 
     if existing is not None:
         raise StockBalanceAlreadyExistsException()
+
+    if data.on_hand_qty != 0 or data.reserved_qty != 0:
+        raise HTTPException(409, "Only zero-balance initialization is allowed; use audited stock operations")
     
     balance = StockBalance(
         product_id=data.product_id,
@@ -148,6 +152,7 @@ def create_stock_balance_service(
     )
 
     with UnitOfWork(db):
+        repo.lock_inventory([data.product_id])
         repo.add(balance)
 
         db.flush()
@@ -185,11 +190,4 @@ def adjust_stock_balance_service(
     if new_reserved > new_on_hand:
         raise InvalidStockReservationException()
 
-    with UnitOfWork(db):
-        balance.on_hand_qty = new_on_hand
-        balance.reserved_qty = new_reserved
-
-        db.flush()
-        db.refresh(balance)
-
-    return balance
+    raise HTTPException(409, "Balance quantities are read-only; use audited stock and reservation operations")

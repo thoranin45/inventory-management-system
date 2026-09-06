@@ -106,14 +106,28 @@ def _create_balance(
             "warehouse_id": warehouse_id,
             "location_id": location_id,
             "batch_id": None,
-            "on_hand_qty": on_hand_qty,
-            "reserved_qty": reserved_qty,
+            "on_hand_qty": "0",
+            "reserved_qty": "0",
         },
     )
 
     assert response.status_code == 201
 
-    return response.json()
+    receipt = client.post("/api/v1/stock/in", json={
+        "product_id": product_id, "warehouse_id": warehouse_id, "location_id": location_id,
+        "quantity": on_hand_qty, "remark": "Test balance opening receipt",
+    })
+    assert receipt.status_code == 200
+    if Decimal(reserved_qty):
+        customer = client.post("/api/v1/customers", json={"customer_name": f"Balance customer {uuid4().hex}"})
+        assert customer.status_code == 201
+        reservation = client.post("/api/v1/sales-orders/", json={
+            "customer_id": customer.json()["data"]["id"],
+            "items": [{"product_id": product_id, "quantity": reserved_qty, "unit_price": "1"}],
+        })
+        assert reservation.status_code == 200
+    return next(row for row in client.get(f"/api/v1/stock-balances/product/{product_id}").json()
+                if row["warehouse_id"] == warehouse_id and row["location_id"] == location_id)
 
 
 def test_create_stock_balance_success(
@@ -305,7 +319,7 @@ def test_reserved_greater_than_on_hand_fails(
     )
 
 
-def test_adjust_stock_balance_success(
+def test_adjust_stock_balance_rejected(
     admin_client: TestClient,
     admin_headers: dict[str, str],
     main_storage: tuple[int, int],
@@ -338,21 +352,21 @@ def test_adjust_stock_balance_success(
         },
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 409
 
-    body = response.json()
+    body = admin_client.get(f"/api/v1/stock-balances/product/{product['id']}").json()[0]
 
     assert _decimal(
         body["on_hand_qty"]
-    ) == Decimal("120.000")
+    ) == Decimal("100.000")
 
     assert _decimal(
         body["reserved_qty"]
-    ) == Decimal("25.000")
+    ) == Decimal("20.000")
 
     assert _decimal(
         body["available_qty"]
-    ) == Decimal("95.000")
+    ) == Decimal("80.000")
 
 
 def test_adjust_reserved_greater_than_on_hand_fails(

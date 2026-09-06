@@ -149,6 +149,8 @@ def ship_sales_order_service(
             sales_order.id
         )
 
+        balance_repo.lock_inventory([item.product_id for item in items])
+
         for item in items:
             product = (
                 sales_order_repo.get_product_by_id_for_update(
@@ -267,20 +269,6 @@ def ship_sales_order_service(
                             ),
                         )
 
-                    if (
-                        batch.quantity
-                        < quantity
-                    ):
-                        _raise_error(
-                            message=(
-                                "Insufficient "
-                                "batch stock"
-                            ),
-                            status_code=(
-                                status.HTTP_409_CONFLICT
-                            ),
-                        )
-
                     balance_before = (
                         balance.on_hand_qty
                     )
@@ -292,10 +280,6 @@ def ship_sales_order_service(
 
                     # Remove physical stock
                     balance.on_hand_qty -= (
-                        quantity
-                    )
-
-                    batch.quantity -= (
                         quantity
                     )
 
@@ -469,23 +453,7 @@ def ship_sales_order_service(
             # Product total stock
             # Batch / Non-batch both reach here
             # =============================================
-            if (
-                product.stock_qty
-                < item.quantity
-            ):
-                _raise_error(
-                    message=(
-                        "Product stock is lower "
-                        "than shipment quantity"
-                    ),
-                    status_code=(
-                        status.HTTP_409_CONFLICT
-                    ),
-                )
-
-            product.stock_qty -= (
-                item.quantity
-            )
+            balance_repo.sync_aggregates(product.id, current_user.username)
 
             transaction = StockTransaction(
                 product_id=item.product_id,
@@ -569,6 +537,8 @@ def create_sales_order_service(
         sales_order.so_number = (
             f"SO-{sales_order.id:06d}"
         )
+
+        balance_repo.lock_inventory([item.product_id for item in data.items])
 
         for request_item in data.items:
             product = (
@@ -909,6 +879,8 @@ def cancel_sales_order_service(
             sales_order.id
         )
 
+        balance_repo.lock_inventory([item.product_id for item in items])
+
         for item in items:
             product = (
                 sales_order_repo.get_product_by_id(
@@ -1094,6 +1066,8 @@ def return_sales_order_items_service(
                 status_code=status.HTTP_409_CONFLICT,
             )
 
+        balance_repo.lock_inventory([item.product_id for item in data.items])
+
         for return_item in data.items:
             sold_item = (
                 sales_order_repo
@@ -1256,15 +1230,7 @@ def return_sales_order_items_service(
                         balance.on_hand_qty
                     )
 
-                    batch.quantity += (
-                        quantity_to_restore
-                    )
-
                     balance.on_hand_qty += (
-                        quantity_to_restore
-                    )
-
-                    product.stock_qty += (
                         quantity_to_restore
                     )
 
@@ -1363,10 +1329,6 @@ def return_sales_order_items_service(
                     return_item.quantity
                 )
 
-                product.stock_qty += (
-                    return_item.quantity
-                )
-
                 movement = InventoryMovement(
                     product_id=(
                         return_item.product_id
@@ -1436,6 +1398,8 @@ def return_sales_order_items_service(
             sales_order_repo.create_stock_transaction(
                 transaction
             )
+
+            balance_repo.sync_aggregates(product.id, current_user.username)
 
             returned_items.append(
                 {

@@ -51,7 +51,7 @@ def _create_product(
         "/api/v1/products",
         headers=admin_headers,
         json=_product_payload(
-            initial_stock=initial_stock,
+            initial_stock=0,
         ),
     )
 
@@ -61,7 +61,14 @@ def _create_product(
 
     assert body["success"] is True
 
-    return body["data"]
+    product = body["data"]
+    if initial_stock:
+        stock = client.post("/api/v1/stock/in", headers=admin_headers, json={
+            "product_id": product["id"], "quantity": initial_stock, "remark": "Test opening receipt",
+        })
+        assert stock.status_code == 200
+        product = client.get(f"/api/v1/products/{product['id']}", headers=admin_headers).json()["data"]
+    return product
 
 
 def _batch_payload(

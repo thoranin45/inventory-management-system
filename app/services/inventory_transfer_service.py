@@ -268,6 +268,8 @@ def complete_inventory_transfer_service(
         if transfer.status == "CANCELLED":
             raise InventoryTransferCancelledException()
 
+        balance_repo.lock_inventory([item.product_id for item in transfer.items])
+
         for item in transfer.items:
             source_balance = (
                 balance_repo.get_balance_for_update(
@@ -381,6 +383,9 @@ def complete_inventory_transfer_service(
             movement_repo.create(
                 destination_movement
             )
+
+        for product_id in sorted({item.product_id for item in transfer.items}):
+            balance_repo.sync_aggregates(product_id, f"user_id={completed_by_user_id}")
 
         transfer.status = "COMPLETED"
         transfer.completed_by_user_id = (

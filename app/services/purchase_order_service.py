@@ -332,6 +332,9 @@ def receive_purchase_order_service(
             if existing_batch is not None:
                 raise DuplicateLotNumberException()
 
+        balance_repo.lock_inventory([item.product_id for item in data.items])
+        warehouse, location = balance_repo.resolve_storage(data.warehouse_id, data.location_id)
+
         # =====================================================
         # Apply receive
         # =====================================================
@@ -364,24 +367,19 @@ def receive_purchase_order_service(
             if batch is None:
                 raise DuplicateLotNumberException()
 
-            product.stock_qty += (
-                receive_item.quantity
-            )
-
             po_item.received_quantity += (
                 receive_item.quantity
             )
 
             balance = (
                 balance_repo
-                .create_default_batch_balance(
-                    product_id=product.id,
+                .get_or_create_balance(
+                    product_id=product.id, warehouse_id=warehouse.id, location_id=location.id,
                     batch_id=batch.id,
-                    on_hand_qty=(
-                        receive_item.quantity
-                    ),
                 )
             )
+
+            balance.on_hand_qty += receive_item.quantity
 
             transaction = StockTransaction(
                 product_id=product.id,
@@ -418,6 +416,8 @@ def receive_purchase_order_service(
             movement_repo.create(
                 movement
             )
+
+            balance_repo.sync_aggregates(product.id, current_user.username)
 
             received_batches.append(
                 ReceivedBatchResponse(

@@ -26,7 +26,7 @@ def _create_product(
                 f"Dashboard Product {unique_value}"
             ),
             "price": price,
-            "stock_qty": stock_qty,
+            "stock_qty": 0,
             "category_id": None,
         },
     )
@@ -37,7 +37,14 @@ def _create_product(
 
     assert body["success"] is True
 
-    return body["data"]
+    product = body["data"]
+    if stock_qty:
+        stock = client.post("/api/v1/stock/in", headers=admin_headers, json={
+            "product_id": product["id"], "quantity": stock_qty, "remark": "Test opening receipt",
+        })
+        assert stock.status_code == 200
+        product = client.get(f"/api/v1/products/{product['id']}", headers=admin_headers).json()["data"]
+    return product
 
 
 def _create_batch(

@@ -12,7 +12,7 @@ def _product_payload() -> dict:
         "barcode": f"885{unique_value}",
         "product_name": "Pytest Product",
         "price": 199.50,
-        "stock_qty": 10,
+        "stock_qty": 0,
         "category_id": None,
     }
 
@@ -41,7 +41,7 @@ def test_create_product_success(
     )
     assert Decimal(
         body["data"]["stock_qty"]
-    ) == Decimal("10.000")
+    ) == Decimal("0.000")
     assert body["data"]["is_active"] is True
 
 
@@ -206,7 +206,7 @@ def test_update_product(
         "Pytest Product Updated"
     )
     update_payload["price"] = 299.75
-    update_payload["stock_qty"] = 25
+    update_payload.pop("stock_qty")
 
     response = client.put(
         f"/api/v1/products/{product_id}",
@@ -225,7 +225,7 @@ def test_update_product(
     assert float(body["data"]["price"]) == 299.75
     assert Decimal(
         body["data"]["stock_qty"]
-    ) == Decimal("25.000")
+    ) == Decimal("0.000")
 
 
 def test_soft_delete_product(

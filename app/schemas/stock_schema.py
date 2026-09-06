@@ -5,6 +5,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class StockIn(BaseModel):
+    warehouse_id: int | None = Field(default=None, gt=0)
+    location_id: int | None = Field(default=None, gt=0)
     product_id: int = Field(..., gt=0)
 
     quantity: Decimal = Field(
@@ -19,6 +21,8 @@ class StockIn(BaseModel):
 
 
 class StockOut(BaseModel):
+    warehouse_id: int | None = Field(default=None, gt=0)
+    location_id: int | None = Field(default=None, gt=0)
     product_id: int = Field(..., gt=0)
 
     quantity: Decimal = Field(
@@ -33,6 +37,8 @@ class StockOut(BaseModel):
 
 
 class StockAdjust(BaseModel):
+    warehouse_id: int | None = Field(default=None, gt=0)
+    location_id: int | None = Field(default=None, gt=0)
     product_id: int = Field(..., gt=0)
 
     new_quantity: Decimal = Field(

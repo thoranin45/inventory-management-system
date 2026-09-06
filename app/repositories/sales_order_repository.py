@@ -192,7 +192,6 @@ class SalesOrderRepository:
             .filter(
                 ProductBatch.product_id
                 == product_id,
-                ProductBatch.quantity > 0,
             )
             .order_by(
                 ProductBatch.expiry_date.asc(),

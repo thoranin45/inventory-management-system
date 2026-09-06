@@ -28,7 +28,7 @@ def _create_product(
                 f"Report Product {unique_value}"
             ),
             "price": price,
-            "stock_qty": stock_qty,
+            "stock_qty": 0,
             "category_id": None,
             "track_batch": True,
             "track_expiry": True,
@@ -37,7 +37,14 @@ def _create_product(
 
     assert response.status_code in {200, 201}
 
-    return response.json()["data"]
+    product = response.json()["data"]
+    if stock_qty:
+        stock = client.post("/api/v1/stock/in", headers=admin_headers, json={
+            "product_id": product["id"], "quantity": stock_qty, "remark": "Test opening receipt",
+        })
+        assert stock.status_code == 200
+        product = client.get(f"/api/v1/products/{product['id']}", headers=admin_headers).json()["data"]
+    return product
 
 
 def _create_customer(

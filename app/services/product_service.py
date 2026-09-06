@@ -151,7 +151,7 @@ def update_product_service(
     Update an existing product.
     """
 
-    product = product_repo.get_by_id(product_id)
+    product = product_repo.get_by_id_for_update(product_id)
 
     if product is None:
         raise ProductNotFoundException()
@@ -217,6 +217,9 @@ def update_product_service(
                 "track_batch=True"
             ),
         )
+
+    if new_track_batch != product.track_batch and (product.stock_qty or product_repo.has_inventory_evidence(product.id)):
+        raise HTTPException(409, "Tracking mode cannot change after inventory or allocation history exists")
     
     update_data = data.model_dump(
         exclude_unset=True

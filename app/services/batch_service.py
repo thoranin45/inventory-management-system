@@ -40,6 +40,8 @@ def create_batch_service(
     data: BatchCreate,
     created_by_user_id: int | None,
 ) -> BatchCreateResponse:
+    balance_repo.lock_inventory([data.product_id])
+    warehouse, location = balance_repo.resolve_storage(data.warehouse_id, data.location_id)
     product = stock_repo.get_active_product(
         data.product_id
     )
@@ -68,15 +70,14 @@ def create_batch_service(
     with UnitOfWork(db) as uow:
         batch_repo.create(batch)
 
-        product.stock_qty += data.quantity
-
         balance = (
-            balance_repo.create_default_batch_balance(
-                product_id=product.id,
+            balance_repo.get_or_create_balance(
+                product_id=product.id, warehouse_id=warehouse.id, location_id=location.id,
                 batch_id=batch.id,
-                on_hand_qty=data.quantity,
             )
         )
+
+        balance.on_hand_qty += data.quantity
 
         transaction = StockTransaction(
             product_id=product.id,
@@ -110,6 +111,8 @@ def create_batch_service(
         movement_repo.create(
             movement
         )
+
+        balance_repo.sync_aggregates(product.id, f"user_id={created_by_user_id}")
 
     uow.refresh(batch)
     uow.refresh(product)

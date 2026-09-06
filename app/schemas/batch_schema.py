@@ -1,9 +1,12 @@
 from datetime import date, datetime
+from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
 class BatchCreate(BaseModel):
+    warehouse_id: int | None = Field(default=None, gt=0)
+    location_id: int | None = Field(default=None, gt=0)
     product_id: int = Field(..., gt=0)
 
     lot_no: str = Field(
@@ -14,7 +17,7 @@ class BatchCreate(BaseModel):
 
     mfg_date: date
     expiry_date: date
-    quantity: int = Field(..., gt=0)
+    quantity: Decimal = Field(..., gt=0, max_digits=18, decimal_places=3)
 
 
 class BatchResponse(BaseModel):
@@ -23,7 +26,7 @@ class BatchResponse(BaseModel):
     lot_no: str
     mfg_date: date
     expiry_date: date
-    quantity: int
+    quantity: Decimal
     created_at: datetime | None = None
 
     model_config = ConfigDict(
@@ -33,4 +36,4 @@ class BatchResponse(BaseModel):
 
 class BatchCreateResponse(BaseModel):
     batch: BatchResponse
-    current_stock: int
+    current_stock: Decimal
