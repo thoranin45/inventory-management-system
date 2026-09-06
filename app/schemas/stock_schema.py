@@ -12,6 +12,7 @@ class StockIn(BaseModel):
     quantity: Decimal = Field(
         ...,
         gt=0,
+        max_digits=18, decimal_places=3, allow_inf_nan=False,
     )
 
     remark: str | None = Field(
@@ -28,6 +29,7 @@ class StockOut(BaseModel):
     quantity: Decimal = Field(
         ...,
         gt=0,
+        max_digits=18, decimal_places=3, allow_inf_nan=False,
     )
 
     remark: str | None = Field(
@@ -44,6 +46,7 @@ class StockAdjust(BaseModel):
     new_quantity: Decimal = Field(
         ...,
         ge=0,
+        max_digits=18, decimal_places=3, allow_inf_nan=False,
     )
 
     remark: str = Field(min_length=1, max_length=255)

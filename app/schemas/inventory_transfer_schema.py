@@ -19,6 +19,7 @@ class InventoryTransferItemCreate(BaseModel):
     quantity: Decimal = Field(
         ...,
         gt=0,
+        max_digits=18, decimal_places=3, allow_inf_nan=False,
     )
 
 

@@ -87,7 +87,7 @@ def get_stock_summary_service(
 
     for product in products:
         price = Decimal(product.price or 0)
-        stock_qty = int(product.stock_qty or 0)
+        stock_qty = Decimal(product.stock_qty or 0)
         stock_value = price * stock_qty
 
         results.append(
@@ -121,7 +121,7 @@ def get_total_stock_value_service(
     total_value = sum(
         (
             Decimal(product.price or 0)
-            * int(product.stock_qty or 0)
+            * Decimal(product.stock_qty or 0)
         )
         for product in products
     )

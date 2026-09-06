@@ -325,7 +325,7 @@ def receive_purchase_order_service(
 
             existing_batch = (
                 batch_repo.get_by_lot_no(
-                    receive_item.lot_no
+                    receive_item.product_id, receive_item.lot_no
                 )
             )
 

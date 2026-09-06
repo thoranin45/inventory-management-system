@@ -12,6 +12,7 @@ from sqlalchemy import (
     SmallInteger,
     CheckConstraint,
     UniqueConstraint,
+    PrimaryKeyConstraint,
     Index,
     text,
 )
@@ -85,17 +86,18 @@ class Product(Base):
         String(30),
         nullable=False,
         default="MERCHANDISE",
+        server_default="MERCHANDISE",
     )
 
     brand_id = Column(
         Integer,
-        ForeignKey("brands.id"),
+        ForeignKey("brands.id", name="fk_products_brand_id"),
         nullable=True,
     )
 
     base_unit_id = Column(
         Integer,
-        ForeignKey("units.id"),
+        ForeignKey("units.id", name="fk_products_base_unit_id"),
         nullable=True,
     )
 
@@ -103,12 +105,14 @@ class Product(Base):
         Numeric(18, 4),
         nullable=False,
         default=0,
+        server_default="0",
     )
 
     minimum_stock = Column(
         Numeric(18, 3),
         nullable=False,
         default=0,
+        server_default="0",
     )
 
     maximum_stock = Column(
@@ -120,6 +124,7 @@ class Product(Base):
         Numeric(18, 3),
         nullable=False,
         default=0,
+        server_default="0",
     )
 
     shelf_life_days = Column(
@@ -131,18 +136,21 @@ class Product(Base):
         Boolean,
         nullable=False,
         default=False,
+        server_default=text("false"),
     )
 
     track_expiry = Column(
         Boolean,
         nullable=False,
         default=False,
+        server_default=text("false"),
     )
 
     track_weight = Column(
         Boolean,
         nullable=False,
         default=False,
+        server_default=text("false"),
     )
 
     updated_at = Column(
@@ -208,6 +216,9 @@ class Brand(Base):
     __tablename__ = "brands"
 
     __table_args__ = (
+        UniqueConstraint("brand_code", name="uq_brands_brand_code"),
+        UniqueConstraint("brand_name", name="uq_brands_brand_name"),
+        PrimaryKeyConstraint("id", name="pk_brands"),
         Index(
             "ix_brands_is_active",
             "is_active",
@@ -221,13 +232,13 @@ class Brand(Base):
 
     brand_code = Column(
         String(50),
-        unique=True,
+
         nullable=True,
     )
 
     brand_name = Column(
         String(255),
-        unique=True,
+
         nullable=False,
     )
 
@@ -235,6 +246,7 @@ class Brand(Base):
         Boolean,
         nullable=False,
         default=True,
+        server_default=text("true"),
     )
 
     created_at = Column(
@@ -260,6 +272,8 @@ class Unit(Base):
     __tablename__ = "units"
 
     __table_args__ = (
+        UniqueConstraint("code", name="uq_units_code"),
+        PrimaryKeyConstraint("id", name="pk_units"),
         Index(
             "ix_units_unit_type",
             "unit_type",
@@ -277,7 +291,7 @@ class Unit(Base):
 
     code = Column(
         String(20),
-        unique=True,
+
         nullable=False,
     )
 
@@ -295,12 +309,14 @@ class Unit(Base):
         SmallInteger,
         nullable=False,
         default=3,
+        server_default="3",
     )
 
     is_active = Column(
         Boolean,
         nullable=False,
         default=True,
+        server_default=text("true"),
     )
 
     created_at = Column(
@@ -338,6 +354,8 @@ class Warehouse(Base):
     __tablename__ = "warehouses"
 
     __table_args__ = (
+        UniqueConstraint("warehouse_code", name="uq_warehouses_warehouse_code"),
+        PrimaryKeyConstraint("id", name="pk_warehouses"),
         Index(
             "ix_warehouses_warehouse_type",
             "warehouse_type",
@@ -355,7 +373,7 @@ class Warehouse(Base):
 
     warehouse_code = Column(
         String(50),
-        unique=True,
+
         nullable=False,
     )
 
@@ -378,6 +396,7 @@ class Warehouse(Base):
         Boolean,
         nullable=False,
         default=True,
+        server_default=text("true"),
     )
 
     created_at = Column(
@@ -403,6 +422,7 @@ class WarehouseLocation(Base):
     __tablename__ = "warehouse_locations"
 
     __table_args__ = (
+        PrimaryKeyConstraint("id", name="pk_warehouse_locations"),
         UniqueConstraint(
             "warehouse_id",
             "location_code",
@@ -429,7 +449,7 @@ class WarehouseLocation(Base):
 
     warehouse_id = Column(
         Integer,
-        ForeignKey("warehouses.id"),
+        ForeignKey("warehouses.id", name="fk_warehouse_locations_warehouse_id"),
         nullable=False,
     )
 
@@ -452,6 +472,7 @@ class WarehouseLocation(Base):
         Boolean,
         nullable=False,
         default=True,
+        server_default=text("true"),
     )
 
     created_at = Column(
@@ -474,6 +495,8 @@ class WarehouseLocation(Base):
 
 class StockTransaction(Base):
     __tablename__ = "stock_transactions"
+
+    __table_args__ = (Index("ix_stock_transactions_product_type", "product_id", "transaction_type"),)
 
     id = Column(Integer, primary_key=True)
 
@@ -518,6 +541,8 @@ class ProductBatch(Base):
     __tablename__ = "product_batches"
 
     __table_args__ = (
+        UniqueConstraint("product_id", "lot_no", name="uq_product_batches_product_lot"),
+        Index("ix_product_batches_product_expiry", "product_id", "expiry_date", "created_at", "id"),
         CheckConstraint(
             "quantity >= 0",
             name="ck_product_batches_quantity_non_negative",
@@ -537,7 +562,7 @@ class ProductBatch(Base):
 
     lot_no = Column(
         String(100),
-        unique=True,
+
     )
 
     mfg_date = Column(Date)
@@ -605,6 +630,7 @@ class PurchaseOrderItem(Base):
     __tablename__ = "purchase_order_items"
 
     __table_args__ = (
+        UniqueConstraint("po_id", "product_id", name="uq_purchase_order_items_po_product"),
         CheckConstraint(
             "quantity > 0",
             name="ck_purchase_order_items_quantity_positive",
@@ -708,6 +734,7 @@ class SalesOrderItem(Base):
     __tablename__ = "sales_order_items"
 
     __table_args__ = (
+        UniqueConstraint("sales_order_id", "product_id", name="uq_sales_order_items_order_product"),
         CheckConstraint(
             "quantity > 0",
             name="ck_sales_order_items_quantity_positive",
@@ -737,6 +764,7 @@ class SalesOrderBatchAllocation(Base):
     __tablename__ = "sales_order_batch_allocations"
 
     __table_args__ = (
+        Index("ix_sales_allocations_order_item", "sales_order_id", "sales_order_item_id", "id"),
         CheckConstraint(
             "quantity > 0",
             name=(
@@ -782,6 +810,7 @@ class ProductUnitConversion(Base):
     __tablename__ = "product_unit_conversions"
 
     __table_args__ = (
+        PrimaryKeyConstraint("id", name="pk_product_unit_conversions"),
         UniqueConstraint(
             "product_id",
             "from_unit_id",
@@ -817,19 +846,19 @@ class ProductUnitConversion(Base):
 
     product_id = Column(
         Integer,
-        ForeignKey("products.id"),
+        ForeignKey("products.id", name="fk_product_unit_conversions_product_id"),
         nullable=False,
     )
 
     from_unit_id = Column(
         Integer,
-        ForeignKey("units.id"),
+        ForeignKey("units.id", name="fk_product_unit_conversions_from_unit_id"),
         nullable=False,
     )
 
     to_unit_id = Column(
         Integer,
-        ForeignKey("units.id"),
+        ForeignKey("units.id", name="fk_product_unit_conversions_to_unit_id"),
         nullable=False,
     )
 
@@ -842,6 +871,7 @@ class ProductUnitConversion(Base):
         Boolean,
         nullable=False,
         default=True,
+        server_default=text("true"),
     )
 
     created_at = Column(
@@ -1039,7 +1069,7 @@ class InventoryTransfer(Base):
     transfer_number = Column(
         String(50),
         nullable=False,
-        unique=True,
+
     )
 
     status = Column(
@@ -1051,25 +1081,25 @@ class InventoryTransfer(Base):
 
     source_warehouse_id = Column(
         Integer,
-        ForeignKey("warehouses.id"),
+        ForeignKey("warehouses.id", name="fk_inventory_transfers_source_warehouse"),
         nullable=False,
     )
 
     destination_warehouse_id = Column(
         Integer,
-        ForeignKey("warehouses.id"),
+        ForeignKey("warehouses.id", name="fk_inventory_transfers_destination_warehouse"),
         nullable=False,
     )
 
     requested_by_user_id = Column(
         Integer,
-        ForeignKey("users.id"),
+        ForeignKey("users.id", name="fk_inventory_transfers_requested_by_user"),
         nullable=True,
     )
 
     completed_by_user_id = Column(
         Integer,
-        ForeignKey("users.id"),
+        ForeignKey("users.id", name="fk_inventory_transfers_completed_by_user"),
         nullable=True,
     )
 
@@ -1123,6 +1153,7 @@ class InventoryTransfer(Base):
     )
 
     __table_args__ = (
+        UniqueConstraint("transfer_number", name="uq_inventory_transfers_transfer_number"),
         CheckConstraint(
             "source_warehouse_id <> destination_warehouse_id",
             name=(
@@ -1159,31 +1190,31 @@ class InventoryTransferItem(Base):
 
     transfer_id = Column(
         Integer,
-        ForeignKey("inventory_transfers.id"),
+        ForeignKey("inventory_transfers.id", name="fk_inventory_transfer_items_transfer"),
         nullable=False,
     )
 
     product_id = Column(
         Integer,
-        ForeignKey("products.id"),
+        ForeignKey("products.id", name="fk_inventory_transfer_items_product"),
         nullable=False,
     )
 
     batch_id = Column(
         Integer,
-        ForeignKey("product_batches.id"),
+        ForeignKey("product_batches.id", name="fk_inventory_transfer_items_batch"),
         nullable=True,
     )
 
     from_location_id = Column(
         Integer,
-        ForeignKey("warehouse_locations.id"),
+        ForeignKey("warehouse_locations.id", name="fk_inventory_transfer_items_from_location"),
         nullable=False,
     )
 
     to_location_id = Column(
         Integer,
-        ForeignKey("warehouse_locations.id"),
+        ForeignKey("warehouse_locations.id", name="fk_inventory_transfer_items_to_location"),
         nullable=False,
     )
 
@@ -1222,6 +1253,7 @@ class InventoryTransferItem(Base):
     )
 
     __table_args__ = (
+        CheckConstraint("from_location_id <> to_location_id", name="ck_inventory_transfer_items_different_locations"),
         CheckConstraint(
             "quantity > 0",
             name=(

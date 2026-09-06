@@ -92,7 +92,7 @@ def _get_required_sales_order_for_update(
 
 def _validate_allocations(
     allocations: list[SalesOrderBatchAllocation],
-    expected_quantity: int,
+    expected_quantity: Decimal,
     sales_order_item_id: int,
 ) -> None:
     allocated_total = sum(

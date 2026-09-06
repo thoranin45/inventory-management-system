@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -275,7 +277,7 @@ class SalesOrderRepository:
         self,
         so_number: str,
         product_id: int,
-    ) -> int:
+    ) -> Decimal:
         returned_quantity = (
             self.db.query(
                 func.coalesce(
@@ -297,7 +299,7 @@ class SalesOrderRepository:
             .scalar()
         )
 
-        return int(
+        return Decimal(
             returned_quantity or 0
         )
 

@@ -53,7 +53,7 @@ def create_batch_service(
         raise InvalidBatchDateException()
 
     existing_batch = batch_repo.get_by_lot_no(
-        data.lot_no
+        data.product_id, data.lot_no
     )
 
     if existing_batch is not None:

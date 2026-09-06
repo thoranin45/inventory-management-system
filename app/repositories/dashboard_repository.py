@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -30,7 +31,7 @@ class DashboardRepository:
 
     def get_total_stock(
         self,
-    ) -> int:
+    ) -> Decimal:
         result = (
             self.db.query(
                 func.coalesce(
@@ -44,12 +45,12 @@ class DashboardRepository:
             .scalar()
         )
 
-        return int(result or 0)
+        return Decimal(result or 0)
 
     def get_transaction_quantity_sum(
         self,
         transaction_types: set[str],
-    ) -> int:
+    ) -> Decimal:
         result = (
             self.db.query(
                 func.coalesce(
@@ -65,7 +66,7 @@ class DashboardRepository:
             .scalar()
         )
 
-        return int(result or 0)
+        return Decimal(result or 0)
 
     def count_low_stock_products(
         self,

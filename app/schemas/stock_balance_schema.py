@@ -19,11 +19,13 @@ class StockBalanceCreate(BaseModel):
     on_hand_qty: Decimal = Field(
         default=Decimal("0"),
         ge=0,
+        max_digits=18, decimal_places=3, allow_inf_nan=False,
     )
 
     reserved_qty: Decimal = Field(
         default=Decimal("0"),
         ge=0,
+        max_digits=18, decimal_places=3, allow_inf_nan=False,
     )
 
 
@@ -31,11 +33,13 @@ class StockBalanceAdjust(BaseModel):
     on_hand_qty: Decimal | None = Field(
         default=None,
         ge=0,
+        max_digits=18, decimal_places=3, allow_inf_nan=False,
     )
 
     reserved_qty: Decimal | None = Field(
         default=None,
         ge=0,
+        max_digits=18, decimal_places=3, allow_inf_nan=False,
     )
 
 

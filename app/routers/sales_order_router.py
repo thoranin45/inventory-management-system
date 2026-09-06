@@ -24,6 +24,7 @@ from app.core.dependencies import (
     require_admin,
 )
 from app.core.response import success_response
+from app.core.quantity import quantity_text
 from app.models import User
 from app.schemas.sales_order_schema import (
     SalesOrderCreate,
@@ -223,7 +224,7 @@ def generate_invoice(
         table_data.append(
             [
                 product_name,
-                item["quantity"],
+                quantity_text(item["quantity"]),
                 f"{item['unit_price']:.2f}",
                 f"{item['total_price']:.2f}",
             ]

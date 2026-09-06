@@ -13,11 +13,13 @@ class BatchRepository:
 
     def get_by_lot_no(
         self,
+        product_id: int,
         lot_no: str,
     ) -> ProductBatch | None:
         return (
             self.db.query(ProductBatch)
             .filter(
+                ProductBatch.product_id == product_id,
                 ProductBatch.lot_no == lot_no
             )
             .first()
@@ -74,6 +76,7 @@ class BatchRepository:
             )
             .on_conflict_do_nothing(
                 index_elements=[
+                    ProductBatch.product_id,
                     ProductBatch.lot_no,
                 ]
             )

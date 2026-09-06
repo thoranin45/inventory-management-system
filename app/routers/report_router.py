@@ -1,4 +1,5 @@
 from app.core.dependencies import require_warehouse
+from app.core.quantity import encode_quantities, quantity_text
 from decimal import Decimal
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -21,7 +22,7 @@ def stock_balance(db: Session = Depends(get_db)):
         Product.is_active == True
     ).all()
 
-    return [
+    return encode_quantities([
         {
             "product_id": p.id,
             "sku": p.sku,
@@ -32,7 +33,7 @@ def stock_balance(db: Session = Depends(get_db)):
             "category_id": p.category_id,
         }
         for p in products
-    ]
+    ])
 
 
 @router.get("/sales-summary")
@@ -55,7 +56,7 @@ def stock_movement(db: Session = Depends(get_db)):
         StockTransaction.created_at.desc()
     ).all()
 
-    return transactions
+    return encode_quantities(transactions)
 
 @router.get("/low-stock")
 def low_stock_report(
@@ -67,7 +68,7 @@ def low_stock_report(
         Product.stock_qty <= threshold
     ).all()
 
-    return [
+    return encode_quantities([
         {
             "product_id": p.id,
             "sku": p.sku,
@@ -76,7 +77,7 @@ def low_stock_report(
             "threshold": threshold
         }
         for p in products
-    ]
+    ])
 
 @router.get("/expiring")
 def expiring_report(
@@ -94,7 +95,7 @@ def expiring_report(
         ProductBatch.expiry_date.asc()
     ).all()
 
-    return [
+    return encode_quantities([
         {
             "batch_id": b.id,
             "product_id": b.product_id,
@@ -105,7 +106,7 @@ def expiring_report(
             "days_left": (b.expiry_date - today).days
         }
         for b in batches
-    ]
+    ])
 
 @router.get("/chart/sales")
 def sales_chart(db: Session = Depends(get_db)):
@@ -119,14 +120,14 @@ def sales_chart(db: Session = Depends(get_db)):
         func.date(SalesOrder.created_at)
     ).all()
 
-    return [
+    return encode_quantities([
         {
             "date": str(row.date),
             "orders": row.orders,
             "sales": float(row.sales)
         }
         for row in data
-    ]
+    ])
 
 
 @router.get("/chart/stock")
@@ -137,13 +138,13 @@ def stock_chart(db: Session = Depends(get_db)):
         Product.stock_qty.desc()
     ).all()
 
-    return [
+    return encode_quantities([
         {
             "product_name": p.product_name,
             "stock_qty": p.stock_qty
         }
         for p in products
-    ]
+    ])
 
 
 @router.get("/chart/expiry")
@@ -154,14 +155,16 @@ def expiry_chart(db: Session = Depends(get_db)):
         ProductBatch.expiry_date.asc()
     ).all()
 
-    return [
+    return encode_quantities([
         {
+            "batch_id": b.id,
+            "product_id": b.product_id,
             "lot_no": b.lot_no,
             "quantity": b.quantity,
             "expiry_date": str(b.expiry_date)
         }
         for b in batches
-    ]
+    ])
 
 @router.get("/export/stock")
 def export_stock_report(
@@ -199,7 +202,7 @@ def export_stock_report(
             p.id,
             p.sku,
             p.product_name,
-            p.stock_qty,
+            quantity_text(p.stock_qty),
             float(p.price),
             float(p.price * p.stock_qty)
         ])
@@ -285,8 +288,8 @@ def export_low_stock_report(
             p.id,
             p.sku,
             p.product_name,
-            p.stock_qty,
-            threshold
+            quantity_text(p.stock_qty),
+            format(threshold, "f")
         ])
 
     wb.save(file_path)
@@ -335,7 +338,7 @@ def export_expiring_report(
             b.id,
             b.product_id,
             b.lot_no,
-            b.quantity,
+            quantity_text(b.quantity),
             str(b.mfg_date),
             str(b.expiry_date),
             (b.expiry_date - today).days

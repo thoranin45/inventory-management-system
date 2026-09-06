@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
 
@@ -442,7 +443,7 @@ def test_stock_chart_sorted_descending(
     data = response.json()
 
     quantities = [
-        item["stock_qty"]
+        Decimal(str(item["stock_qty"]))
         for item in data
     ]
 

@@ -153,6 +153,12 @@ def create_stock_balance_service(
 
     with UnitOfWork(db):
         repo.lock_inventory([data.product_id])
+        # A competing initializer may have committed while this request waited.
+        if repo.get_exact(
+            product_id=data.product_id, warehouse_id=data.warehouse_id,
+            location_id=data.location_id, batch_id=data.batch_id,
+        ) is not None:
+            raise StockBalanceAlreadyExistsException()
         repo.add(balance)
 
         db.flush()

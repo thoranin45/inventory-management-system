@@ -1,3 +1,6 @@
+from app.core.quantity import encode_quantities
+
+
 def success_response(
     message: str,
     data=None
@@ -5,5 +8,5 @@ def success_response(
     return {
         "success": True,
         "message": message,
-        "data": data
+        "data": encode_quantities(data)
     }

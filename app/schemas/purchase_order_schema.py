@@ -86,16 +86,6 @@ class ReceivePO(BaseModel):
                 "Duplicate product_id is not allowed"
             )
 
-        lot_numbers = [
-            item.lot_no.strip().lower()
-            for item in self.items
-        ]
-
-        if len(lot_numbers) != len(set(lot_numbers)):
-            raise ValueError(
-                "Duplicate lot_no is not allowed"
-            )
-
         return self
 
 

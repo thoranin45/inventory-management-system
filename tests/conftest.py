@@ -7,7 +7,9 @@ from uuid import uuid4
 import pytest
 from dotenv import load_dotenv
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import text
+from alembic import command
+from tests.database_support import make_schema_engine, migration_config
 from sqlalchemy.orm import Session, sessionmaker
 
 # Keep test logging out of the production logs directory.
@@ -36,17 +38,8 @@ if not TEST_DATABASE_URL:
         "TEST_DATABASE_URL is missing from .env.test"
     )
 
-if "test" not in TEST_DATABASE_URL.lower():
-    raise RuntimeError(
-        "Refusing to run tests because the database URL "
-        "does not appear to be a test database"
-    )
-
-
-test_engine = create_engine(
-    TEST_DATABASE_URL,
-    pool_pre_ping=True,
-)
+TEST_SCHEMA = "test_" + uuid4().hex
+test_engine = make_schema_engine(TEST_DATABASE_URL, TEST_SCHEMA)
 
 TestingSessionLocal = sessionmaker(
     bind=test_engine,
@@ -128,21 +121,16 @@ def seed_test_foundation() -> None:
     autouse=True,
 )
 def prepare_test_database():
-    Base.metadata.drop_all(
-        bind=test_engine
-    )
-
-    Base.metadata.create_all(
-        bind=test_engine
-    )
-
-    seed_test_foundation()
-
-    yield
-
-    Base.metadata.drop_all(
-        bind=test_engine
-    )
+    try:
+        with test_engine.begin() as connection:
+            connection.execute(text(f'CREATE SCHEMA "{TEST_SCHEMA}"'))
+            command.upgrade(migration_config(connection), "head")
+        seed_test_foundation()
+        yield
+    finally:
+        with test_engine.begin() as connection:
+            connection.execute(text(f'DROP SCHEMA IF EXISTS "{TEST_SCHEMA}" CASCADE'))
+        test_engine.dispose()
 
 
 @pytest.fixture(autouse=True)
