@@ -738,3 +738,80 @@ cannot perform its mandatory preflight.
 Phase 4 tests reuse dedicated TEST_DATABASE_URL validation and disposable schemas
 created by Alembic. No production reconciliation, picking waves, partial shipment,
 transfer IN_TRANSIT workflow, frontend, or Phase 5 functionality is included.
+
+## Phase 5: purchase confirmation and receipt replay
+
+New POs start DRAFT. Admin confirmation transitions DRAFT -> CONFIRMED without
+inventory effects. Receipts accept CONFIRMED/PARTIALLY_RECEIVED and atomically
+advance cumulative received quantities to PARTIALLY_RECEIVED or RECEIVED. Admin
+cancellation accepts DRAFT/CONFIRMED only when every received quantity is zero.
+No close-short or receipt reversal is introduced.
+
+POST /api/v1/purchase-orders/{id}/confirm is Admin-only. Existing creation, reads,
+POST /receive and POST /cancel routes remain. Warehouse retains read/receive;
+it cannot create, confirm, or cancel. Clients must confirm new orders explicitly.
+
+Every receive call requires an Idempotency-Key header (1–128 characters: letters,
+digits, dot, underscore, colon, or hyphen). Retain the same key and payload for a
+network retry. A fresh physical receipt requires a new key. Keys are scoped to the
+PO. Same key/same canonical payload returns the original response, including the
+original PO status and receipt-time stock values; changed payload returns 409.
+Failed transactions leave no committed event and can be retried. Successful replay
+performs no new stock, movement, transaction, or business audit writes.
+
+Canonical fingerprints include PO, sorted products, three-place exact quantities,
+verbatim lot strings, dates, and storage. Omitted/NULL warehouse and location are
+represented by a stable MAIN/DEFAULT token. Explicit IDs remain explicit and are
+not treated as the same request as omitted defaults. Replay is checked before
+mutable product, destination, lot and terminal-state validation. Normal permission
+checks still apply; the original receipt actor is retained.
+
+PurchaseOrderReceipt stores event identity, a unique server-generated POR number,
+operation key/fingerprint, timestamp/actor and a JSONB replay snapshot. The snapshot
+is not inventory authority. InventoryMovement has nullable purchase_receipt_id,
+purchase_order_item_id and stock_transaction_id links. Existing movement quantities
+remain the physical ledger; no receipt-line ledger is duplicated. The unique
+receipt/item pair preserves one receipt line per PO product. Historical links stay
+NULL and historical event identities are never fabricated.
+
+Non-batch products receive directly into batch_id=NULL balances. Lot/date metadata
+is rejected. Batch products require a lot; dates are optional without expiry
+tracking, with expiry > manufacturing when both are given. Expiry-tracked products
+require both dates. New independent receipts into an existing same-product lot are
+still rejected; other products may share its text. No case folding, lot merging or
+new current-date expiry policy is introduced. A same-key replay bypasses duplicate
+lot checks because it does not receive again.
+
+Receipts preserve reservations, capture actual balance_before and balance_after,
+write existing IN_PO transactions/PURCHASE_RECEIPT movements, synchronize Product
+and ProductBatch aggregates and update PO items in one UnitOfWork. PO/item locks
+precede canonical product/batch/balance locks. All lines roll back together.
+
+Receipt responses preserve received_batches for batch lines and add received_items,
+receipt_id and receipt_number. Non-batch responses have an empty received_batches.
+Batch-list date fields permit NULL for batches without expiry tracking. Typed Decimal output remains unchanged. Warehouse/location remain request-level;
+both omitted use MAIN/DEFAULT, incomplete pairs fail, and invalid explicit storage
+never falls back.
+
+Migration e51a00000001 follows e41a00000001. Pause writers and coordinate schema and
+application deployment. Valid legacy PENDING maps explicitly to CONFIRMED because
+those orders were already receivable. Other legacy statuses and quantities remain.
+No historical confirmation actor or receipt event is created. New event sums cover
+only new receipts, not the unknown historical component of received_quantity.
+
+Read-only preflight: set an explicit PHASE5_PREFLIGHT_DATABASE_URL and run
+`python -m scripts.check_phase5_preflight`. It does not load application settings
+or .env files. It checks statuses, ownership, quantity bounds/precision, duplicate
+products, status/received consistency, empty POs and batches on non-batch products.
+Incompatible data reports identifiers and stops; resolve it explicitly outside
+this migration. The migration repeats validation under locks. It never repairs
+inventory, changes tracking flags, merges batches, or invents receipt history.
+A live PostgreSQL connection is required; offline SQL cannot perform preflight.
+
+Downgrade refuses recorded receipt events or unsupported lifecycle states such as
+DRAFT. With no such history, CONFIRMED maps back to PENDING and only new empty schema
+and nullable links are removed. Do not delete events or rewrite state to bypass
+this guard. No production migration or preflight was executed during development.
+
+Phase 5 adds no AP/accounting, close-short, transfer IN_TRANSIT, or Phase 6 work.
+Tests use dedicated TEST_DATABASE_URL and disposable Alembic-built schemas.

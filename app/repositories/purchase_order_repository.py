@@ -2,7 +2,7 @@ from sqlalchemy.orm import Session
 
 from app.models import (
     PurchaseOrder,
-    PurchaseOrderItem,
+    PurchaseOrderItem, PurchaseOrderReceipt,
 )
 
 
@@ -52,7 +52,7 @@ class PurchaseOrderRepository:
             .filter(
                 PurchaseOrder.id == po_id
             )
-            .with_for_update()
+            .populate_existing().with_for_update()
             .first()
         )
 
@@ -95,7 +95,7 @@ class PurchaseOrderRepository:
             .order_by(
                 PurchaseOrderItem.id.asc()
             )
-            .with_for_update()
+            .populate_existing().with_for_update()
             .all()
         )
     
@@ -106,3 +106,12 @@ class PurchaseOrderRepository:
         self.db.add(purchase_order)
 
         return purchase_order
+
+    def get_receipt(self, po_id: int, operation_key: str):
+        return (self.db.query(PurchaseOrderReceipt)
+                .filter_by(po_id=po_id, operation_key=operation_key).first())
+
+    def create_receipt(self, receipt: PurchaseOrderReceipt):
+        self.db.add(receipt)
+        self.db.flush()
+        return receipt

@@ -140,9 +140,10 @@ def test_po_receiving_explicit_location_maintains_aggregates(client, admin_heade
     supplier = purchase._create_supplier(client, admin_headers)
     product = purchase._create_product(client, admin_headers)
     order = purchase._create_purchase_order(client, admin_headers, supplier["id"], product["id"])
+    purchase._confirm_purchase_order(client, admin_headers, order['id'])
     payload = purchase._receive_payload(product["id"], quantity=4)
     payload.update(warehouse_id=transfer_storage["destination_warehouse_id"], location_id=transfer_storage["destination_location_id"])
-    response = client.post(f"/api/v1/purchase-orders/{order['id']}/receive", headers=admin_headers, json=payload)
+    response = client.post(f"/api/v1/purchase-orders/{order['id']}/receive", headers={**admin_headers, "Idempotency-Key": uuid4().hex}, json=payload)
     assert response.status_code == 200
     assert_aggregates(db_session, product["id"])
     movement = db_session.query(InventoryMovement).filter_by(product_id=product["id"]).one()

@@ -33,7 +33,7 @@ def test_phase4_legacy_upgrade_and_compatible_downgrade(migration_engine, batch,
     with migration_engine.begin() as c:
         legacy(c, status, batch)
         before = inventory(c)
-    upgrade(migration_engine, "head")
+    upgrade(migration_engine, "e41a00000001")
     with migration_engine.connect() as c:
         assert inventory(c) == before
         order = c.execute(text("SELECT * FROM sales_orders WHERE id=201")).mappings().one()
@@ -50,7 +50,7 @@ def test_phase4_legacy_upgrade_and_compatible_downgrade(migration_engine, batch,
     with migration_engine.begin() as c:
         command.downgrade(migration_config(c), PHASE3)
         assert inventory(c) == before
-    upgrade(migration_engine, "head")
+    upgrade(migration_engine, "e41a00000001")
 
 
 @pytest.mark.parametrize("sql,reason", [
@@ -67,7 +67,7 @@ def test_phase4_preflight_refuses_without_changes(migration_engine, sql, reason)
         c.execute(text(sql))
         before = inventory(c)
     with pytest.raises(RuntimeError, match=reason):
-        upgrade(migration_engine, "head")
+        upgrade(migration_engine, "e41a00000001")
     with migration_engine.connect() as c:
         assert inventory(c) == before
         assert c.scalar(text("SELECT version_num FROM alembic_version")) == PHASE3
@@ -79,7 +79,7 @@ def test_phase4_downgrade_refuses_history(migration_engine, sql):
     upgrade(migration_engine, PHASE3)
     with migration_engine.begin() as c:
         legacy(c)
-    upgrade(migration_engine, "head")
+    upgrade(migration_engine, "e41a00000001")
     with migration_engine.begin() as c:
         c.execute(text(sql))
         before = inventory(c)
@@ -96,7 +96,7 @@ def test_phase4_progress_constraint(migration_engine, values):
     upgrade(migration_engine, PHASE3)
     with migration_engine.begin() as c:
         legacy(c)
-    upgrade(migration_engine, "head")
+    upgrade(migration_engine, "e41a00000001")
     with pytest.raises(IntegrityError):
         with migration_engine.begin() as c:
             c.execute(text("UPDATE sales_order_batch_allocations SET " + values))

@@ -17,6 +17,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.sql import func
+from sqlalchemy.dialects.postgresql import JSONB
 
 Base = declarative_base()
 
@@ -1317,6 +1318,10 @@ class InventoryTransferItem(Base):
 class InventoryMovement(Base):
     __tablename__ = "inventory_movements"
 
+    purchase_receipt_id = Column(Integer, ForeignKey("purchase_order_receipts.id"))
+    purchase_order_item_id = Column(Integer, ForeignKey("purchase_order_items.id"))
+    stock_transaction_id = Column(Integer, ForeignKey("stock_transactions.id"))
+
     id = Column(
         Integer,
         primary_key=True,
@@ -1419,6 +1424,7 @@ class InventoryMovement(Base):
     )
 
     __table_args__ = (
+        UniqueConstraint("purchase_receipt_id", "purchase_order_item_id", name="uq_receipt_movement_item"),
         CheckConstraint(
             "quantity <> 0",
             name=(
@@ -1479,3 +1485,19 @@ class InventoryMovement(Base):
             "created_at",
         ),
     )
+
+
+class PurchaseOrderReceipt(Base):
+    __tablename__ = "purchase_order_receipts"
+    __table_args__ = (
+        UniqueConstraint("po_id", "operation_key", name="uq_po_receipt_operation"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    po_id = Column(Integer, ForeignKey("purchase_orders.id"), nullable=False)
+    receipt_number = Column(String(100), unique=True, nullable=False)
+    operation_key = Column(String(128), nullable=False)
+    request_fingerprint = Column(String(64), nullable=False)
+    received_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    received_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    response_snapshot = Column(JSONB, nullable=False)

@@ -24,8 +24,8 @@ class BatchResponse(BaseModel):
     id: int
     product_id: int
     lot_no: str
-    mfg_date: date
-    expiry_date: date
+    mfg_date: date | None
+    expiry_date: date | None
     quantity: Decimal
     created_at: datetime | None = None
 

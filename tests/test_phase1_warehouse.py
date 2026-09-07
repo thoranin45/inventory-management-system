@@ -1,3 +1,4 @@
+from uuid import uuid4
 from decimal import Decimal
 
 from app.models import InventoryMovement
@@ -11,8 +12,9 @@ def test_warehouse_can_receive_purchase_order(client, admin_headers, warehouse_h
     supplier = purchase._create_supplier(client, admin_headers)
     product = purchase._create_product(client, admin_headers)
     order = purchase._create_purchase_order(client, admin_headers, supplier["id"], product["id"])
+    purchase._confirm_purchase_order(client, admin_headers, order['id'])
     response = client.post(
-        f"/api/v1/purchase-orders/{order['id']}/receive", headers=warehouse_headers,
+        f"/api/v1/purchase-orders/{order['id']}/receive", headers={**warehouse_headers, "Idempotency-Key": uuid4().hex},
         json=purchase._receive_payload(product["id"], quantity=10),
     )
     assert response.status_code == 200

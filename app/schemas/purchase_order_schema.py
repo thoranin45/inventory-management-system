@@ -16,6 +16,7 @@ class PurchaseOrderItemCreate(BaseModel):
         gt=0,
         max_digits=18,
         decimal_places=3,
+        allow_inf_nan=False,
     )
     unit_price: Decimal = Field(..., ge=0)
 
@@ -54,16 +55,17 @@ class ReceivePOItem(BaseModel):
         gt=0,
         max_digits=18,
         decimal_places=3,
+        allow_inf_nan=False,
     )
 
-    lot_no: str = Field(
-        ...,
+    lot_no: str | None = Field(
+        default=None,
         min_length=1,
         max_length=100,
     )
 
-    mfg_date: date
-    expiry_date: date
+    mfg_date: date | None = None
+    expiry_date: date | None = None
 
 
 class ReceivePO(BaseModel):
@@ -137,8 +139,20 @@ class ReceivedBatchResponse(BaseModel):
     current_stock: Decimal
 
 
+class ReceivedItemResponse(BaseModel):
+    po_item_id: int
+    product_id: int
+    batch_id: int | None
+    stock_balance_id: int
+    received_quantity: Decimal
+    current_stock: Decimal
+
+
 class PurchaseOrderReceiveResponse(BaseModel):
     id: int
     po_number: str
     status: str
     received_batches: list[ReceivedBatchResponse]
+    received_items: list[ReceivedItemResponse]
+    receipt_id: int
+    receipt_number: str

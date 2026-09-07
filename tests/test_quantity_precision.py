@@ -1,4 +1,5 @@
-﻿from datetime import date, timedelta
+from uuid import uuid4
+from datetime import date, timedelta
 from decimal import Decimal
 from io import BytesIO
 
@@ -115,11 +116,12 @@ def test_two_products_can_receive_same_lot_in_one_po(client, admin_headers):
     })
     assert response.status_code == 201
     order_id = response.json()["data"]["id"]
+    purchase._confirm_purchase_order(client, admin_headers, order_id)
     items = []
     for product in products:
         item = purchase._receive_payload(product["id"], quantity="1.125", lot_no="SHARED-LOT")["items"][0]
         items.append(item)
-    response = client.post(f"/api/v1/purchase-orders/{order_id}/receive", headers=admin_headers, json={"items": items})
+    response = client.post(f"/api/v1/purchase-orders/{order_id}/receive", headers={**admin_headers, "Idempotency-Key": uuid4().hex}, json={"items": items})
     assert response.status_code == 200
     batches = response.json()["data"]["received_batches"]
     assert len({b["batch_id"] for b in batches}) == 2
@@ -139,7 +141,6 @@ def test_dashboard_repository_keeps_fractional_sums(client, admin_headers, db_se
 def test_batch_lot_scope_preserves_case_and_duplicate_rejection(client, admin_headers):
     first = _create_product(client, admin_headers)
     second = _create_product(client, admin_headers)
-    from uuid import uuid4
     lot = "SCOPE-" + uuid4().hex
     payload = {"quantity": "0.001", "lot_no": lot,
                "mfg_date": date.today().isoformat(),

@@ -1,3 +1,4 @@
+from uuid import uuid4
 """Real overlapping PostgreSQL requests; all inventory setup uses audited APIs."""
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
@@ -88,9 +89,11 @@ def overlap(state, requests, table, ids):
         barrier.wait()
 
     def invoke(request):
-        method, path, payload = request
+        method, path, payload = request[:3]
         with TestClient(app, headers=state.headers) as worker:
-            return worker.request(method, path, json=payload)
+            if len(request) == 4:
+                return worker.request(method, path, json=payload, headers={"Idempotency-Key": request[3]})
+            return worker.request(method, path, json=payload, headers={"Idempotency-Key": uuid4().hex})
 
     with state.engine.connect() as blocker:
         transaction = blocker.begin()
@@ -227,6 +230,7 @@ def test_po_partial_receipt_race(concurrent_inventory, quantity, statuses, total
     product = purchase._create_product(s.client, s.headers)
     supplier = purchase._create_supplier(s.client, s.headers)
     order = purchase._create_purchase_order(s.client, s.headers, supplier["id"], product["id"], quantity=1)
+    purchase._confirm_purchase_order(s.client, s.headers, order['id'])
     requests = [("POST", f"/api/v1/purchase-orders/{order['id']}/receive",
                  purchase._receive_payload(product["id"], quantity=quantity, lot_no=f"PO-RACE-{i}")) for i in range(2)]
     responses = overlap(s, requests, "purchase_orders", [order["id"]])
@@ -242,6 +246,7 @@ def test_batch_creation_races_po_receipt(concurrent_inventory):
     product = purchase._create_product(s.client, s.headers)
     supplier = purchase._create_supplier(s.client, s.headers)
     order = purchase._create_purchase_order(s.client, s.headers, supplier["id"], product["id"], quantity=1)
+    purchase._confirm_purchase_order(s.client, s.headers, order['id'])
     requests = [
         ("POST", "/api/v1/batches", batch_payload(product["id"], "0.125", "SHARED")),
         ("POST", f"/api/v1/purchase-orders/{order['id']}/receive",
@@ -383,3 +388,61 @@ def test_fulfillment_overlap(concurrent_inventory, race):
         assert db.query(StockTransaction).filter_by(transaction_type="SALE_SHIPMENT").count() == int(shipped)
         if race == "confirm-cancel":
             assert order.status == "CANCELLED"
+
+
+def _receipt_race_order(s, products, quantity="1.000"):
+    supplier = purchase._create_supplier(s.client, s.headers)
+    response = s.client.post("/api/v1/purchase-orders", json={"supplier_id":supplier["id"], "items":[
+        {"product_id":p["id"],"quantity":quantity,"unit_price":1} for p in products]})
+    assert response.status_code == 201
+    po_id=response.json()["data"]["id"]
+    purchase._confirm_purchase_order(s.client,s.headers,po_id)
+    return po_id
+
+
+@pytest.mark.parametrize("race", ["same-key", "changed-payload", "same-lot", "different-products-lot", "missing-balance", "multiline", "cancel"])
+def test_receipt_operation_races(concurrent_inventory,race):
+    from app.models import PurchaseOrderReceipt, PurchaseOrder
+    s=concurrent_inventory
+    batch=race in {"same-lot","different-products-lot"}
+    create=purchase._create_product if batch else _create_product
+    products=[create(s.client,s.headers)]
+    if race in {"different-products-lot","multiline"}:
+        products.append(create(s.client,s.headers))
+    same_order=race in {"same-key","changed-payload","cancel"}
+    first=_receipt_race_order(s,products if race=="multiline" else products[:1])
+    second=first if same_order else _receipt_race_order(s,list(reversed(products)) if race=="multiline" else products[-1:])
+    def payload(ps,amount):
+        return {"items":[purchase._receive_payload(p["id"],quantity=amount,lot_no="RACE-LOT")["items"][0]
+                         if batch else {"product_id":p["id"],"quantity":amount} for p in ps]}
+    amount="1.000" if race=="same-key" else "0.500"
+    first_payload=payload(products if race=="multiline" else products[:1],amount)
+    second_payload=payload(list(reversed(products)) if race=="multiline" else products[-1:],"0.750" if race=="changed-payload" else amount)
+    key=uuid4().hex
+    requests=[("POST",f"/api/v1/purchase-orders/{first}/receive",first_payload,key),
+              ("POST",f"/api/v1/purchase-orders/{second}/receive",second_payload,key if same_order else uuid4().hex)]
+    if race=="cancel":
+        requests[1]=("POST",f"/api/v1/purchase-orders/{first}/cancel",None)
+    responses=overlap(s,requests,"purchase_orders" if same_order else "products",[first] if same_order else [p["id"] for p in products])
+    expected=[200,409] if race in {"changed-payload","same-lot","cancel"} else [200,200]
+    assert sorted(r.status_code for r in responses)==expected
+    if race=="same-key":
+        assert responses[0].json()==responses[1].json()
+        replay=s.client.post(f"/api/v1/purchase-orders/{first}/receive",json=first_payload,headers={"Idempotency-Key":key})
+        assert replay.json()==responses[0].json()
+    with s.sessions() as db:
+        events=db.query(PurchaseOrderReceipt).all()
+        expected_events=1 if race in {"same-key","changed-payload","same-lot"} else (int(db.get(PurchaseOrder,first).status!="CANCELLED") if race=="cancel" else 2)
+        assert len(events)==expected_events
+        movements=db.query(InventoryMovement).filter_by(movement_type="PURCHASE_RECEIPT").all()
+        assert len(movements)==expected_events*(2 if race=="multiline" else 1)
+        assert db.query(StockTransaction).filter_by(transaction_type="IN_PO").count()==len(movements)
+        for p in products:
+            balances=db.query(StockBalance).filter_by(product_id=p["id"]).all()
+            assert len(balances)<=1 and all(b.reserved_qty==0 for b in balances)
+            committed=sum((m.quantity for m in movements if m.product_id==p["id"]),Decimal(0))
+            assert sum((b.on_hand_qty for b in balances),Decimal(0))==committed
+            items=db.query(PurchaseOrderItem).filter_by(product_id=p["id"]).all()
+            assert sum((i.received_quantity for i in items),Decimal(0))==committed
+            assert all(i.received_quantity<=i.quantity for i in items)
+        assert db.query(ProductBatch).count()==(expected_events if batch else 0)

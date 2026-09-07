@@ -15,7 +15,7 @@ def _create_supplier(
 
     response = client.post(
         "/api/v1/suppliers",
-        headers=admin_headers,
+        headers={**admin_headers, "Idempotency-Key": uuid4().hex},
         json={
             "supplier_name": (
                 f"PO Test Supplier {unique_value}"
@@ -43,7 +43,7 @@ def _create_product(
 
     response = client.post(
         "/api/v1/products",
-        headers=admin_headers,
+        headers={**admin_headers, "Idempotency-Key": uuid4().hex},
         json={
             "sku": f"PO-{unique_value}",
             "barcode": f"883{unique_value}",
@@ -53,6 +53,8 @@ def _create_product(
             "price": 100,
             "stock_qty": 0,
             "category_id": None,
+            "track_batch": True,
+            "track_expiry": True,
         },
     )
 
@@ -72,7 +74,7 @@ def _create_purchase_order(
 ) -> dict:
     response = client.post(
         "/api/v1/purchase-orders",
-        headers=admin_headers,
+        headers={**admin_headers, "Idempotency-Key": uuid4().hex},
         json={
             "supplier_id": supplier_id,
             "items": [
@@ -134,7 +136,7 @@ def _get_product(
 ) -> dict:
     response = client.get(
         f"/api/v1/products/{product_id}",
-        headers=admin_headers,
+        headers={**admin_headers, "Idempotency-Key": uuid4().hex},
     )
 
     assert response.status_code == 200
@@ -180,7 +182,7 @@ def test_create_purchase_order_success(
 
     response = client.post(
         "/api/v1/purchase-orders",
-        headers=admin_headers,
+        headers={**admin_headers, "Idempotency-Key": uuid4().hex},
         json={
             "supplier_id": supplier["id"],
             "items": [
@@ -204,7 +206,7 @@ def test_create_purchase_order_success(
     assert data["id"] > 0
     assert data["po_number"].startswith("PO-")
     assert data["supplier_id"] == supplier["id"]
-    assert data["status"] == "PENDING"
+    assert data["status"] == "DRAFT"
     assert float(data["total_amount"]) == 601.00
     assert len(data["items"]) == 1
 
@@ -229,7 +231,7 @@ def test_create_po_supplier_not_found(
 
     response = client.post(
         "/api/v1/purchase-orders",
-        headers=admin_headers,
+        headers={**admin_headers, "Idempotency-Key": uuid4().hex},
         json={
             "supplier_id": 999999999,
             "items": [
@@ -261,7 +263,7 @@ def test_create_po_product_not_found(
 
     response = client.post(
         "/api/v1/purchase-orders",
-        headers=admin_headers,
+        headers={**admin_headers, "Idempotency-Key": uuid4().hex},
         json={
             "supplier_id": supplier["id"],
             "items": [
@@ -298,7 +300,7 @@ def test_create_po_duplicate_product_validation(
 
     response = client.post(
         "/api/v1/purchase-orders",
-        headers=admin_headers,
+        headers={**admin_headers, "Idempotency-Key": uuid4().hex},
         json={
             "supplier_id": supplier["id"],
             "items": [
@@ -372,7 +374,7 @@ def test_get_purchase_orders_and_detail(
     detail = detail_response.json()["data"]
 
     assert detail["id"] == created["id"]
-    assert detail["status"] == "PENDING"
+    assert detail["status"] == "DRAFT"
     assert float(detail["total_amount"]) == 600
     assert len(detail["items"]) == 1
 
@@ -416,6 +418,7 @@ def test_receive_purchase_order_success(
         quantity=12,
         unit_price=80,
     )
+    _confirm_purchase_order(warehouse_client, admin_headers, created['id'])
 
     payload = _receive_payload(
         product["id"],
@@ -427,7 +430,7 @@ def test_receive_purchase_order_success(
             f"/api/v1/purchase-orders/"
             f"{created['id']}/receive"
         ),
-        headers=admin_headers,
+        headers={**admin_headers, "Idempotency-Key": uuid4().hex},
         json=payload,
     )
 
@@ -529,6 +532,7 @@ def test_receive_purchase_order_twice(
         supplier["id"],
         product["id"],
     )
+    _confirm_purchase_order(client, admin_headers, created['id'])
 
     first_payload = _receive_payload(
         product["id"],
@@ -540,7 +544,7 @@ def test_receive_purchase_order_twice(
             f"/api/v1/purchase-orders/"
             f"{created['id']}/receive"
         ),
-        headers=admin_headers,
+        headers={**admin_headers, "Idempotency-Key": uuid4().hex},
         json=first_payload,
     )
 
@@ -551,7 +555,7 @@ def test_receive_purchase_order_twice(
             f"/api/v1/purchase-orders/"
             f"{created['id']}/receive"
         ),
-        headers=admin_headers,
+        headers={**admin_headers, "Idempotency-Key": uuid4().hex},
         json=_receive_payload(
             product["id"],
             quantity=10,
@@ -585,6 +589,7 @@ def test_receive_po_invalid_batch_date(
         supplier["id"],
         product["id"],
     )
+    _confirm_purchase_order(client, admin_headers, created['id'])
 
     same_date = date.today().isoformat()
 
@@ -593,7 +598,7 @@ def test_receive_po_invalid_batch_date(
             f"/api/v1/purchase-orders/"
             f"{created['id']}/receive"
         ),
-        headers=admin_headers,
+        headers={**admin_headers, "Idempotency-Key": uuid4().hex},
         json={
             "items": [
                 {
@@ -647,7 +652,7 @@ def test_partial_receive_purchase_order(
 
     response = client.post(
         "/api/v1/purchase-orders",
-        headers=admin_headers,
+        headers={**admin_headers, "Idempotency-Key": uuid4().hex},
         json={
             "supplier_id": supplier["id"],
             "items": [
@@ -668,13 +673,14 @@ def test_partial_receive_purchase_order(
     assert response.status_code == 201
 
     po_id = response.json()["data"]["id"]
+    _confirm_purchase_order(client, admin_headers, po_id)
 
     receive_response = client.post(
         (
             f"/api/v1/purchase-orders/"
             f"{po_id}/receive"
         ),
-        headers=admin_headers,
+        headers={**admin_headers, "Idempotency-Key": uuid4().hex},
         json=_receive_payload(
             first_product["id"],
             quantity=5,
@@ -729,13 +735,14 @@ def test_cancel_purchase_order_success(
         supplier["id"],
         product["id"],
     )
+    _confirm_purchase_order(client, admin_headers, created['id'])
 
     response = client.post(
         (
             f"/api/v1/purchase-orders/"
             f"{created['id']}/cancel"
         ),
-        headers=admin_headers,
+        headers={**admin_headers, "Idempotency-Key": uuid4().hex},
     )
 
     assert response.status_code == 200
@@ -769,6 +776,7 @@ def test_cancel_purchase_order_twice(
         supplier["id"],
         product["id"],
     )
+    _confirm_purchase_order(client, admin_headers, created['id'])
 
     url = (
         f"/api/v1/purchase-orders/"
@@ -777,14 +785,14 @@ def test_cancel_purchase_order_twice(
 
     first_response = client.post(
         url,
-        headers=admin_headers,
+        headers={**admin_headers, "Idempotency-Key": uuid4().hex},
     )
 
     assert first_response.status_code == 200
 
     second_response = client.post(
         url,
-        headers=admin_headers,
+        headers={**admin_headers, "Idempotency-Key": uuid4().hex},
     )
 
     assert second_response.status_code == 409
@@ -814,13 +822,14 @@ def test_receive_cancelled_purchase_order(
         supplier["id"],
         product["id"],
     )
+    _confirm_purchase_order(client, admin_headers, created['id'])
 
     cancel_response = client.post(
         (
             f"/api/v1/purchase-orders/"
             f"{created['id']}/cancel"
         ),
-        headers=admin_headers,
+        headers={**admin_headers, "Idempotency-Key": uuid4().hex},
     )
 
     assert cancel_response.status_code == 200
@@ -830,7 +839,7 @@ def test_receive_cancelled_purchase_order(
             f"/api/v1/purchase-orders/"
             f"{created['id']}/receive"
         ),
-        headers=admin_headers,
+        headers={**admin_headers, "Idempotency-Key": uuid4().hex},
         json=_receive_payload(
             product["id"],
             quantity=10,
@@ -863,3 +872,9 @@ def test_create_purchase_order_without_token(
 
     assert response.status_code == 401
 
+
+
+def _confirm_purchase_order(client, headers, po_id):
+    response = client.post(f"/api/v1/purchase-orders/{po_id}/confirm", headers=headers)
+    assert response.status_code == 200, response.text
+    return response.json()["data"]
