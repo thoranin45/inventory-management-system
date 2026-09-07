@@ -6,12 +6,20 @@ variable. No .env files are opened, and connection errors never expose credentia
 import json
 import os
 from collections import defaultdict
+from datetime import date
 from decimal import Decimal
 
 from sqlalchemy import create_engine, text
 
+# Business calendar for the read-only diagnostic. Kept self-contained (no app
+# config import): overridable via INVENTORY_DIAGNOSTIC_TIMEZONE, default matches
+# the application's Asia/Bangkok business timezone.
+DIAGNOSTIC_TIMEZONE = os.environ.get("INVENTORY_DIAGNOSTIC_TIMEZONE", "Asia/Bangkok")
 
-def analyze_inventory(snapshot: dict) -> list[dict]:
+
+def analyze_inventory(snapshot: dict, today: date | None = None) -> list[dict]:
+    if today is None:
+        today = date.today()
     findings = []
 
     def report(check, classification, **evidence):
@@ -87,7 +95,59 @@ def analyze_inventory(snapshot: dict) -> list[dict]:
                    movement_ids=[m["id"] for m in entries])
 
     _analyze_transfers(snapshot, balances, movements, report)
+    _analyze_expiry(snapshot, balances, today, report)
     return findings
+
+
+def _analyze_expiry(snapshot, balances, today, report):
+    """Read-only Phase 7 view: how much owned stock is expired, still operationally
+    eligible, or in transit, and whether the partition reconciles against
+    Product.stock_qty. Classifies only; never reconciles or mutates."""
+    batch_expiry = {b["id"]: b.get("expiry_date") for b in snapshot.get("batches", [])}
+    transit_warehouse_ids = {
+        w["id"] for w in snapshot.get("warehouses", [])
+        if w.get("warehouse_code") == "__TRANSIT__" or w.get("warehouse_type") == "TRANSIT"
+    }
+
+    def is_expired_batch(batch_id):
+        expiry = batch_expiry.get(batch_id)
+        return expiry is not None and expiry < today
+
+    by_product = defaultdict(list)
+    for b in balances:
+        by_product[b["product_id"]].append(b)
+
+    owned_by_product = {p["id"]: p["stock_qty"] for p in snapshot.get("products", [])}
+
+    for product_id in sorted(set(by_product) | set(owned_by_product)):
+        rows = by_product.get(product_id, [])
+        transit_qty = sum((r["on_hand_qty"] for r in rows if r["warehouse_id"] in transit_warehouse_ids), Decimal("0"))
+        operational = [r for r in rows if r["warehouse_id"] not in transit_warehouse_ids]
+        expired_qty = sum((r["on_hand_qty"] for r in operational if is_expired_batch(r["batch_id"])), Decimal("0"))
+        eligible_on_hand = sum((r["on_hand_qty"] for r in operational if not is_expired_batch(r["batch_id"])), Decimal("0"))
+        eligible_reserved = sum((r["reserved_qty"] for r in operational if not is_expired_batch(r["batch_id"])), Decimal("0"))
+        eligible_available = eligible_on_hand - eligible_reserved
+        owned_total = sum((r["on_hand_qty"] for r in rows), Decimal("0"))
+
+        report("expired_owned_quantity", "CONSISTENT",
+               product_id=product_id, expired_owned=expired_qty, in_transit=transit_qty)
+        report("operationally_eligible_quantity", "CONSISTENT",
+               product_id=product_id, eligible_on_hand=eligible_on_hand,
+               eligible_available=eligible_available, reserved=eligible_reserved)
+
+        stored = owned_by_product.get(product_id)
+        # every operational balance is either expired or eligible; plus transit.
+        partition_ok = owned_total == transit_qty + expired_qty + eligible_on_hand
+        report("owned_partition_reconciliation",
+               "CONSISTENT" if partition_ok else "UNRESOLVED",
+               product_id=product_id, owned_total=owned_total, in_transit=transit_qty,
+               expired=expired_qty, eligible_on_hand=eligible_on_hand,
+               delta=owned_total - (transit_qty + expired_qty + eligible_on_hand))
+        if stored is not None:
+            report("owned_aggregate_matches_balances",
+                   "CONSISTENT" if stored == owned_total else "UNRESOLVED",
+                   product_id=product_id, stored_stock_qty=stored, balance_total=owned_total,
+                   note="Product.stock_qty is total owned inventory incl. expired and transit")
 
 
 def _analyze_transfers(snapshot, balances, movements, report):
@@ -176,10 +236,11 @@ def _analyze_transfers(snapshot, balances, movements, report):
                outstanding=outstanding, delta=balance["on_hand_qty"] - outstanding)
 
 
-def diagnose_inventory(engine) -> list[dict]:
+def diagnose_inventory(engine, today: date | None = None) -> list[dict]:
     queries = {
         "products": "SELECT id, stock_qty FROM products",
-        "batches": "SELECT id, product_id, quantity FROM product_batches",
+        "batches": "SELECT id, product_id, quantity, expiry_date FROM product_batches",
+        "warehouses": "SELECT id, warehouse_code, warehouse_type FROM warehouses",
         "balances": "SELECT id, product_id, warehouse_id, location_id, batch_id, on_hand_qty, reserved_qty FROM stock_balances",
         "movements": (
             "SELECT id, product_id, warehouse_id, location_id, batch_id, quantity, balance_before, balance_after, "
@@ -196,8 +257,12 @@ def diagnose_inventory(engine) -> list[dict]:
     with engine.connect().execution_options(isolation_level="REPEATABLE READ") as connection:
         with connection.begin():
             connection.execute(text("SET TRANSACTION READ ONLY"))
+            if today is None:
+                today = connection.execute(
+                    text("SELECT (now() AT TIME ZONE :tz)::date"), {"tz": DIAGNOSTIC_TIMEZONE}
+                ).scalar()
             snapshot = {name: list(connection.execute(text(sql)).mappings()) for name, sql in queries.items()}
-            return analyze_inventory(snapshot)
+            return analyze_inventory(snapshot, today=today)
 
 
 def main() -> int:

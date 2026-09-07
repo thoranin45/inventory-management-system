@@ -1,7 +1,8 @@
+from datetime import date
 from decimal import Decimal
 
 from fastapi import HTTPException
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -520,3 +521,44 @@ class StockBalanceRepository:
         if len(rows) != 1:
             raise HTTPException(409, "System transit configuration is missing or incompatible")
         return rows[0]
+
+    # ------------------------------------------------------------------ #
+    # Phase 7: derived operational availability. Never persisted, never a
+    # replacement for Product.stock_qty (which stays total owned inventory).
+    # ------------------------------------------------------------------ #
+    def _operational_available_query(self, today: date):
+        return (
+            self.db.query(
+                StockBalance.product_id.label("product_id"),
+                func.coalesce(
+                    func.sum(StockBalance.on_hand_qty - StockBalance.reserved_qty), 0
+                ).label("available"),
+            )
+            .join(Warehouse, Warehouse.id == StockBalance.warehouse_id)
+            .outerjoin(ProductBatch, ProductBatch.id == StockBalance.batch_id)
+            .filter(
+                Warehouse.warehouse_type.is_distinct_from("TRANSIT"),
+                Warehouse.warehouse_code != "__TRANSIT__",
+                or_(
+                    StockBalance.batch_id.is_(None),
+                    ProductBatch.expiry_date.is_(None),
+                    ProductBatch.expiry_date >= today,
+                ),
+            )
+            .group_by(StockBalance.product_id)
+        )
+
+    def operational_available_quantity(self, product_id: int, today: date) -> Decimal:
+        """SUM(on_hand - reserved) over operational (non-transit), non-expired balances."""
+        row = (
+            self._operational_available_query(today)
+            .filter(StockBalance.product_id == product_id)
+            .first()
+        )
+        return Decimal(str(row.available)) if row is not None else Decimal("0")
+
+    def operational_available_by_product(self, today: date) -> dict[int, Decimal]:
+        return {
+            row.product_id: Decimal(str(row.available))
+            for row in self._operational_available_query(today).all()
+        }

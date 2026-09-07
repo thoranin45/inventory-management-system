@@ -189,6 +189,7 @@ class SalesOrderRepository:
         self,
         product_id: int,
     ) -> list[ProductBatch]:
+        # Deterministic FEFO order: dated lots first (earliest expiry), NULL last.
         return (
             self.db.query(ProductBatch)
             .filter(
@@ -196,7 +197,7 @@ class SalesOrderRepository:
                 == product_id,
             )
             .order_by(
-                ProductBatch.expiry_date.asc(),
+                ProductBatch.expiry_date.asc().nulls_last(),
                 ProductBatch.created_at.asc(),
                 ProductBatch.id.asc(),
             )

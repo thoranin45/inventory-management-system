@@ -953,3 +953,129 @@ Phase 6 adds no partial dispatch, no reverse logistics or in-transit adjustment,
 no production reconciliation, and no Phase 7 work. Tests use the dedicated
 TEST_DATABASE_URL, disposable Alembic-built schemas, and the isolated PostgreSQL
 concurrency harness.
+
+## Phase 7: expiry, batch eligibility and FEFO
+
+Phase 7 gives the system one consistent definition of whether a batch is usable,
+near expiry, expired, or ineligible for a specific operation. It changes no
+inventory-ownership semantics and requires **no Alembic migration**: everything is
+date arithmetic on the existing `product_batches.expiry_date` plus service and
+repository filters. `Product.stock_qty` and `ProductBatch.quantity` remain the
+total owned physical inventory, including expired and in-transit stock.
+
+### Business date
+
+`app/core/batch_eligibility.py` owns the single rule. `business_today()` returns
+the current date in `settings.timezone` (default `Asia/Bangkok`,
+environment-overridable) so expiry decisions never depend on the UTC deployment
+clock. The rule, applied everywhere:
+
+- `expiry_date < business_today()` -> expired / operationally ineligible
+- `expiry_date == business_today()` -> usable (same-day)
+- `expiry_date > business_today()` -> usable
+- `expiry_date IS NULL` -> usable (never expires)
+
+Pure helpers: `days_to_expiry`, `is_expired`, `is_batch_eligible`,
+`is_near_expiry`. Nothing is persisted; no derived-status column exists. Every
+service routes through these (directly or via `is_expired`/`is_batch_eligible`),
+so a test can pin the business date by patching `business_today`.
+
+### Near expiry
+
+`is_near_expiry` = not expired and `days_to_expiry <= settings.near_expiry_days`
+(default 90, environment-overridable). Derived only; no notification UI. The
+dashboard `expiring-soon` window and the `reports/expiring` and
+`dashboard/expired` date calculations now use `business_today()` and, for the
+soon-window, `settings.near_expiry_days` (default preserves the previous 90).
+
+### FEFO / FIFO stock out
+
+FEFO (`stock/out-fefo`) selects First Expired First Out **among eligible lots
+only**. Ordering is `expiry_date ASC NULLS LAST, created_at ASC, id ASC`: dated
+lots first (earliest expiry), NULL-expiry lots last, deterministic ties. Expired
+lots are never selected even though they would sort first. `available =
+on_hand - reserved` is still enforced per lot; transit balances are still
+excluded (operational location scope). The sufficiency check uses
+`get_eligible_batch_stock_total`, so when only expired stock remains the call
+fails with a clear `InsufficientBatchStock` (409) **before any mutation,
+transaction or movement**.
+
+FIFO (`stock/out-fifo`) must not be an expiry bypass: it applies the same
+eligibility filter (`expiry_date IS NULL OR expiry_date >= business_today()`).
+NULL-expiry / non-expiry-tracked lots keep their existing FIFO behavior; a dated
+expired lot is skipped by both FIFO and FEFO. FIFO/FEFO is unchanged for products
+with no dated lots.
+
+### Sales
+
+Confirmation excludes expired batches from allocation candidates (deterministic
+FEFO order, NULL-expiry eligible, `expiry == business_today()` eligible). If only
+expired stock exists confirmation fails 409 and the order stays DRAFT with no
+reservation. Picking and Packing remain progress-only: a batch that expires
+mid-fulfilment does not block them. Shipment routes through the shared
+eligibility helper: an expired allocated batch fails 409 atomically -
+status, reservation, on-hand, and the allocation itself are unchanged and no
+other batch is silently chosen. Operational recovery: cancel the order (releases
+the reservation) and recreate/reconfirm. Cancellation after expiry still releases
+the reservation normally. No in-place reallocation workflow is added.
+
+### PO receiving
+
+Phase 5 receiving and idempotency are unchanged. Tracking contracts are
+unchanged: `track_batch=False` rejects lot/date metadata; `track_batch=True,
+track_expiry=False` needs a lot, dates optional; `track_batch=True,
+track_expiry=True` needs lot + manufacturing + expiry. When both dates are given,
+`expiry_date` must be strictly later than `mfg_date` (400, unchanged). Receiving
+already-expired goods is **allowed** - the system must record physical inventory
+that arrived - and same-day expiry is allowed. The resulting stock is owned
+(counted in `Product.stock_qty`) but immediately operationally ineligible: no
+Sales confirmation, FEFO or expiry-relevant FIFO will select it, and it is not
+quarantined.
+
+### Returns
+
+A Sales return of an expired batch is accepted and the physical quantity is
+restored to its authoritative `StockBalance` exactly as before. After restore the
+batch stays owned but operationally ineligible: Sales confirmation, FEFO and
+expiry-relevant FIFO exclude it. No quarantine tables or locations; visible
+segregation is deferred to Phase 8+.
+
+### Transfers
+
+Phase 6 `source -> TRANSIT -> destination` is unchanged. At dispatch,
+`_validate_transfer_item` rejects an already-expired batch with 409 ("Cannot
+dispatch expired batch"), so an ordinary transfer cannot bypass expiry
+protection; same-day expiry is allowed. If a batch expires **after** dispatch
+while IN_TRANSIT it is never removed, reversed, or substituted: the destination
+receipt still succeeds and the destination receives the exact same ProductBatch
+id, lot, manufacturing metadata and expiry date. That quantity stays part of
+total owned inventory and is excluded from operational eligibility. Goods are
+never stranded in transit because of expiry.
+
+### Operational availability
+
+`StockBalanceRepository.operational_available_quantity(product_id, today)` and
+`operational_available_by_product(today)` derive - never persist - the
+operationally usable quantity: `SUM(on_hand - reserved)` over balances whose
+warehouse is operational (not TRANSIT) and whose batch is NULL, has NULL expiry,
+or has not expired. `Product.stock_qty` keeps its Phase 2 meaning (total owned,
+including expired and transit).
+
+### Diagnostics
+
+The read-only `scripts/check_inventory_consistency.py` gains four classifying
+checks (no reconciliation, no writes): `expired_owned_quantity` and
+`operationally_eligible_quantity` per product, `owned_partition_reconciliation`
+(owned total == in-transit + operational-expired + operational-eligible on-hand),
+and `owned_aggregate_matches_balances`. The diagnostic stays configuration-free:
+its business date comes from `SELECT (now() AT TIME ZONE :tz)::date` with `tz`
+from `INVENTORY_DIAGNOSTIC_TIMEZONE` (default `Asia/Bangkok`), or an injected
+`today` for tests.
+
+### Not in Phase 7
+
+No persisted expired/near-expiry status, no quarantine architecture, no reverse
+logistics, no in-place Sales reallocation, no auto-reconciliation, no Phase 8
+dashboard/report redesign, no schema change. Concurrency tests use the existing
+isolated PostgreSQL harness with injected business dates; the system clock is
+never manipulated.

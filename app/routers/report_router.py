@@ -5,8 +5,9 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
+from app.core.batch_eligibility import business_today
 from app.database import get_db
-from datetime import date, timedelta
+from datetime import timedelta
 from app.models import Product, SalesOrder, StockTransaction, ProductBatch
 
 from fastapi.responses import FileResponse
@@ -84,7 +85,7 @@ def expiring_report(
     days: int = 90,
     db: Session = Depends(get_db)
 ):
-    today = date.today()
+    today = business_today()
     target_date = today + timedelta(days=days)
 
     batches = db.query(ProductBatch).filter(
@@ -305,7 +306,7 @@ def export_expiring_report(
     days: int = 90,
     db: Session = Depends(get_db)
 ):
-    today = date.today()
+    today = business_today()
     target_date = today + timedelta(days=days)
 
     batches = db.query(ProductBatch).filter(

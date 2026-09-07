@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
+from app.core import batch_eligibility
 from app.core.exceptions import (
     BatchStockAdjustmentException,
     InsufficientBatchStockException,
@@ -149,16 +150,20 @@ def stock_out_fifo_service(
 
         previous_stock = balance_repo.product_quantity(product.id)
 
+        today = batch_eligibility.business_today()
+
+        # FIFO must never become an expiry bypass: expired dated lots are skipped;
+        # NULL-expiry / non-expiry-tracked lots keep their existing FIFO behavior.
         batches = (
             stock_repo
             .get_fifo_batches_for_update(
-                product.id
+                product.id, eligible_only=True, today=today,
             )
         )
 
         if previous_stock < data.quantity:
             raise InsufficientStockException()
-        if stock_repo.get_batch_stock_total(product.id, warehouse.id, location.id) < data.quantity:
+        if stock_repo.get_eligible_batch_stock_total(product.id, warehouse.id, location.id, today) < data.quantity:
             raise InsufficientBatchStockException()
 
         remaining_quantity = (
@@ -293,16 +298,20 @@ def stock_out_fefo_service(
 
         previous_stock = balance_repo.product_quantity(product.id)
 
+        today = batch_eligibility.business_today()
+
+        # FEFO selects First Expired First Out among eligible lots only; expired
+        # lots are never selected even though they would sort first.
         batches = (
             stock_repo
             .get_fefo_batches_for_update(
-                product.id
+                product.id, eligible_only=True, today=today,
             )
         )
 
         if previous_stock < data.quantity:
             raise InsufficientStockException()
-        if stock_repo.get_batch_stock_total(product.id, warehouse.id, location.id) < data.quantity:
+        if stock_repo.get_eligible_batch_stock_total(product.id, warehouse.id, location.id, today) < data.quantity:
             raise InsufficientBatchStockException()
 
         remaining_quantity = (

@@ -151,6 +151,27 @@ def db_session() -> Generator[Session, None, None]:
 
 
 @pytest.fixture
+def business_date(monkeypatch):
+    """Deterministically pin the business calendar for Phase 7 expiry tests.
+
+    Patches ``app.core.batch_eligibility.business_today`` — the single function
+    every expiry decision routes through, directly or via ``is_expired`` /
+    ``is_batch_eligible``. Never manipulates the system clock.
+    """
+    import app.core.batch_eligibility as be
+
+    state = {"today": be.business_today()}
+    monkeypatch.setattr(be, "business_today", lambda: state["today"])
+
+    def _set(value):
+        state["today"] = value
+        return value
+
+    _set.get = lambda: state["today"]
+    return _set
+
+
+@pytest.fixture
 def client() -> Generator[TestClient, None, None]:
     with TestClient(app) as test_client:
         yield test_client

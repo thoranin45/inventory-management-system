@@ -1,6 +1,8 @@
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
+from app.core.batch_eligibility import business_today
+from app.core.config import settings
 from app.repositories.dashboard_repository import (
     DashboardRepository,
 )
@@ -9,7 +11,6 @@ from app.repositories.dashboard_repository import (
 LOW_STOCK_THRESHOLD = 10
 RECENT_TRANSACTION_LIMIT = 10
 TOP_STOCK_LIMIT = 10
-EXPIRING_SOON_DAYS = 90
 
 STOCK_IN_TRANSACTION_TYPES = {
     "IN",
@@ -134,10 +135,10 @@ def get_total_stock_value_service(
 def get_expiring_soon_service(
     dashboard_repo: DashboardRepository,
 ) -> list:
-    today = date.today()
+    today = business_today()
 
     target_date = today + timedelta(
-        days=EXPIRING_SOON_DAYS
+        days=settings.near_expiry_days
     )
 
     return dashboard_repo.get_batches_expiring_between(
@@ -150,5 +151,5 @@ def get_expired_batches_service(
     dashboard_repo: DashboardRepository,
 ) -> list:
     return dashboard_repo.get_expired_batches(
-        today=date.today()
+        today=business_today()
     )

@@ -1,10 +1,11 @@
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
 from fastapi import status
 from sqlalchemy.orm import Session
 
+from app.core import batch_eligibility
 from app.core.exceptions import AppException, InsufficientAvailableStockException
 from app.core.unit_of_work import UnitOfWork
 from app.models import AuditLog, InventoryMovement, SalesOrder, SalesOrderBatchAllocation, SalesOrderItem, StockTransaction
@@ -92,7 +93,7 @@ def _source(db, allocation):
 def _expiry(repo, allocation):
     if allocation.batch_id is not None:
         batch = repo.get_batch_by_id(allocation.batch_id)
-        if batch.expiry_date is not None and batch.expiry_date < date.today():
+        if batch_eligibility.is_expired(batch):
             _raise_error(f"Expired allocated batch: {batch.id}")
 
 
@@ -131,9 +132,10 @@ def confirm_sales_order_service(db: Session, sales_order_repo: SalesOrderReposit
             if sales_order_repo.get_item_allocations(order.id, item.id):
                 _raise_error("Draft already has allocation evidence")
             if product.track_batch:
+                today = batch_eligibility.business_today()
                 batches = sales_order_repo.get_available_batches_fefo(product.id)
                 candidates = [(b.id, balance_repo.get_default_batch_balance_for_update(product.id, b.id))
-                              for b in batches if b.expiry_date is None or b.expiry_date >= date.today()]
+                              for b in batches if batch_eligibility.is_batch_eligible(b, today)]
             else:
                 candidates = [(None, balance_repo.get_default_product_balance_for_update(product.id))]
             remaining = item.quantity

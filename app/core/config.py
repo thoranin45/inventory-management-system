@@ -16,6 +16,12 @@ class Settings(BaseSettings):
     app_version: str = "1.0.0"
     env: str = "development"
 
+    # Business calendar used for every inventory expiry decision. Never rely on the
+    # process-local date: the deployment runs UTC while the business is UTC+7.
+    timezone: str = "Asia/Bangkok"
+    # Derived near-expiry window (days). Read-only concept, never persisted.
+    near_expiry_days: int = 90
+
     rate_limit_max_requests: int = 100
     rate_limit_window_seconds: int = 60
 

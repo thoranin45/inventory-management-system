@@ -4,6 +4,7 @@ from uuid import uuid4
 import hashlib
 import json
 from fastapi import HTTPException
+from app.core import batch_eligibility
 from app.models import AuditLog, InventoryTransferReceipt
 from app.schemas.inventory_transfer_schema import InventoryTransferResponse, TransferReceiptResponse
 
@@ -355,6 +356,10 @@ def _validate_transfer_item(db, balances, transfer, item):
         batch = db.get(ProductBatch, item.batch_id)
         if batch is None or batch.product_id != item.product_id:
             raise HTTPException(409, "Invalid transfer batch identity")
+        # Phase 7: an ordinary transfer must not become an expiry bypass. Same-day
+        # expiry is still usable; only strictly-past expiry is rejected at dispatch.
+        if batch_eligibility.is_expired(batch):
+            raise HTTPException(409, f"Cannot dispatch expired batch: {batch.id}")
     if item.quantity <= 0 or item.dispatched_quantity is None or item.received_quantity is None:
         raise HTTPException(409, "Invalid transfer item progress")
 
