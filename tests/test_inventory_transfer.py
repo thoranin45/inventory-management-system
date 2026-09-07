@@ -189,6 +189,75 @@ def _stock_in(
     assert response.status_code == 200
 
 
+def _dispatch(
+    client: TestClient,
+    headers: dict[str, str],
+    transfer_id: int,
+    *,
+    expect: int = 200,
+):
+    response = client.post(
+        f"/api/v1/inventory-transfers/{transfer_id}/dispatch",
+        headers=headers,
+    )
+
+    assert response.status_code == expect, response.text
+
+    return response
+
+
+def _receive(
+    client: TestClient,
+    headers: dict[str, str],
+    transfer_id: int,
+    items: list[dict],
+    *,
+    key: str | None = None,
+    expect: int = 200,
+):
+    request_headers = dict(headers)
+    request_headers["Idempotency-Key"] = key or uuid4().hex
+
+    response = client.post(
+        f"/api/v1/inventory-transfers/{transfer_id}/receive",
+        headers=request_headers,
+        json={"items": items},
+    )
+
+    assert response.status_code == expect, response.text
+
+    return response
+
+
+def _receive_lines(transfer: dict) -> list[dict]:
+    return [
+        {
+            "transfer_item_id": item["id"],
+            "quantity": item["quantity"],
+        }
+        for item in transfer["items"]
+    ]
+
+
+def _run_transfer_lifecycle(
+    client: TestClient,
+    headers: dict[str, str],
+    transfer: dict,
+    *,
+    key: str | None = None,
+):
+    """create (done by caller) -> dispatch -> receive the full dispatched quantity."""
+    _dispatch(client, headers, transfer["id"])
+
+    return _receive(
+        client,
+        headers,
+        transfer["id"],
+        _receive_lines(transfer),
+        key=key,
+    )
+
+
 # ---------------------------------------------------------
 # DRAFT TRANSFER
 # ---------------------------------------------------------
@@ -592,11 +661,11 @@ def test_draft_transfer_does_not_move_stock(
 
 
 # ---------------------------------------------------------
-# COMPLETE TRANSFER
+# TRANSFER LIFECYCLE: create -> dispatch -> receive
 # ---------------------------------------------------------
 
 
-def test_complete_inventory_transfer_success(
+def test_transfer_lifecycle_moves_stock_source_to_destination(
     client: TestClient,
     admin_headers: dict[str, str],
     transfer_storage: dict[str, int],
@@ -622,21 +691,28 @@ def test_complete_inventory_transfer_success(
         quantity="20.000",
     )
 
-    response = client.post(
-        (
-            "/api/v1/inventory-transfers/"
-            f"{transfer['id']}/complete"
-        ),
-        headers=admin_headers,
+    dispatch_body = _dispatch(
+        client, admin_headers, transfer["id"]
+    ).json()
+
+    assert dispatch_body["status"] == "IN_TRANSIT"
+    assert dispatch_body["dispatched_at"] is not None
+    assert dispatch_body["dispatched_by_user_id"] is not None
+
+    response = _receive(
+        client,
+        admin_headers,
+        transfer["id"],
+        _receive_lines(transfer),
     )
 
-    assert response.status_code == 200
-
-    body = response.json()
+    body = response.json()["transfer"]
 
     assert body["status"] == "COMPLETED"
     assert body["completed_by_user_id"] is not None
     assert body["completed_at"] is not None
+    assert body["items"][0]["received_quantity"] == "20.000"
+    assert body["items"][0]["outstanding_quantity"] == "0.000"
 
     db_session.expire_all()
 
@@ -687,6 +763,19 @@ def test_complete_inventory_transfer_success(
         destination_balance.on_hand_qty
     ) == Decimal("20.000")
 
+    transit_balance = (
+        db_session.query(StockBalance)
+        .join(Warehouse, Warehouse.id == StockBalance.warehouse_id)
+        .filter(
+            StockBalance.product_id == product["id"],
+            Warehouse.warehouse_code == "__TRANSIT__",
+        )
+        .first()
+    )
+
+    assert transit_balance is not None
+    assert _decimal(transit_balance.on_hand_qty) == Decimal("0.000")
+
 
 def test_complete_transfer_keeps_total_product_stock(
     client: TestClient,
@@ -714,15 +803,7 @@ def test_complete_transfer_keeps_total_product_stock(
         quantity="20.000",
     )
 
-    response = client.post(
-        (
-            "/api/v1/inventory-transfers/"
-            f"{transfer['id']}/complete"
-        ),
-        headers=admin_headers,
-    )
-
-    assert response.status_code == 200
+    _run_transfer_lifecycle(client, admin_headers, transfer)
 
     db_session.expire_all()
 
@@ -741,11 +822,13 @@ def test_complete_transfer_keeps_total_product_stock(
     ) == Decimal("50.000")
 
 
-def test_complete_inventory_transfer_twice(
+def test_retired_complete_endpoint_reports_deprecation(
     client: TestClient,
     admin_headers: dict[str, str],
     transfer_storage: dict[str, int],
 ) -> None:
+    """The immediate /complete workflow is retired; the route stays authenticated
+    and never silently performs a transfer."""
     product = _create_product(
         client,
         admin_headers,
@@ -766,7 +849,7 @@ def test_complete_inventory_transfer_twice(
         quantity="20.000",
     )
 
-    first_response = client.post(
+    response = client.post(
         (
             "/api/v1/inventory-transfers/"
             f"{transfer['id']}/complete"
@@ -774,27 +857,31 @@ def test_complete_inventory_transfer_twice(
         headers=admin_headers,
     )
 
-    assert first_response.status_code == 200
+    assert response.status_code == 409
+    assert "dispatch" in response.json()["message"].lower()
 
-    second_response = client.post(
-        (
-            "/api/v1/inventory-transfers/"
-            f"{transfer['id']}/complete"
-        ),
+    # The draft must remain untouched: no dispatch, no movements.
+    fetched = client.get(
+        f"/api/v1/inventory-transfers/{transfer['id']}",
+        headers=admin_headers,
+    ).json()
+
+    assert fetched["status"] == "DRAFT"
+    assert fetched["dispatched_at"] is None
+
+    missing = client.post(
+        "/api/v1/inventory-transfers/999999999/complete",
         headers=admin_headers,
     )
 
-    assert second_response.status_code == 409
-
-    assert second_response.json()["message"] == (
-        "Inventory transfer already completed"
-    )
+    assert missing.status_code == 404
 
 
-def test_complete_transfer_insufficient_stock(
+def test_dispatch_transfer_insufficient_stock(
     client: TestClient,
     admin_headers: dict[str, str],
     transfer_storage: dict[str, int],
+    db_session: Session,
 ) -> None:
     product = _create_product(
         client,
@@ -816,18 +903,24 @@ def test_complete_transfer_insufficient_stock(
         quantity="20.000",
     )
 
-    response = client.post(
-        (
-            "/api/v1/inventory-transfers/"
-            f"{transfer['id']}/complete"
-        ),
+    _dispatch(client, admin_headers, transfer["id"], expect=409)
+
+    db_session.expire_all()
+
+    # Nothing left transit; the source keeps its full quantity.
+    assert db_session.query(InventoryMovement).filter_by(
+        reference_type="INVENTORY_TRANSFER", reference_id=transfer["id"],
+    ).count() == 0
+
+    fetched = client.get(
+        f"/api/v1/inventory-transfers/{transfer['id']}",
         headers=admin_headers,
-    )
+    ).json()
 
-    assert response.status_code == 409
+    assert fetched["status"] == "DRAFT"
 
 
-def test_complete_transfer_uses_available_stock(
+def test_dispatch_transfer_uses_available_stock(
     client: TestClient,
     admin_headers: dict[str, str],
     transfer_storage: dict[str, int],
@@ -878,15 +971,8 @@ def test_complete_transfer_uses_available_stock(
         quantity="20.000",
     )
 
-    response = client.post(
-        (
-            "/api/v1/inventory-transfers/"
-            f"{transfer['id']}/complete"
-        ),
-        headers=admin_headers,
-    )
-
-    assert response.status_code == 409
+    # available = 50 on_hand - 40 reserved = 10 < 20 requested
+    _dispatch(client, admin_headers, transfer["id"], expect=409)
 
 def test_cancel_inventory_transfer_success(
     client: TestClient,
@@ -1006,15 +1092,7 @@ def test_cancel_completed_transfer_fails(
         quantity="20.000",
     )
 
-    complete_response = client.post(
-        (
-            "/api/v1/inventory-transfers/"
-            f"{transfer['id']}/complete"
-        ),
-        headers=admin_headers,
-    )
-
-    assert complete_response.status_code == 200
+    _run_transfer_lifecycle(client, admin_headers, transfer)
 
     cancel_response = client.post(
         (
@@ -1067,7 +1145,7 @@ def test_cancel_inventory_transfer_twice(
 
     assert second_response.status_code == 409
 
-def test_complete_transfer_creates_inventory_movements(
+def test_transfer_lifecycle_creates_paired_movements(
     client: TestClient,
     admin_headers: dict[str, str],
     transfer_storage: dict[str, int],
@@ -1093,17 +1171,17 @@ def test_complete_transfer_creates_inventory_movements(
         quantity="20.000",
     )
 
-    response = client.post(
-        (
-            "/api/v1/inventory-transfers/"
-            f"{transfer['id']}/complete"
-        ),
-        headers=admin_headers,
-    )
-
-    assert response.status_code == 200
+    _run_transfer_lifecycle(client, admin_headers, transfer)
 
     db_session.expire_all()
+
+    transit = (
+        db_session.query(Warehouse, WarehouseLocation)
+        .join(WarehouseLocation, WarehouseLocation.warehouse_id == Warehouse.id)
+        .filter(Warehouse.warehouse_code == "__TRANSIT__")
+        .one()
+    )
+    transit_warehouse_id, transit_location_id = transit[0].id, transit[1].id
 
     movements = (
         db_session.query(InventoryMovement)
@@ -1119,92 +1197,39 @@ def test_complete_transfer_creates_inventory_movements(
         .all()
     )
 
-    assert len(movements) == 2
+    # Two legs at dispatch (source -> transit) and two at receipt (transit -> destination).
+    assert len(movements) == 4
 
-    movement_out = movements[0]
-    movement_in = movements[1]
+    observed = [
+        (
+            movement.movement_type,
+            Decimal(str(movement.quantity)),
+            Decimal(str(movement.balance_before)),
+            Decimal(str(movement.balance_after)),
+            movement.warehouse_id,
+            movement.location_id,
+        )
+        for movement in movements
+    ]
 
-    assert movement_out.movement_type == (
-        "TRANSFER_OUT"
-    )
+    assert observed == [
+        ("TRANSFER_OUT", Decimal("-20.000"), Decimal("50.000"), Decimal("30.000"),
+         transfer_storage["source_warehouse_id"], transfer_storage["source_location_id"]),
+        ("TRANSFER_TRANSIT_IN", Decimal("20.000"), Decimal("0.000"), Decimal("20.000"),
+         transit_warehouse_id, transit_location_id),
+        ("TRANSFER_TRANSIT_OUT", Decimal("-20.000"), Decimal("20.000"), Decimal("0.000"),
+         transit_warehouse_id, transit_location_id),
+        ("TRANSFER_IN", Decimal("20.000"), Decimal("0.000"), Decimal("20.000"),
+         transfer_storage["destination_warehouse_id"], transfer_storage["destination_location_id"]),
+    ]
 
-    assert movement_in.movement_type == (
-        "TRANSFER_IN"
-    )
-
-    assert movement_out.product_id == (
-        product["id"]
-    )
-
-    assert movement_in.product_id == (
-        product["id"]
-    )
-
-    assert Decimal(
-        str(movement_out.quantity)
-    ) == Decimal("-20.000")
-
-    assert Decimal(
-        str(movement_in.quantity)
-    ) == Decimal("20.000")
-
-    assert Decimal(
-        str(movement_out.balance_before)
-    ) == Decimal("50.000")
-
-    assert Decimal(
-        str(movement_out.balance_after)
-    ) == Decimal("30.000")
-
-    assert Decimal(
-        str(movement_in.balance_before)
-    ) == Decimal("0.000")
-
-    assert Decimal(
-        str(movement_in.balance_after)
-    ) == Decimal("20.000")
-
-    assert movement_out.warehouse_id == (
-        transfer_storage[
-            "source_warehouse_id"
-        ]
-    )
-
-    assert movement_out.location_id == (
-        transfer_storage[
-            "source_location_id"
-        ]
-    )
-
-    assert movement_in.warehouse_id == (
-        transfer_storage[
-            "destination_warehouse_id"
-        ]
-    )
-
-    assert movement_in.location_id == (
-        transfer_storage[
-            "destination_location_id"
-        ]
-    )
-
-    assert movement_out.reference_number == (
-        transfer["transfer_number"]
-    )
-
-    assert movement_in.reference_number == (
-        transfer["transfer_number"]
-    )
-
-    assert (
-        movement_out.created_by_user_id
-        is not None
-    )
-
-    assert (
-        movement_in.created_by_user_id
-        is not None
-    )
+    assert sum(Decimal(str(m.quantity)) for m in movements) == Decimal("0.000")
+    assert all(m.product_id == product["id"] for m in movements)
+    assert all(m.reference_number == transfer["transfer_number"] for m in movements)
+    assert all(m.created_by_user_id is not None for m in movements)
+    assert all(m.transfer_item_id == transfer["items"][0]["id"] for m in movements)
+    # Only the receipt legs are tied to a receipt event.
+    assert [m.transfer_receipt_id is not None for m in movements] == [False, False, True, True]
 
 def test_draft_transfer_creates_no_movements(
     client: TestClient,
@@ -1309,15 +1334,7 @@ def test_get_inventory_movements(
         quantity="20.000",
     )
 
-    complete_response = client.post(
-        (
-            "/api/v1/inventory-transfers/"
-            f"{transfer['id']}/complete"
-        ),
-        headers=admin_headers,
-    )
-
-    assert complete_response.status_code == 200
+    _run_transfer_lifecycle(client, admin_headers, transfer)
 
     response = client.get(
         "/api/v1/inventory-movements",
@@ -1382,15 +1399,7 @@ def test_get_inventory_movements_by_product(
         quantity="20.000",
     )
 
-    complete_response = client.post(
-        (
-            "/api/v1/inventory-transfers/"
-            f"{transfer['id']}/complete"
-        ),
-        headers=admin_headers,
-    )
-
-    assert complete_response.status_code == 200
+    _run_transfer_lifecycle(client, admin_headers, transfer)
 
     response = client.get(
         (
@@ -1439,15 +1448,7 @@ def test_get_inventory_movements_by_reference(
         quantity="20.000",
     )
 
-    complete_response = client.post(
-        (
-            "/api/v1/inventory-transfers/"
-            f"{transfer['id']}/complete"
-        ),
-        headers=admin_headers,
-    )
-
-    assert complete_response.status_code == 200
+    _run_transfer_lifecycle(client, admin_headers, transfer)
 
     response = client.get(
         (
@@ -1462,7 +1463,8 @@ def test_get_inventory_movements_by_reference(
 
     body = response.json()
 
-    assert len(body) == 2
+    # Every lifecycle leg is traceable from the transfer reference.
+    assert len(body) == 4
 
     movement_types = {
         item["movement_type"]
@@ -1471,6 +1473,8 @@ def test_get_inventory_movements_by_reference(
 
     assert movement_types == {
         "TRANSFER_OUT",
+        "TRANSFER_TRANSIT_IN",
+        "TRANSFER_TRANSIT_OUT",
         "TRANSFER_IN",
     }
 
@@ -1525,15 +1529,7 @@ def test_inventory_movement_pagination(
         quantity="20.000",
     )
 
-    complete_response = client.post(
-        (
-            "/api/v1/inventory-transfers/"
-            f"{transfer['id']}/complete"
-        ),
-        headers=admin_headers,
-    )
-
-    assert complete_response.status_code == 200
+    _run_transfer_lifecycle(client, admin_headers, transfer)
 
     response = client.get(
         "/api/v1/inventory-movements?page=1&size=1",
@@ -1575,15 +1571,7 @@ def test_filter_inventory_movements_by_type(
         quantity="20.000",
     )
 
-    complete_response = client.post(
-        (
-            "/api/v1/inventory-transfers/"
-            f"{transfer['id']}/complete"
-        ),
-        headers=admin_headers,
-    )
-
-    assert complete_response.status_code == 200
+    _run_transfer_lifecycle(client, admin_headers, transfer)
 
     response = client.get(
         (
@@ -1630,15 +1618,7 @@ def test_filter_inventory_movements_by_product(
         quantity="20.000",
     )
 
-    complete_response = client.post(
-        (
-            "/api/v1/inventory-transfers/"
-            f"{transfer['id']}/complete"
-        ),
-        headers=admin_headers,
-    )
-
-    assert complete_response.status_code == 200
+    _run_transfer_lifecycle(client, admin_headers, transfer)
 
     response = client.get(
         (
@@ -1682,15 +1662,7 @@ def test_filter_inventory_movements_by_warehouse(
         quantity="20.000",
     )
 
-    complete_response = client.post(
-        (
-            "/api/v1/inventory-transfers/"
-            f"{transfer['id']}/complete"
-        ),
-        headers=admin_headers,
-    )
-
-    assert complete_response.status_code == 200
+    _run_transfer_lifecycle(client, admin_headers, transfer)
 
     source_warehouse_id = (
         transfer_storage[
@@ -1743,15 +1715,7 @@ def test_filter_inventory_movements_by_date(
         quantity="20.000",
     )
 
-    complete_response = client.post(
-        (
-            "/api/v1/inventory-transfers/"
-            f"{transfer['id']}/complete"
-        ),
-        headers=admin_headers,
-    )
-
-    assert complete_response.status_code == 200
+    _run_transfer_lifecycle(client, admin_headers, transfer)
 
     response = client.get(
         (

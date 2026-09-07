@@ -1,7 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class InventoryTransferItemCreate(BaseModel):
@@ -40,6 +40,12 @@ class InventoryTransferCreate(BaseModel):
 
 
 class InventoryTransferItemResponse(BaseModel):
+    dispatched_quantity: Decimal | None
+    received_quantity: Decimal | None
+    outstanding_quantity: Decimal | None
+    source_stock_balance_id: int | None
+    transit_stock_balance_id: int | None
+
     id: int
     transfer_id: int
     product_id: int
@@ -57,6 +63,10 @@ class InventoryTransferItemResponse(BaseModel):
 
 
 class InventoryTransferResponse(BaseModel):
+    dispatched_at: datetime | None
+    dispatched_by_user_id: int | None
+    legacy_completed: bool
+
     id: int
 
     transfer_number: str
@@ -81,3 +91,24 @@ class InventoryTransferResponse(BaseModel):
     model_config = ConfigDict(
         from_attributes=True,
     )
+
+
+class TransferReceiveItem(BaseModel):
+    transfer_item_id: int = Field(gt=0)
+    quantity: Decimal = Field(gt=0, max_digits=18, decimal_places=3, allow_inf_nan=False)
+
+
+class TransferReceive(BaseModel):
+    items: list[TransferReceiveItem] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def unique_items(self):
+        if len({i.transfer_item_id for i in self.items}) != len(self.items):
+            raise ValueError("Duplicate transfer item")
+        return self
+
+
+class TransferReceiptResponse(BaseModel):
+    receipt_id: int
+    receipt_number: str
+    transfer: InventoryTransferResponse

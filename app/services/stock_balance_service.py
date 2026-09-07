@@ -102,6 +102,8 @@ def create_stock_balance_service(
     if location is None:
         raise WarehouseLocationNotFoundException()
 
+    repo.require_operational_storage(data.warehouse_id, data.location_id)
+
     if product.track_batch and data.batch_id is None:
         raise BatchRequiredException()
 

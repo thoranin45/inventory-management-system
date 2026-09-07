@@ -1076,6 +1076,9 @@ class StockBalance(Base):
         )
 
 class InventoryTransfer(Base):
+    dispatched_at = Column(DateTime(timezone=True))
+    dispatched_by_user_id = Column(Integer, ForeignKey("users.id"))
+    legacy_completed = Column(Boolean, nullable=False, default=False, server_default=text("false"))
     __tablename__ = "inventory_transfers"
 
     id = Column(
@@ -1198,6 +1201,17 @@ class InventoryTransfer(Base):
 
 
 class InventoryTransferItem(Base):
+    dispatched_quantity = Column(Numeric(18, 3))
+    received_quantity = Column(Numeric(18, 3))
+    source_stock_balance_id = Column(Integer, ForeignKey("stock_balances.id"))
+    transit_stock_balance_id = Column(Integer, ForeignKey("stock_balances.id"))
+
+    @property
+    def outstanding_quantity(self):
+        if self.dispatched_quantity is None or self.received_quantity is None:
+            return None
+        return self.dispatched_quantity - self.received_quantity
+
     __tablename__ = "inventory_transfer_items"
 
     id = Column(
@@ -1270,6 +1284,7 @@ class InventoryTransferItem(Base):
     )
 
     __table_args__ = (
+        CheckConstraint("(dispatched_quantity IS NULL AND received_quantity IS NULL) OR (dispatched_quantity IS NOT NULL AND received_quantity IS NOT NULL AND received_quantity >= 0 AND received_quantity <= dispatched_quantity AND dispatched_quantity <= quantity AND (dispatched_quantity = 0 OR dispatched_quantity = quantity))", name="ck_transfer_item_progress"),
         CheckConstraint("from_location_id <> to_location_id", name="ck_inventory_transfer_items_different_locations"),
         CheckConstraint(
             "quantity > 0",
@@ -1316,6 +1331,8 @@ class InventoryTransferItem(Base):
     )
 
 class InventoryMovement(Base):
+    transfer_item_id = Column(Integer, ForeignKey("inventory_transfer_items.id"))
+    transfer_receipt_id = Column(Integer, ForeignKey("inventory_transfer_receipts.id"))
     __tablename__ = "inventory_movements"
 
     purchase_receipt_id = Column(Integer, ForeignKey("purchase_order_receipts.id"))
@@ -1495,6 +1512,19 @@ class PurchaseOrderReceipt(Base):
 
     id = Column(Integer, primary_key=True)
     po_id = Column(Integer, ForeignKey("purchase_orders.id"), nullable=False)
+    receipt_number = Column(String(100), unique=True, nullable=False)
+    operation_key = Column(String(128), nullable=False)
+    request_fingerprint = Column(String(64), nullable=False)
+    received_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    received_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    response_snapshot = Column(JSONB, nullable=False)
+
+
+class InventoryTransferReceipt(Base):
+    __tablename__ = "inventory_transfer_receipts"
+    __table_args__ = (UniqueConstraint("transfer_id", "operation_key", name="uq_transfer_receipt_operation"),)
+    id = Column(Integer, primary_key=True)
+    transfer_id = Column(Integer, ForeignKey("inventory_transfers.id"), nullable=False)
     receipt_number = Column(String(100), unique=True, nullable=False)
     operation_key = Column(String(128), nullable=False)
     request_fingerprint = Column(String(64), nullable=False)

@@ -35,7 +35,7 @@ class InventoryTransferRepository:
             .filter(
                 InventoryTransfer.id == transfer_id
             )
-            .with_for_update()
+            .populate_existing().with_for_update()
             .first()
         )
 
@@ -81,3 +81,6 @@ class InventoryTransferRepository:
         self.db.flush()
 
         return item
+    def get_items_for_update(self, transfer_id):
+        return self.db.query(InventoryTransferItem).filter_by(transfer_id=transfer_id).order_by(
+            InventoryTransferItem.id).populate_existing().with_for_update().all()

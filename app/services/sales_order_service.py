@@ -81,6 +81,7 @@ def _source(db, allocation):
     if (balance is None or balance.product_id != allocation.product_id or
             balance.batch_id != allocation.batch_id):
         _raise_error(f"Invalid pinned allocation source: {allocation.id}")
+    StockBalanceRepository(db).require_operational_storage(balance.warehouse_id, balance.location_id)
     if allocation.batch_id is not None:
         batch = SalesOrderRepository(db).get_batch_by_id(allocation.batch_id)
         if batch is None or batch.product_id != allocation.product_id:

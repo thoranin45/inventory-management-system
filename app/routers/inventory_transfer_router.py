@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Header, status
 
 from app.core.dependencies import (
     DatabaseSession,
@@ -9,11 +9,11 @@ from app.core.dependencies import (
 )
 from app.models import User
 from app.schemas.inventory_transfer_schema import (
-    InventoryTransferCreate,
+    InventoryTransferCreate, TransferReceive, TransferReceiptResponse,
     InventoryTransferResponse,
 )
 from app.services.inventory_transfer_service import (
-    cancel_inventory_transfer_service,
+    cancel_inventory_transfer_service, dispatch_inventory_transfer_service, receive_inventory_transfer_service,
     complete_inventory_transfer_service,
     create_inventory_transfer_service,
     get_inventory_transfer_service,
@@ -116,3 +116,17 @@ def cancel_inventory_transfer(
         transfer_repo=transfer_repo,
         transfer_id=transfer_id,
     )
+@router.post("/{transfer_id}/dispatch", response_model=InventoryTransferResponse)
+def dispatch_inventory_transfer(transfer_id: int, db: DatabaseSession,
+    transfer_repo: InventoryTransferRepositoryDependency, balance_repo: StockBalanceRepositoryDependency,
+    movement_repo: InventoryMovementRepositoryDependency, current_user: User = Depends(require_warehouse)):
+    return dispatch_inventory_transfer_service(db,transfer_repo,balance_repo,movement_repo,transfer_id,current_user)
+
+
+@router.post("/{transfer_id}/receive", response_model=TransferReceiptResponse)
+def receive_inventory_transfer(transfer_id: int, data: TransferReceive, db: DatabaseSession,
+    transfer_repo: InventoryTransferRepositoryDependency, balance_repo: StockBalanceRepositoryDependency,
+    movement_repo: InventoryMovementRepositoryDependency,
+    operation_key: str = Header(..., alias="Idempotency-Key",min_length=1,max_length=128,pattern=r"^[A-Za-z0-9._:-]+$"),
+    current_user: User = Depends(require_warehouse)):
+    return receive_inventory_transfer_service(db,transfer_repo,balance_repo,movement_repo,transfer_id,data,operation_key,current_user)

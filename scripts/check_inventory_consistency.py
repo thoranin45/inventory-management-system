@@ -85,7 +85,95 @@ def analyze_inventory(snapshot: dict) -> list[dict]:
         if transaction_id not in transaction_ids:
             report("orphan_movement_reference", "UNRESOLVED", transaction_id=transaction_id,
                    movement_ids=[m["id"] for m in entries])
+
+    _analyze_transfers(snapshot, balances, movements, report)
     return findings
+
+
+def _analyze_transfers(snapshot, balances, movements, report):
+    """Read-only Phase 6 checks: transit vs outstanding, movement pairing,
+    receipt totals, and legacy immediate-transfer history remaining distinct.
+    Nothing here reconciles or mutates."""
+    transfers = {t["id"]: t for t in snapshot.get("transfers", [])}
+    items = snapshot.get("transfer_items", [])
+    if not transfers and not items:
+        return
+
+    balances_by_id = {b["id"]: b for b in balances}
+    transfer_moves = [m for m in movements if m["reference_type"] == "INVENTORY_TRANSFER"]
+    moves_by_item = defaultdict(list)
+    for m in transfer_moves:
+        if m.get("transfer_item_id") is not None:
+            moves_by_item[m["transfer_item_id"]].append(m)
+
+    RECEIPT_IN = {"TRANSFER_IN"}
+    TRANSIT_OUT = {"TRANSFER_TRANSIT_OUT"}
+    outstanding_by_transit = defaultdict(lambda: Decimal("0"))
+
+    for item in items:
+        transfer = transfers.get(item["transfer_id"])
+        legs = moves_by_item.get(item["id"], [])
+        dispatched = item.get("dispatched_quantity")
+        received = item.get("received_quantity")
+
+        # 1) movement pairing: every transfer leg for an item nets to zero
+        #    (-dispatched + dispatched - received + received), regardless of progress.
+        if legs:
+            net = sum((m["quantity"] for m in legs), Decimal("0"))
+            report("transfer_movement_pair_conservation",
+                   "CONSISTENT" if net == 0 else "UNRESOLVED",
+                   transfer_item_id=item["id"], net_movement=net)
+
+        # 2) legacy immediate-transfer history stays distinguishable from lifecycle rows.
+        is_legacy = bool(transfer and transfer.get("legacy_completed"))
+        has_progress = dispatched is not None or received is not None
+        has_lifecycle_moves = any(
+            m.get("transfer_item_id") is not None or m.get("transfer_receipt_id") is not None
+            for m in legs
+        )
+        if is_legacy:
+            status = "EXPLAINED" if not has_progress and not has_lifecycle_moves else "UNRESOLVED"
+            report("legacy_transfer_history_distinct", status, transfer_item_id=item["id"],
+                   reason="Legacy immediate transfer: no lifecycle progress or linked movements")
+        elif transfer and transfer.get("status") in {"IN_TRANSIT", "PARTIALLY_RECEIVED", "COMPLETED"}:
+            report("legacy_transfer_history_distinct",
+                   "CONSISTENT" if has_progress else "MISSING_EVIDENCE",
+                   transfer_item_id=item["id"],
+                   reason="Lifecycle transfer carries explicit dispatched/received progress")
+
+        if dispatched is None or received is None:
+            continue
+
+        # 3) receipt movement totals vs recorded received_quantity.
+        received_legs = sum((abs(m["quantity"]) for m in legs if m["movement_type"] in RECEIPT_IN), Decimal("0"))
+        transit_out_legs = sum((abs(m["quantity"]) for m in legs if m["movement_type"] in TRANSIT_OUT), Decimal("0"))
+        matches = received_legs == received == transit_out_legs
+        report("transfer_receipt_movement_totals",
+               "CONSISTENT" if matches else ("EXPLAINED" if not legs and received == 0 else "UNRESOLVED"),
+               transfer_item_id=item["id"], received_quantity=received,
+               destination_in=received_legs, transit_out=transit_out_legs)
+
+        # 4) accumulate outstanding (still-in-transit) quantity per pinned transit balance.
+        transit_balance_id = item.get("transit_stock_balance_id")
+        if transit_balance_id is not None:
+            outstanding_by_transit[transit_balance_id] += dispatched - received
+
+    # 1b) transit StockBalance on-hand must equal the sum of outstanding transfer quantities pinned to it.
+    transit_balance_ids = {
+        b["id"] for b in balances
+        if b["id"] in outstanding_by_transit
+    } | set(outstanding_by_transit)
+    for balance_id in sorted(transit_balance_ids):
+        balance = balances_by_id.get(balance_id)
+        outstanding = outstanding_by_transit.get(balance_id, Decimal("0"))
+        if balance is None:
+            report("transit_outstanding_reconciliation", "MISSING_EVIDENCE",
+                   transit_stock_balance_id=balance_id, outstanding=outstanding)
+            continue
+        report("transit_outstanding_reconciliation",
+               "CONSISTENT" if balance["on_hand_qty"] == outstanding else "UNRESOLVED",
+               transit_stock_balance_id=balance_id, on_hand=balance["on_hand_qty"],
+               outstanding=outstanding, delta=balance["on_hand_qty"] - outstanding)
 
 
 def diagnose_inventory(engine) -> list[dict]:
@@ -93,8 +181,17 @@ def diagnose_inventory(engine) -> list[dict]:
         "products": "SELECT id, stock_qty FROM products",
         "batches": "SELECT id, product_id, quantity FROM product_batches",
         "balances": "SELECT id, product_id, warehouse_id, location_id, batch_id, on_hand_qty, reserved_qty FROM stock_balances",
-        "movements": "SELECT id, product_id, warehouse_id, location_id, batch_id, quantity, balance_before, balance_after, reference_type, reference_id FROM inventory_movements",
+        "movements": (
+            "SELECT id, product_id, warehouse_id, location_id, batch_id, quantity, balance_before, balance_after, "
+            "reference_type, reference_id, movement_type, transfer_item_id, transfer_receipt_id FROM inventory_movements"
+        ),
         "transactions": "SELECT id, product_id, transaction_type, quantity FROM stock_transactions",
+        "transfers": "SELECT id, status, legacy_completed FROM inventory_transfers",
+        "transfer_items": (
+            "SELECT id, transfer_id, product_id, batch_id, quantity, dispatched_quantity, received_quantity, "
+            "source_stock_balance_id, transit_stock_balance_id FROM inventory_transfer_items"
+        ),
+        "transfer_receipts": "SELECT id, transfer_id FROM inventory_transfer_receipts",
     }
     with engine.connect().execution_options(isolation_level="REPEATABLE READ") as connection:
         with connection.begin():

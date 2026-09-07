@@ -815,3 +815,141 @@ this guard. No production migration or preflight was executed during development
 
 Phase 5 adds no AP/accounting, close-short, transfer IN_TRANSIT, or Phase 6 work.
 Tests use dedicated TEST_DATABASE_URL and disposable Alembic-built schemas.
+
+## Phase 6: warehouse transfer lifecycle and transit storage
+
+### Lifecycle
+
+A warehouse transfer now moves through an explicit state machine:
+DRAFT -> IN_TRANSIT -> PARTIALLY_RECEIVED -> COMPLETED. Creation is unchanged and
+still produces a DRAFT with `dispatched_quantity` and `received_quantity` set to 0
+on every line. `POST /api/v1/inventory-transfers/{id}/dispatch` (Warehouse or Admin)
+moves DRAFT -> IN_TRANSIT: it locks the transfer row, then the canonical
+product/batch/balance locks, checks that available (`on_hand - reserved`) at each
+distinct source balance covers the aggregated demand, and moves every line's full
+quantity out of the source and into system transit in one UnitOfWork. Dispatch is
+all-or-nothing across lines; a single short line rolls the whole dispatch back and
+the transfer stays DRAFT. There is no partial dispatch.
+
+`POST /api/v1/inventory-transfers/{id}/receive` (Warehouse or Admin) accepts
+IN_TRANSIT or PARTIALLY_RECEIVED and applies one receipt of one or more lines.
+Each line's cumulative `received_quantity` may not exceed its `dispatched_quantity`
+(`outstanding_quantity = dispatched_quantity - received_quantity`). When every line
+reaches its dispatched quantity the transfer becomes COMPLETED and
+`completed_at`/`completed_by_user_id` are stamped; otherwise it is
+PARTIALLY_RECEIVED. Receipts are atomic across their lines: an invalid or
+over-outstanding line leaves every line's goods in transit and the transfer state
+unchanged. Repeated partial receipts are the supported way to close a transfer in
+stages.
+
+Cancellation stays DRAFT-only and additionally refuses if any line already carries
+dispatch or receipt progress. An IN_TRANSIT or PARTIALLY_RECEIVED transfer cannot
+be cancelled; its goods must be received. No reverse logistics, in-transit
+shrinkage, or return-to-source path is introduced.
+
+### Transit storage
+
+Migration e61a00000001 seeds one system warehouse and location, both
+`warehouse_code`/`location_code` `__TRANSIT__` and `warehouse_type`/`location_type`
+`TRANSIT`, active. `StockBalanceRepository.get_transit_storage()` resolves exactly
+that pair. Transit holds goods that have left a source but not yet reached a
+destination. Dispatch writes paired `TRANSFER_OUT` (source, negative) and
+`TRANSFER_TRANSIT_IN` (transit, positive) movements; each receipt writes paired
+`TRANSFER_TRANSIT_OUT` (transit, negative) and `TRANSFER_IN` (destination,
+positive) movements. The signed legs of any transfer item always sum to zero.
+`InventoryTransferItem.source_stock_balance_id` and `transit_stock_balance_id` pin
+the balances chosen at dispatch; receipt re-validates that identity and refuses if
+it drifted. `dispatched_quantity IN (0, quantity)` and
+`0 <= received_quantity <= dispatched_quantity <= quantity` are enforced by
+`ck_transfer_item_progress`.
+
+Transit is never operationally selectable. `require_operational_storage` rejects a
+transit warehouse or location (HTTP 409) from Stock In, Stock Out (FIFO/FEFO),
+Inventory Adjustment, raw StockBalance creation, purchase-order receiving, sales
+allocation sourcing, and both transfer endpoints (source and destination).
+`StockBalanceRepository` list and per-product queries exclude transit rows, so
+normal stock views and availability never show in-transit goods. The authoritative
+`Product.stock_qty` and `ProductBatch.quantity` aggregates still sum every balance
+including transit, so a global reconciliation stays balanced while goods are in
+flight. A transfer's own transit balance is one shared row per product/batch;
+concurrent dispatches create it exactly once and one transfer never draws down
+another transfer's outstanding transit quantity, because receipt is bounded by that
+line's own `outstanding_quantity`, not by the shared balance's `on_hand`.
+
+### Receipt events and Idempotency-Key
+
+Every receive call requires an `Idempotency-Key` header (1-128 characters:
+letters, digits, dot, underscore, colon, hyphen). `InventoryTransferReceipt` stores
+event identity: a unique server-generated `TRR-` receipt number, the operation key,
+a SHA-256 canonical request fingerprint (version tag, transfer id, and the lines
+sorted by item id with three-place exact quantities), timestamp, actor, and a JSONB
+response snapshot. Keys are unique per `(transfer_id, operation_key)`. Same
+key/same canonical payload replays the stored snapshot and performs no new
+movement, balance, aggregate, or audit write - including after the transfer has
+reached COMPLETED. Same key/different payload returns 409. The replay check runs
+before state and outstanding-quantity validation. Failed receipts commit no event
+and can be retried. `InventoryMovement` gains nullable `transfer_item_id` and
+`transfer_receipt_id` links; dispatch legs carry only `transfer_item_id`, receipt
+legs carry both. No receipt-line ledger duplicates the movement rows.
+
+Business audit rows (`AuditLog`, `table_name='inventory_transfers'`) record
+CREATE_TRANSFER, DISPATCH_TRANSFER, RECEIVE_TRANSFER, and CANCEL_TRANSFER;
+`sync_aggregates` continues to log any derived-total change under
+DERIVE_INVENTORY_TOTAL without reconciling balances.
+
+### Legacy /complete deprecation
+
+`POST /api/v1/inventory-transfers/{id}/complete` (the pre-Phase-6 immediate
+one-shot completion) is retired. The route stays authenticated and unchanged in
+shape: an unknown transfer id still returns 404, and an existing transfer returns
+409 with a message directing the caller to dispatch then receive. It never
+performs a transfer and is never silently reinterpreted. Historical transfers that
+were completed through the old path are marked `legacy_completed = true`, keep
+NULL line progress, keep their original two-leg `TRANSFER_OUT`/`TRANSFER_IN`
+movement history with NULL transfer links, and are read-only: dispatch and receive
+refuse a `legacy_completed` transfer. This keeps legacy immediate-transfer history
+distinguishable from lifecycle transfers in both the schema and the read-only
+diagnostic.
+
+### Diagnostic
+
+`scripts/check_inventory_consistency.py` (read-only, explicit
+`INVENTORY_DIAGNOSTIC_DATABASE_URL`, never loads settings) adds transfer checks:
+`transfer_movement_pair_conservation` (an item's signed transfer legs net to
+zero), `transfer_receipt_movement_totals` (`TRANSFER_IN` and `TRANSFER_TRANSIT_OUT`
+totals equal recorded `received_quantity`), `transit_outstanding_reconciliation`
+(each transit balance `on_hand` equals the summed `dispatched - received` of the
+lines pinned to it), and `legacy_transfer_history_distinct` (legacy transfers show
+no lifecycle progress or links; lifecycle transfers do). It classifies only and
+reconciles nothing.
+
+### Migration and downgrade limitations
+
+Migration e61a00000001 follows e51a00000001. Pause writers and coordinate schema
+and application deployment. It runs under `ACCESS EXCLUSIVE` locks and calls the
+read-only Phase 6 preflight (`scripts.check_phase6_preflight`, also runnable as a
+standalone check with an explicit `PHASE6_PREFLIGHT_DATABASE_URL`; PostgreSQL
+required, offline SQL cannot perform it). The preflight refuses and stops the
+migration, reporting identifiers, on: unknown transfer status, item ownership
+gaps, empty transfers, same-warehouse or same-location lines, non-positive or
+over-precise quantities, duplicate lines, storage/warehouse identity mismatch,
+batch/tracking identity mismatch, any transfer movement history on a
+non-COMPLETED transfer, a COMPLETED transfer whose movement legs do not
+reconstruct exactly (including ambiguous duplicate legs), orphan transfer
+movements, movement arithmetic errors, and any pre-existing `__TRANSIT__` or
+`TRANSIT`-typed warehouse/location. Existing COMPLETED transfers are marked
+`legacy_completed`; DRAFT/CANCELLED line progress is normalised to zero; the
+ledger, products, and stock transactions are untouched.
+
+Downgrade is intentionally narrow. It refuses once any lifecycle history exists:
+a non-legacy state, a set `dispatched_at`, non-zero line progress, any
+`InventoryTransferReceipt`, any transfer-linked movement, or any surviving transit
+`StockBalance`. With none of that, it removes the `__TRANSIT__` warehouse/location,
+the receipt table, the new columns and the check constraint, and restores the
+pre-Phase-6 shape. Do not delete events or rewrite state to bypass the guard. No
+production migration or preflight was executed during development.
+
+Phase 6 adds no partial dispatch, no reverse logistics or in-transit adjustment,
+no production reconciliation, and no Phase 7 work. Tests use the dedicated
+TEST_DATABASE_URL, disposable Alembic-built schemas, and the isolated PostgreSQL
+concurrency harness.

@@ -69,7 +69,7 @@ def concurrent_inventory():
 
 def overlap(state, requests, table, ids):
     """Hold a real row lock until both independent backends visibly wait on locks."""
-    assert table in {"products", "sales_orders", "purchase_orders"}
+    assert table in {"products", "sales_orders", "purchase_orders", "inventory_transfers"}
     barrier = Barrier(2, timeout=6)
     mutex = Lock()
     pids = set()
@@ -170,6 +170,7 @@ def test_simultaneous_missing_balance_creation(concurrent_inventory, with_batch)
     s = concurrent_inventory
     product = sales._create_product(s.client, s.headers) if with_batch else _create_product(s.client, s.headers)
     if with_batch:
+        # Two transfers of the same batch race to create the one shared transit balance at dispatch.
         batch = _create_batch(s.client, s.headers, product["id"], quantity="2.000", expiry_days=90)
         orders = []
         for _ in range(2):
@@ -182,7 +183,7 @@ def test_simultaneous_missing_balance_creation(concurrent_inventory, with_batch)
             })
             assert response.status_code == 201
             orders.append(response.json())
-        requests = [("POST", f"/api/v1/inventory-transfers/{o['id']}/complete", None) for o in orders]
+        requests = [("POST", f"/api/v1/inventory-transfers/{o['id']}/dispatch", None) for o in orders]
     else:
         request = ("POST", "/api/v1/stock/in", {"product_id": product["id"], "quantity": "0.750"})
         requests = [request, request]
@@ -190,9 +191,18 @@ def test_simultaneous_missing_balance_creation(concurrent_inventory, with_batch)
     assert [r.status_code for r in responses] == [200, 200]
     with s.sessions() as db:
         balances = db.query(StockBalance).all()
-        assert len(balances) == (2 if with_batch else 1)
-        target = next(b for b in balances if not with_batch or b.warehouse_id == s.storage["destination_warehouse_id"])
-        assert target.on_hand_qty == Decimal("1.500")
+        if with_batch:
+            # exactly one source balance and one shared transit balance, no duplicates
+            transit_id = db.query(Warehouse.id).filter_by(warehouse_code="__TRANSIT__").scalar()
+            assert len(balances) == 2
+            transit = next(b for b in balances if b.warehouse_id == transit_id)
+            source = next(b for b in balances if b.warehouse_id == s.storage["source_warehouse_id"])
+            assert transit.on_hand_qty == Decimal("1.500")
+            assert source.on_hand_qty == Decimal("0.500")
+            assert transit.reserved_qty == 0
+        else:
+            assert len(balances) == 1
+            assert balances[0].on_hand_qty == Decimal("1.500")
 
 
 def test_raw_zero_balance_creation_race(concurrent_inventory):
@@ -305,12 +315,27 @@ def test_opposite_direction_multi_product_transfers(concurrent_inventory):
         })
         assert response.status_code == 201
         orders.append(response.json())
-    responses = overlap(s, [("POST", f"/api/v1/inventory-transfers/{o['id']}/complete", None) for o in orders],
+    # Opposite-direction transfers race to dispatch, each locking both products and both source balances.
+    responses = overlap(s, [("POST", f"/api/v1/inventory-transfers/{o['id']}/dispatch", None) for o in orders],
                         "products", [p["id"] for p in products])
     assert [r.status_code for r in responses] == [200, 200]
+    for order in orders:
+        receipt = s.client.post(
+            f"/api/v1/inventory-transfers/{order['id']}/receive",
+            headers={"Idempotency-Key": uuid4().hex},
+            json={"items": [{"transfer_item_id": item["id"], "quantity": item["quantity"]}
+                            for item in order["items"]]},
+        )
+        assert receipt.status_code == 200, receipt.text
     with s.sessions() as db:
-        assert all(b.on_hand_qty == Decimal("1.000") for b in db.query(StockBalance).all())
-        assert db.query(InventoryMovement).filter_by(reference_type="INVENTORY_TRANSFER").count() == 8
+        operational = [b for b in db.query(StockBalance).all()
+                       if b.warehouse_id != db.query(Warehouse.id).filter_by(warehouse_code="__TRANSIT__").scalar()]
+        assert all(b.on_hand_qty == Decimal("1.000") for b in operational)
+        # 2 transfers x 2 lines x (2 dispatch legs + 2 receipt legs)
+        assert db.query(InventoryMovement).filter_by(reference_type="INVENTORY_TRANSFER").count() == 16
+        assert db.query(InventoryMovement).filter(
+            InventoryMovement.reference_type == "INVENTORY_TRANSFER").filter(
+            InventoryMovement.quantity != 0).count() == 16
 
 
 @pytest.mark.parametrize("track_batch", [False, True])

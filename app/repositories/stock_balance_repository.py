@@ -65,6 +65,7 @@ class StockBalanceRepository:
         ).first()
         if location is None:
             raise HTTPException(404, "Warehouse location not found")
+        self.require_operational_storage(warehouse.id, location.id)
         return warehouse, location
 
     def product_quantity(self, product_id: int) -> Decimal:
@@ -116,6 +117,8 @@ class StockBalanceRepository:
     ) -> list[StockBalance]:
         return (
             self.db.query(StockBalance)
+            .join(Warehouse, Warehouse.id == StockBalance.warehouse_id)
+            .filter(Warehouse.warehouse_type.is_distinct_from("TRANSIT"), Warehouse.warehouse_code != "__TRANSIT__")
             .order_by(
                 StockBalance.product_id,
                 StockBalance.warehouse_id,
@@ -131,10 +134,8 @@ class StockBalanceRepository:
     ) -> list[StockBalance]:
         return (
             self.db.query(StockBalance)
-            .filter(
-                StockBalance.product_id
-                == product_id
-            )
+            .join(Warehouse, Warehouse.id == StockBalance.warehouse_id)
+            .filter(Warehouse.warehouse_type.is_distinct_from("TRANSIT"), Warehouse.warehouse_code != "__TRANSIT__", StockBalance.product_id == product_id)
             .order_by(
                 StockBalance.warehouse_id,
                 StockBalance.location_id,
@@ -214,6 +215,7 @@ class StockBalanceRepository:
         if location is None:
             return None
 
+        self.require_operational_storage(warehouse.id, location.id)
         return warehouse, location
 
     def get_default_product_balance(
@@ -499,3 +501,22 @@ class StockBalanceRepository:
             )
 
         return balance
+
+    def require_operational_storage(self, warehouse_id, location_id):
+        warehouse = self.db.get(Warehouse, warehouse_id)
+        location = self.db.get(WarehouseLocation, location_id)
+        if warehouse is None or location is None or location.warehouse_id != warehouse_id:
+            raise HTTPException(404, "Warehouse/location not found")
+        if (warehouse.warehouse_type == "TRANSIT" or warehouse.warehouse_code == "__TRANSIT__" or
+                location.location_type == "TRANSIT" or location.location_code == "__TRANSIT__"):
+            raise HTTPException(409, "System transit storage is not operationally selectable")
+
+    def get_transit_storage(self):
+        rows = self.db.query(Warehouse, WarehouseLocation).join(
+            WarehouseLocation, WarehouseLocation.warehouse_id == Warehouse.id).filter(
+            Warehouse.warehouse_code == "__TRANSIT__", Warehouse.warehouse_type == "TRANSIT",
+            WarehouseLocation.location_code == "__TRANSIT__", WarehouseLocation.location_type == "TRANSIT",
+            Warehouse.is_active.is_(True), WarehouseLocation.is_active.is_(True)).all()
+        if len(rows) != 1:
+            raise HTTPException(409, "System transit configuration is missing or incompatible")
+        return rows[0]
