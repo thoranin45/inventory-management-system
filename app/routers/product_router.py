@@ -15,7 +15,9 @@ from app.core.dependencies import (
     CurrentUser,
     DatabaseSession,
     ProductRepositoryDependency,
+    StockBalanceRepositoryDependency,
 )
+from app.core.pagination import ListParams, list_params
 from app.schemas.product_schema import (
     ProductCreate,
     ProductResponse,
@@ -71,34 +73,15 @@ def create_product(
     )
 
 
-@router.get(
-    "",
-    response_model=ApiResponse[
-        PaginatedData[ProductResponse]
-    ],
-)
+@router.get("")
 def get_products(
     product_repo: ProductRepositoryDependency,
+    balance_repo: StockBalanceRepositoryDependency,
     current_user: CurrentUser,
-    page: int = Query(
-        default=1,
-        ge=1,
-    ),
-    size: int = Query(
-        default=20,
-        ge=1,
-        le=100,
-    ),
-) -> ApiResponse[PaginatedData[ProductResponse]]:
-    result = get_products_service(
-        product_repo=product_repo,
-        page=page,
-        size=size,
-    )
-
-    return ApiResponse(
-        message="Products retrieved successfully",
-        data=result,
+    params: ListParams = Depends(list_params),
+) -> dict:
+    return get_products_service(
+        product_repo=product_repo, balance_repo=balance_repo, params=params
     )
 
 

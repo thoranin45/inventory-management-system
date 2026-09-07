@@ -4,13 +4,17 @@ from app.core.exceptions import (
     CustomerAlreadyExistsException,
     CustomerNotFoundException,
 )
+from app.core.pagination import ListParams, paginate, paginated_body, resolve_ordering
 from app.core.unit_of_work import UnitOfWork
 from app.models import Customer
 from app.repositories.customer_repository import CustomerRepository
 from app.schemas.customer_schema import (
     CustomerCreate,
+    CustomerResponse,
     CustomerUpdate,
 )
+
+_CUSTOMER_SORTS = {"id": Customer.id, "customer_name": Customer.customer_name}
 
 
 def create_customer_service(
@@ -42,8 +46,18 @@ def create_customer_service(
 
 def get_customers_service(
     customer_repo: CustomerRepository,
-) -> list[Customer]:
-    return customer_repo.get_all()
+    params: ListParams,
+) -> dict:
+    ordering = resolve_ordering(params, _CUSTOMER_SORTS, "id", Customer.id)
+    items, total = paginate(
+        customer_repo.list_query(search=params.search), params, ordering
+    )
+    return paginated_body(
+        [CustomerResponse.model_validate(row) for row in items],
+        total,
+        params,
+        "Customers retrieved successfully",
+    )
 
 
 def get_customer_service(

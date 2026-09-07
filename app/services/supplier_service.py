@@ -4,13 +4,17 @@ from app.core.exceptions import (
     SupplierAlreadyExistsException,
     SupplierNotFoundException,
 )
+from app.core.pagination import ListParams, paginate, paginated_body, resolve_ordering
 from app.core.unit_of_work import UnitOfWork
 from app.models import Supplier
 from app.repositories.supplier_repository import SupplierRepository
 from app.schemas.supplier_schema import (
     SupplierCreate,
+    SupplierResponse,
     SupplierUpdate,
 )
+
+_SUPPLIER_SORTS = {"id": Supplier.id, "supplier_name": Supplier.supplier_name}
 
 
 def create_supplier_service(
@@ -47,12 +51,18 @@ def create_supplier_service(
 
 def get_suppliers_service(
     supplier_repo: SupplierRepository,
-) -> list[Supplier]:
-    """
-    Get all suppliers.
-    """
-
-    return supplier_repo.get_all()
+    params: ListParams,
+) -> dict:
+    ordering = resolve_ordering(params, _SUPPLIER_SORTS, "id", Supplier.id)
+    items, total = paginate(
+        supplier_repo.list_query(search=params.search), params, ordering
+    )
+    return paginated_body(
+        [SupplierResponse.model_validate(row) for row in items],
+        total,
+        params,
+        "Suppliers retrieved successfully",
+    )
 
 
 def get_supplier_service(

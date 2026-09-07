@@ -17,6 +17,7 @@ from tests.test_migrations import migration_engine, upgrade
 
 PHASE5 = "e51a00000001"
 PHASE6 = "e61a00000001"
+HEAD = "e71a00000001"
 
 
 # --------------------------------------------------------------------------- #
@@ -85,7 +86,7 @@ def _stable_snapshot(c):
 def test_fresh_upgrade_seeds_resolvable_transit_storage(migration_engine):
     upgrade(migration_engine, "head")
     with migration_engine.connect() as c:
-        assert c.scalar(text("SELECT version_num FROM alembic_version")) == PHASE6
+        assert c.scalar(text("SELECT version_num FROM alembic_version")) == HEAD
 
         # exactly one active, fully-typed transit warehouse/location pair, resolvable
         # by the same predicate StockBalanceRepository.get_transit_storage() uses.
@@ -267,6 +268,6 @@ def test_downgrade_refused_once_lifecycle_history_exists(migration_engine, histo
             command.downgrade(migration_config(c), PHASE5)
 
     with migration_engine.connect() as c:
-        assert c.scalar(text("SELECT version_num FROM alembic_version")) == PHASE6
+        assert c.scalar(text("SELECT version_num FROM alembic_version")) == HEAD
         assert "inventory_transfer_receipts" in inspect(c).get_table_names()
         assert c.scalar(text("SELECT count(*) FROM warehouses WHERE warehouse_code='__TRANSIT__'")) == 1

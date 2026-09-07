@@ -51,6 +51,7 @@ class Product(Base):
             "ix_products_is_active",
             "is_active",
         ),
+        Index("ix_products_product_name", "product_name"),
     )
 
     id = Column(Integer, primary_key=True)
@@ -497,7 +498,10 @@ class WarehouseLocation(Base):
 class StockTransaction(Base):
     __tablename__ = "stock_transactions"
 
-    __table_args__ = (Index("ix_stock_transactions_product_type", "product_id", "transaction_type"),)
+    __table_args__ = (
+        Index("ix_stock_transactions_product_type", "product_id", "transaction_type"),
+        Index("ix_stock_transactions_created_at", "created_at"),
+    )
 
     id = Column(Integer, primary_key=True)
 
@@ -544,6 +548,7 @@ class ProductBatch(Base):
     __table_args__ = (
         UniqueConstraint("product_id", "lot_no", name="uq_product_batches_product_lot"),
         Index("ix_product_batches_product_expiry", "product_id", "expiry_date", "created_at", "id"),
+        Index("ix_product_batches_lot_no", "lot_no"),
         CheckConstraint(
             "quantity >= 0",
             name="ck_product_batches_quantity_non_negative",
@@ -589,6 +594,10 @@ class ProductBatch(Base):
 class Supplier(Base):
     __tablename__ = "suppliers"
 
+    __table_args__ = (
+        Index("ix_suppliers_supplier_name", "supplier_name"),
+    )
+
     id = Column(Integer, primary_key=True)
 
     supplier_name = Column(String(255))
@@ -609,6 +618,11 @@ class Supplier(Base):
 
 class PurchaseOrder(Base):
     __tablename__ = "purchase_orders"
+
+    __table_args__ = (
+        Index("ix_purchase_orders_status_created_at", "status", "created_at"),
+        Index("ix_purchase_orders_supplier_id", "supplier_id"),
+    )
 
     id = Column(Integer, primary_key=True)
 
@@ -688,6 +702,10 @@ class PurchaseOrderItem(Base):
 class AuditLog(Base):
     __tablename__ = "audit_logs"
 
+    __table_args__ = (
+        Index("ix_audit_logs_created_at", "created_at"),
+    )
+
     id = Column(Integer, primary_key=True)
 
     username = Column(String(100))
@@ -708,6 +726,10 @@ class AuditLog(Base):
 class Customer(Base):
     __tablename__ = "customers"
 
+    __table_args__ = (
+        Index("ix_customers_customer_name", "customer_name"),
+    )
+
     id = Column(Integer, primary_key=True)
     customer_name = Column(String(255))
     phone = Column(String(50))
@@ -717,6 +739,10 @@ class Customer(Base):
 
 class SalesOrder(Base):
     __tablename__ = "sales_orders"
+
+    __table_args__ = (
+        Index("ix_sales_orders_status_created_at", "status", "created_at"),
+    )
 
     id = Column(Integer, primary_key=True)
     so_number = Column(String(100), unique=True)

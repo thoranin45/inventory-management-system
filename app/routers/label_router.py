@@ -47,6 +47,31 @@ def generate_product_label(
         f"app/static/qrcodes/{product.sku}_qr.png"
     )
 
+    # Phase 8: self-heal missing code images so the label never renders text-only.
+    if product.barcode and not os.path.exists(barcode_file):
+        try:
+            import barcode as _bc
+            from barcode.writer import ImageWriter
+
+            os.makedirs("app/static/barcodes", exist_ok=True)
+            _bc.get("code128", product.barcode, writer=ImageWriter()).save(
+                f"app/static/barcodes/{product.barcode}"
+            )
+        except Exception:
+            pass
+    if not os.path.exists(qr_file):
+        try:
+            import json as _json
+            import qrcode as _qr
+
+            os.makedirs("app/static/qrcodes", exist_ok=True)
+            _qr.make(_json.dumps({
+                "product_id": product.id, "sku": product.sku,
+                "barcode": product.barcode, "product_name": product.product_name,
+            })).save(qr_file)
+        except Exception:
+            pass
+
     os.makedirs(
         "app/static/labels",
         exist_ok=True

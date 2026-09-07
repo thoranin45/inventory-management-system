@@ -107,8 +107,7 @@ def test_get_categories(
 
     assert body["success"] is True
     assert body["message"] == "Categories retrieved successfully"
-    assert isinstance(body["data"], list)
-
+    body["data"] = body["data"]["items"]
     category_ids = [
         category["id"]
         for category in body["data"]

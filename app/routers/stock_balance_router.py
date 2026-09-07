@@ -1,5 +1,6 @@
 from app.core.dependencies import require_admin
 from app.core.dependencies import require_warehouse
+from app.core.pagination import ListParams, list_params
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
@@ -15,6 +16,7 @@ from app.schemas.stock_balance_schema import (
 from app.services.stock_balance_service import (
     adjust_stock_balance_service,
     create_stock_balance_service,
+    get_in_transit_balances_service,
     get_product_stock_balances_service,
     get_stock_balances_service,
 )
@@ -25,32 +27,30 @@ router = APIRouter(dependencies=[Depends(require_warehouse)],
 )
 
 
-@router.get(
-    "",
-    response_model=list[StockBalanceResponse],
-)
+@router.get("")
 def get_stock_balances(
     db: Session = Depends(get_db),
-):
-    repo = StockBalanceRepository(db)
+    params: ListParams = Depends(list_params),
+) -> dict:
+    return get_stock_balances_service(db, StockBalanceRepository(db), params)
 
-    return get_stock_balances_service(repo)
+
+@router.get("/in-transit")
+def get_in_transit_stock_balances(
+    db: Session = Depends(get_db),
+    params: ListParams = Depends(list_params),
+) -> dict:
+    return get_in_transit_balances_service(db, StockBalanceRepository(db), params)
 
 
-@router.get(
-    "/product/{product_id}",
-    response_model=list[StockBalanceResponse],
-)
+@router.get("/product/{product_id}")
 def get_product_stock_balances(
     product_id: int,
     db: Session = Depends(get_db),
-):
-    repo = StockBalanceRepository(db)
-
+    params: ListParams = Depends(list_params),
+) -> dict:
     return get_product_stock_balances_service(
-        db,
-        repo,
-        product_id,
+        db, StockBalanceRepository(db), product_id, params
     )
 
 

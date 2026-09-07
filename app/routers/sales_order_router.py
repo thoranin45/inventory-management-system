@@ -24,6 +24,7 @@ from app.core.dependencies import (
     require_admin,
 )
 from app.core.response import success_response
+from app.core.pagination import ListParams, list_params
 from app.core.quantity import quantity_text
 from app.models import User
 from app.schemas.sales_order_schema import (
@@ -74,15 +75,9 @@ def create_sales_order(
 @router.get("/")
 def get_sales_orders(
     sales_order_repo: SalesOrderRepositoryDependency,
+    params: ListParams = Depends(list_params),
 ):
-    result = get_sales_orders_service(
-        sales_order_repo=sales_order_repo,
-    )
-
-    return success_response(
-        "Sales Orders Retrieved",
-        result,
-    )
+    return get_sales_orders_service(sales_order_repo=sales_order_repo, params=params)
 
 
 @router.get("/{sales_order_id}")
@@ -99,6 +94,64 @@ def get_sales_order(
         "Sales Order Retrieved",
         result,
     )
+
+
+@router.get("/{sales_order_id}/packing-slip-data")
+def packing_slip_data(
+    sales_order_id: int,
+    sales_order_repo: SalesOrderRepositoryDependency,
+):
+    order = get_sales_order_service(
+        sales_order_repo=sales_order_repo, sales_order_id=sales_order_id
+    )
+    customer = sales_order_repo.get_customer_by_id(order["customer_id"])
+    return success_response("Packing slip data", {
+        "so_number": order["so_number"],
+        "status": order["status"],
+        "created_at": order["created_at"],
+        "shipment_number": order.get("shipment_number"),
+        "customer": {
+            "id": order["customer_id"],
+            "name": getattr(customer, "customer_name", None),
+            "address": getattr(customer, "address", None),
+            "phone": getattr(customer, "phone", None),
+        },
+        "items": [
+            {
+                "product_id": item["product_id"],
+                "quantity": item["quantity"],
+                "batch_allocations": item["batch_allocations"],
+                "fulfillment_allocations": item["fulfillment_allocations"],
+            }
+            for item in order["items"]
+        ],
+    })
+
+
+@router.get("/{sales_order_id}/shipping-label-data")
+def shipping_label_data(
+    sales_order_id: int,
+    sales_order_repo: SalesOrderRepositoryDependency,
+):
+    order = get_sales_order_service(
+        sales_order_repo=sales_order_repo, sales_order_id=sales_order_id
+    )
+    customer = sales_order_repo.get_customer_by_id(order["customer_id"])
+    return success_response("Shipping label data", {
+        "so_number": order["so_number"],
+        "shipment_number": order.get("shipment_number"),
+        "status": order["status"],
+        "shipped_at": order.get("shipped_at"),
+        "ship_to": {
+            "name": getattr(customer, "customer_name", None),
+            "address": getattr(customer, "address", None),
+            "phone": getattr(customer, "phone", None),
+        },
+        "total_quantity": sum(
+            (item["quantity"] for item in order["items"]), 0
+        ),
+        "order_barcode": order["so_number"],
+    })
 
 
 @router.get("/{sales_order_id}/invoice")

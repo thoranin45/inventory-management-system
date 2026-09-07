@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -326,3 +326,113 @@ class SalesOrderRepository:
         return (self.db.query(SalesOrderBatchAllocation)
                 .filter(SalesOrderBatchAllocation.sales_order_id == sales_order_id)
                 .order_by(SalesOrderBatchAllocation.id).all())
+
+    # ---------------- Phase 8 work-queue support (grouped, no N+1) --------- #
+    def list_query(self, *, search: str | None = None, status: str | None = None):
+        query = self.db.query(SalesOrder)
+        if status:
+            wanted = [s.strip().upper() for s in status.split(",") if s.strip()]
+            query = query.filter(SalesOrder.status.in_(wanted))
+        if search:
+            like = f"%{search}%"
+            query = query.outerjoin(
+                Customer, Customer.id == SalesOrder.customer_id
+            ).filter(
+                or_(
+                    SalesOrder.so_number.ilike(like),
+                    Customer.customer_name.ilike(like),
+                )
+            )
+        return query
+
+    def status_counts(self) -> dict[str, int]:
+        return {
+            row[0]: row[1]
+            for row in self.db.query(SalesOrder.status, func.count(SalesOrder.id))
+            .group_by(SalesOrder.status)
+            .all()
+        }
+
+    def item_aggregates(self, order_ids: list[int]) -> dict[int, tuple]:
+        if not order_ids:
+            return {}
+        rows = (
+            self.db.query(
+                SalesOrderItem.sales_order_id,
+                func.count(SalesOrderItem.id),
+                func.coalesce(func.sum(SalesOrderItem.quantity), 0),
+            )
+            .filter(SalesOrderItem.sales_order_id.in_(order_ids))
+            .group_by(SalesOrderItem.sales_order_id)
+            .all()
+        )
+        return {r[0]: (int(r[1]), Decimal(str(r[2]))) for r in rows}
+
+    def fulfillment_aggregates(self, order_ids: list[int]) -> dict[int, tuple]:
+        if not order_ids:
+            return {}
+        rows = (
+            self.db.query(
+                SalesOrderBatchAllocation.sales_order_id,
+                func.coalesce(func.sum(SalesOrderBatchAllocation.quantity), 0),
+                func.coalesce(func.sum(SalesOrderBatchAllocation.picked_quantity), 0),
+                func.coalesce(func.sum(SalesOrderBatchAllocation.packed_quantity), 0),
+            )
+            .filter(SalesOrderBatchAllocation.sales_order_id.in_(order_ids))
+            .group_by(SalesOrderBatchAllocation.sales_order_id)
+            .all()
+        )
+        return {
+            r[0]: (Decimal(str(r[1])), Decimal(str(r[2])), Decimal(str(r[3])))
+            for r in rows
+        }
+
+    def blocked_by_expiry_ids(self, order_ids: list[int], today) -> set[int]:
+        if not order_ids:
+            return set()
+        return {
+            row[0]
+            for row in self.db.query(SalesOrderBatchAllocation.sales_order_id)
+            .join(ProductBatch, ProductBatch.id == SalesOrderBatchAllocation.batch_id)
+            .filter(
+                SalesOrderBatchAllocation.sales_order_id.in_(order_ids),
+                ProductBatch.expiry_date.isnot(None),
+                ProductBatch.expiry_date < today,
+            )
+            .distinct()
+        }
+
+    def all_blocked_by_expiry_ids(self, today, statuses: list[str]) -> set[int]:
+        return {
+            row[0]
+            for row in self.db.query(SalesOrderBatchAllocation.sales_order_id)
+            .join(SalesOrder, SalesOrder.id == SalesOrderBatchAllocation.sales_order_id)
+            .join(ProductBatch, ProductBatch.id == SalesOrderBatchAllocation.batch_id)
+            .filter(
+                SalesOrder.status.in_(statuses),
+                ProductBatch.expiry_date.isnot(None),
+                ProductBatch.expiry_date < today,
+            )
+            .distinct()
+        }
+
+    def customer_names(self, customer_ids: list[int]) -> dict[int, str]:
+        if not customer_ids:
+            return {}
+        return {
+            row[0]: row[1]
+            for row in self.db.query(Customer.id, Customer.customer_name)
+            .filter(Customer.id.in_(customer_ids))
+            .all()
+        }
+
+    def shipped_today_count(self, day_start, day_end) -> int:
+        return (
+            self.db.query(func.count(SalesOrder.id))
+            .filter(
+                SalesOrder.shipped_at.isnot(None),
+                SalesOrder.shipped_at >= day_start,
+                SalesOrder.shipped_at < day_end,
+            )
+            .scalar()
+        )

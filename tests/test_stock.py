@@ -152,7 +152,7 @@ def _get_batches(
 
     assert body["success"] is True
 
-    return body["data"]
+    return body["data"]["items"]
 
 
 def _get_batch_by_id(

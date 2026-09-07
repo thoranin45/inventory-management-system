@@ -1079,3 +1079,137 @@ logistics, no in-place Sales reallocation, no auto-reconciliation, no Phase 8
 dashboard/report redesign, no schema change. Concurrency tests use the existing
 isolated PostgreSQL harness with injected business dates; the system clock is
 never manipulated.
+
+## Phase 8: Web App backend readiness
+
+Phase 8 is read-oriented and additive. It does not change Product.stock_qty
+semantics (still total owned physical inventory incl. expired and transit), does
+not redesign any lifecycle, and introduces no locking. One Alembic revision
+(`e71a00000001`) adds read-path btree indexes only — no data rewrite.
+
+### Standard collection contract
+
+Every targeted list endpoint returns
+
+    {"success": true, "message": "...",
+     "data": {"items": [...],
+              "pagination": {"page", "page_size", "total_items", "total_pages"}}}
+
+Query params: `page` (>=1), `page_size` (default 20, hard max 100),
+`search`, `status`, `sort_by`, `sort_order` (`asc|desc`). `sort_by` is an explicit
+per-endpoint allow-list; an unknown field is 422. Every ordering appends `id` as a
+deterministic tiebreaker. Applied to: products, customers, suppliers, categories,
+batches, stock-balances, sales-orders, purchase-orders, inventory-transfers,
+inventory-movements (`inventory-movements` keeps a documented `page_size` default
+of 50). Auth `/token` and `/login` are unchanged.
+
+Quantity Decimals serialize as fixed scale-3 JSON strings (`"20.000"`), money as
+scale-2 strings (`"120.00"`); the DB scale is preserved. Business arithmetic
+stays `Decimal` internally.
+
+### Operational stock visibility
+
+Product list/report rows gain additive derived fields, computed with one grouped
+query (`StockBalanceRepository.inventory_categories_by_product`), never persisted:
+`owned_quantity` (= `stock_qty`), `operational_available_quantity`,
+`reserved_quantity`, `expired_quantity`, `near_expiry_quantity`,
+`transit_quantity`, plus the already-stored `minimum_stock`, `safety_stock`,
+`maximum_stock`, and `as_of_date`. Batch rows gain `owned_quantity`,
+`operational_available_quantity`, `transit_quantity`, `days_to_expiry`,
+`is_expired`, `is_near_expiry`, `as_of_date`. Stock-balance rows gain `is_transit`,
+`batch_expiry_date`, `days_to_expiry`, `is_expired`. Operational list endpoints
+still exclude TRANSIT rows; `GET /stock-balances/in-transit` exposes them
+explicitly.
+
+### Dashboard summary and attention
+
+`GET /dashboard/summary` (require_warehouse, READ COMMITTED, no locks) is additive
+— `GET /dashboard` is unchanged. It returns operational inventory totals (owned,
+operational available, reserved, expired, near-expiry, in-transit), Sales / PO /
+Transfer status counts, `shipped_today` / `received_today` / `completed_today`
+computed on Asia/Bangkok business-day bounds, `attention_required` (Sales orders
+whose allocated batch is now expired), and `generated_at`.
+
+`GET /attention/summary` returns the "Needs Attention" counts;
+`GET /attention/queues?type=<...>&page=&page_size=` drills into a paginated list.
+Queue types: `low_stock`, `expired`, `near_expiry`, `sales_blocked`,
+`sales_picking`, `sales_packing`, `sales_ready`, `po_partial`,
+`transfer_in_transit`, `transfer_partial`. The full inventory diagnostic is never
+run in the request path.
+
+Low-stock (dashboard summary and attention only — legacy `/dashboard/low-stock`
+and `/reports/low-stock` are unchanged) compares
+`operational_available_quantity` against `safety_stock` when > 0, else
+`minimum_stock` when > 0, else a global fallback of 10.
+
+### Work queues (no N+1)
+
+`GET /sales-orders/`, `GET /purchase-orders`, `GET /inventory-transfers` return
+summary rows with aggregate fields (item/line counts, quantity totals, progress
+percentages, last-activity / last-receipt / dispatch timestamps, customer /
+supplier / warehouse names, and for Sales an `attention_reason` of
+`"expired_allocation"` or null). Aggregates come from grouped subqueries — query
+count is bounded regardless of row count. `last_activity_at` is derived from
+existing timestamps (`created_at`, `picked_at`, `packed_at`, `shipped_at`); no new
+`updated_at` column was added. Detail endpoints and every lifecycle mutation
+(Phase 4/5/6) are unchanged.
+
+### Global search and scan resolver
+
+`GET /search?q=&types=&limit=` (require_warehouse; `limit` default 20, max 50):
+PostgreSQL-native, no external engine, no `pg_trgm`. Each of the seven entity
+types (product, sales_order, purchase_order, transfer, batch, customer, supplier)
+runs one bounded `LIMIT` query ranked exact-barcode -> exact-identifier ->
+identifier-prefix -> bounded name substring. `len(q) < 2` returns an empty,
+non-error result. Rows carry only `type`, `id`, `label`, optional `sublabel`,
+`status`, `url_hint`. Users, audit logs, credentials and admin-only write fields
+are never returned.
+
+`GET /scan/resolve?barcode=&context=lookup|stock_in|pick|pack` (require_warehouse,
+read-only): resolves a barcode via the same `ProductRepository.get_active_by_barcode`
+used by scan-pick / scan-pack — no duplicate barcode truth — and returns product
+identity + operational availability + (for batch products) the eligible-first
+batch list with expiry flags. Stock-in flow: resolve -> `product_id` ->
+existing `POST /stock/in` (no new mutation endpoint). `scan-pick` / `scan-pack`
+remain the action endpoints.
+
+### Reports
+
+Operational dashboard data lives under `/dashboard/*` and `/attention/*`.
+`/reports` keeps its legacy endpoints unchanged and adds:
+`/reports/operational-stock` (paginated per-product categories),
+`/reports/expired-stock`, `/reports/near-expiry-stock`, `/reports/in-transit-stock`,
+`/reports/low-stock-operational`, and `/reports/sales`, `/reports/purchase-orders`,
+`/reports/transfers` (reusing the work-queue summaries). `/reports/stock-movement`
+is now paginated with `transaction_type` / `date_from` / `date_to` filters — it no
+longer dumps the whole table. `/reports/chart/stock` and `/reports/chart/expiry`
+are bounded by `?limit=` and the expiry chart carries an
+`eligible|near_expiry|expired|no_expiry` series. All report date math routes
+through the Asia/Bangkok business date. Decimal fidelity is preserved in JSON
+(scale-3/scale-2 strings) and in xlsx exports.
+
+### Print readiness
+
+No Print Center. `GET /sales-orders/{id}/packing-slip-data` and
+`/shipping-label-data` return read-only JSON assembled from existing order /
+allocation / customer data. The product-label endpoint now self-heals missing
+barcode / QR PNGs instead of rendering text-only. The product QR payload is valid
+JSON (`json.dumps`) instead of a Python dict repr. No carrier integration, no
+structured shipping-address schema.
+
+### Index migration (`e71a00000001`)
+
+Additive btree indexes, each with query evidence:
+`sales_orders(status, created_at)`, `purchase_orders(status, created_at)`,
+`purchase_orders(supplier_id)`, `product_batches(lot_no)`,
+`products(product_name)`, `customers(customer_name)`, `suppliers(supplier_name)`,
+`audit_logs(created_at)`, `stock_transactions(created_at)`. No `pg_trgm`, no GIN,
+no functional/`text_pattern_ops` indexes, no speculative indexes. Matching
+`Index(...)` entries were added to the ORM models so metadata parity holds.
+Downgrade drops only these indexes.
+
+### Not in Phase 8
+
+No frontend, no Phase 9 hardening, no ownership-semantics change, no quarantine,
+no forecasting / reorder suggestions, no Advanced Reports, no Exception Center, no
+external search engine, no new locking, no production data modification.

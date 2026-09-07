@@ -29,6 +29,7 @@ from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.request_logger import RequestLoggingMiddleware
 from app.middleware.security_headers import SecurityHeadersMiddleware
 
+from app.routers.attention_router import router as attention_router
 from app.routers.audit_router import router as audit_router
 from app.routers.auth_router import router as auth_router
 from app.routers.batch_router import router as batch_router
@@ -42,6 +43,8 @@ from app.routers.product_router import router as product_router
 from app.routers.purchase_order_router import router as po_router
 from app.routers.report_router import router as report_router
 from app.routers.sales_order_router import router as sales_order_router
+from app.routers.scan_router import router as scan_router
+from app.routers.search_router import router as search_router
 from app.routers.stock_router import router as stock_router
 from app.routers.supplier_router import router as supplier_router
 from app.routers.stock_balance_router import (
@@ -291,4 +294,19 @@ app.include_router(
 app.include_router(
     inventory_movement_router,
     prefix="/api/v1",
+)
+
+app.include_router(
+    attention_router,
+    prefix=API_V1_PREFIX,
+)
+
+app.include_router(
+    search_router,
+    prefix=API_V1_PREFIX,
+)
+
+app.include_router(
+    scan_router,
+    prefix=API_V1_PREFIX,
 )

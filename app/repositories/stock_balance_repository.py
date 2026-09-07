@@ -1,8 +1,8 @@
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from fastapi import HTTPException
-from sqlalchemy import func, or_
+from sqlalchemy import case, func, or_
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -144,6 +144,34 @@ class StockBalanceRepository:
             )
             .all()
         )
+
+    def _operational_filter(self, query):
+        return query.join(
+            Warehouse, Warehouse.id == StockBalance.warehouse_id
+        ).filter(
+            Warehouse.warehouse_type.is_distinct_from("TRANSIT"),
+            Warehouse.warehouse_code != "__TRANSIT__",
+        )
+
+    def list_query(self, *, product_id: int | None = None):
+        """Operational (non-transit) balances only."""
+        query = self._operational_filter(self.db.query(StockBalance))
+        if product_id is not None:
+            query = query.filter(StockBalance.product_id == product_id)
+        return query
+
+    def in_transit_query(self, *, product_id: int | None = None):
+        query = self.db.query(StockBalance).join(
+            Warehouse, Warehouse.id == StockBalance.warehouse_id
+        ).filter(
+            or_(
+                Warehouse.warehouse_type == "TRANSIT",
+                Warehouse.warehouse_code == "__TRANSIT__",
+            )
+        )
+        if product_id is not None:
+            query = query.filter(StockBalance.product_id == product_id)
+        return query
 
     def get_exact(
         self,
@@ -561,4 +589,129 @@ class StockBalanceRepository:
         return {
             row.product_id: Decimal(str(row.available))
             for row in self._operational_available_query(today).all()
+        }
+
+    # ------------------------------------------------------------------ #
+    # Phase 8: batched derived inventory categories for list/dashboard views.
+    # One grouped query per call. Never persisted; never a Product.stock_qty
+    # replacement.
+    # ------------------------------------------------------------------ #
+    def _category_query(self, today: date, near_expiry_days: int, group_col):
+        near_cutoff = today + timedelta(days=near_expiry_days)
+        is_transit = or_(
+            Warehouse.warehouse_type == "TRANSIT",
+            Warehouse.warehouse_code == "__TRANSIT__",
+        )
+        expired = (
+            ProductBatch.expiry_date.isnot(None) & (ProductBatch.expiry_date < today)
+        )
+        near = (
+            ProductBatch.expiry_date.isnot(None)
+            & (ProductBatch.expiry_date >= today)
+            & (ProductBatch.expiry_date <= near_cutoff)
+        )
+        eligible = or_(
+            StockBalance.batch_id.is_(None),
+            ProductBatch.expiry_date.is_(None),
+            ProductBatch.expiry_date >= today,
+        )
+
+        def s(predicate, col):
+            return func.coalesce(
+                func.sum(case((predicate, col), else_=0)), 0
+            )
+
+        return (
+            self.db.query(
+                group_col.label("key"),
+                s(~is_transit, StockBalance.on_hand_qty).label("operational_on_hand"),
+                s(~is_transit, StockBalance.reserved_qty).label("operational_reserved"),
+                s(~is_transit & expired, StockBalance.on_hand_qty).label("expired"),
+                s(~is_transit & near, StockBalance.on_hand_qty).label("near_expiry"),
+                s(~is_transit & eligible, StockBalance.on_hand_qty).label("eligible_on_hand"),
+                s(~is_transit & eligible, StockBalance.reserved_qty).label("eligible_reserved"),
+                s(is_transit, StockBalance.on_hand_qty).label("in_transit"),
+            )
+            .join(Warehouse, Warehouse.id == StockBalance.warehouse_id)
+            .outerjoin(ProductBatch, ProductBatch.id == StockBalance.batch_id)
+            .group_by(group_col)
+        )
+
+    @staticmethod
+    def _category_row(row) -> dict:
+        eligible_on_hand = Decimal(str(row.eligible_on_hand))
+        eligible_reserved = Decimal(str(row.eligible_reserved))
+        return {
+            "operational_available_quantity": eligible_on_hand - eligible_reserved,
+            "reserved_quantity": Decimal(str(row.operational_reserved)),
+            "expired_quantity": Decimal(str(row.expired)),
+            "near_expiry_quantity": Decimal(str(row.near_expiry)),
+            "transit_quantity": Decimal(str(row.in_transit)),
+        }
+
+    def inventory_categories_by_product(
+        self, today: date, near_expiry_days: int, product_ids: list[int] | None = None
+    ) -> dict[int, dict]:
+        query = self._category_query(today, near_expiry_days, StockBalance.product_id)
+        if product_ids is not None:
+            if not product_ids:
+                return {}
+            query = query.filter(StockBalance.product_id.in_(product_ids))
+        return {row.key: self._category_row(row) for row in query.all()}
+
+    def inventory_categories_by_batch(
+        self, today: date, near_expiry_days: int, batch_ids: list[int] | None = None
+    ) -> dict[int, dict]:
+        query = self._category_query(today, near_expiry_days, StockBalance.batch_id).filter(
+            StockBalance.batch_id.isnot(None)
+        )
+        if batch_ids is not None:
+            if not batch_ids:
+                return {}
+            query = query.filter(StockBalance.batch_id.in_(batch_ids))
+        return {row.key: self._category_row(row) for row in query.all()}
+
+    def inventory_category_totals(self, today: date, near_expiry_days: int) -> dict:
+        """System-wide operational rollup for the dashboard summary. One query."""
+        near_cutoff = today + timedelta(days=near_expiry_days)
+        is_transit = or_(
+            Warehouse.warehouse_type == "TRANSIT",
+            Warehouse.warehouse_code == "__TRANSIT__",
+        )
+        expired = ProductBatch.expiry_date.isnot(None) & (ProductBatch.expiry_date < today)
+        near = (
+            ProductBatch.expiry_date.isnot(None)
+            & (ProductBatch.expiry_date >= today)
+            & (ProductBatch.expiry_date <= near_cutoff)
+        )
+        eligible = or_(
+            StockBalance.batch_id.is_(None),
+            ProductBatch.expiry_date.is_(None),
+            ProductBatch.expiry_date >= today,
+        )
+
+        def s(predicate, col):
+            return func.coalesce(func.sum(case((predicate, col), else_=0)), 0)
+
+        row = (
+            self.db.query(
+                s(~is_transit & eligible, StockBalance.on_hand_qty).label("eligible_on_hand"),
+                s(~is_transit & eligible, StockBalance.reserved_qty).label("eligible_reserved"),
+                s(~is_transit, StockBalance.reserved_qty).label("operational_reserved"),
+                s(~is_transit & expired, StockBalance.on_hand_qty).label("expired"),
+                s(~is_transit & near, StockBalance.on_hand_qty).label("near_expiry"),
+                s(is_transit, StockBalance.on_hand_qty).label("in_transit"),
+            )
+            .join(Warehouse, Warehouse.id == StockBalance.warehouse_id)
+            .outerjoin(ProductBatch, ProductBatch.id == StockBalance.batch_id)
+            .one()
+        )
+        eligible_on_hand = Decimal(str(row.eligible_on_hand))
+        eligible_reserved = Decimal(str(row.eligible_reserved))
+        return {
+            "operational_available_quantity": eligible_on_hand - eligible_reserved,
+            "reserved_quantity": Decimal(str(row.operational_reserved)),
+            "expired_quantity": Decimal(str(row.expired)),
+            "near_expiry_quantity": Decimal(str(row.near_expiry)),
+            "in_transit_quantity": Decimal(str(row.in_transit)),
         }

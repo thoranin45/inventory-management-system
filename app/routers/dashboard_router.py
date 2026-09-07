@@ -3,6 +3,11 @@ from fastapi import APIRouter, Depends
 
 from app.core.dependencies import (
     DashboardRepositoryDependency,
+    DatabaseSession,
+    InventoryTransferRepositoryDependency,
+    PurchaseOrderRepositoryDependency,
+    SalesOrderRepositoryDependency,
+    StockBalanceRepositoryDependency,
 )
 from app.core.response import success_response
 from app.services.dashboard_service import (
@@ -15,6 +20,7 @@ from app.services.dashboard_service import (
     get_top_stock_service,
     get_total_stock_value_service,
 )
+from app.services.dashboard_summary_service import get_dashboard_summary_service
 
 
 router = APIRouter(dependencies=[Depends(require_warehouse)], )
@@ -31,6 +37,19 @@ def get_dashboard(
     return success_response(
         "Dashboard retrieved successfully",
         result,
+    )
+
+
+@router.get("/dashboard/summary")
+def get_dashboard_summary(
+    db: DatabaseSession,
+    balance_repo: StockBalanceRepositoryDependency,
+    sales_repo: SalesOrderRepositoryDependency,
+    po_repo: PurchaseOrderRepositoryDependency,
+    transfer_repo: InventoryTransferRepositoryDependency,
+) -> dict:
+    return get_dashboard_summary_service(
+        db, balance_repo, sales_repo, po_repo, transfer_repo
     )
 
 

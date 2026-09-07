@@ -67,18 +67,22 @@ def search_inventory_movements_service(
         date_to=date_to,
     )
 
-    total_pages = (
-        math.ceil(total / size)
-        if total > 0
-        else 0
-    )
+    from app.core.pagination import phase8_json
+    from app.schemas.inventory_movement_schema import InventoryMovementResponse
 
-    return InventoryMovementListResponse(
-        items=items,
-        pagination=InventoryMovementPagination(
-            page=page,
-            page_size=size,
-            total_items=total,
-            total_pages=total_pages,
-        ),
-    )
+    total_pages = math.ceil(total / size) if total > 0 else 0
+    return {
+        "success": True,
+        "message": "Inventory movements retrieved successfully",
+        "data": {
+            "items": phase8_json(
+                [InventoryMovementResponse.model_validate(m) for m in items]
+            ),
+            "pagination": {
+                "page": page,
+                "page_size": size,
+                "total_items": total,
+                "total_pages": total_pages,
+            },
+        },
+    }

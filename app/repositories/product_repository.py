@@ -57,6 +57,26 @@ class ProductRepository(BaseRepository):
             )
         ).all()
 
+    def list_query(self, *, search: str | None = None, status: str | None = None,
+                   category_id: int | None = None):
+        query = self.db.query(Product)
+        if status == "inactive":
+            query = query.filter(Product.is_active.is_(False))
+        elif status != "all":
+            query = query.filter(Product.is_active.is_(True))
+        if category_id is not None:
+            query = query.filter(Product.category_id == category_id)
+        if search:
+            like = f"%{search}%"
+            query = query.filter(
+                or_(
+                    Product.product_name.ilike(like),
+                    Product.sku.ilike(like),
+                    Product.barcode.ilike(like),
+                )
+            )
+        return query
+
     def get_active_by_barcode(self, barcode: str):
         return self.db.query(Product).filter(
             Product.barcode == barcode,

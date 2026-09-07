@@ -295,8 +295,67 @@ def cancel_sales_order_service(db: Session, sales_order_repo: SalesOrderReposito
     return _result(order)
 
 
-def get_sales_orders_service(sales_order_repo):
-    return {"items": sales_order_repo.get_all_sales_orders()}
+_SALES_SORTS = None  # built lazily to avoid import cycles
+
+
+def _pct(numerator: Decimal, denominator: Decimal) -> float:
+    if not denominator:
+        return 0.0
+    return float((numerator / denominator * 100).quantize(Decimal("0.1")))
+
+
+def get_sales_orders_service(sales_order_repo, params) -> dict:
+    from app.core.batch_eligibility import business_today
+    from app.core.pagination import paginate, paginated_body, resolve_ordering
+    from app.models import SalesOrder as _SO
+
+    sorts = {
+        "id": _SO.id,
+        "created_at": _SO.created_at,
+        "status": _SO.status,
+        "so_number": _SO.so_number,
+        "total_amount": _SO.total_amount,
+    }
+    ordering = resolve_ordering(params, sorts, "created_at", _SO.id)
+    items, total = paginate(
+        sales_order_repo.list_query(search=params.search, status=params.status),
+        params,
+        ordering,
+    )
+    order_ids = [o.id for o in items]
+    item_agg = sales_order_repo.item_aggregates(order_ids)
+    ful_agg = sales_order_repo.fulfillment_aggregates(order_ids)
+    blocked = sales_order_repo.blocked_by_expiry_ids(order_ids, business_today())
+    names = sales_order_repo.customer_names([o.customer_id for o in items if o.customer_id])
+
+    def _naive(t):
+        if t is None:
+            return None
+        return t.replace(tzinfo=None) if t.tzinfo is not None else t
+
+    rows = []
+    for o in items:
+        count, total_qty = item_agg.get(o.id, (0, Decimal("0")))
+        alloc_qty, picked, packed = ful_agg.get(o.id, (Decimal("0"), Decimal("0"), Decimal("0")))
+        last_activity = max(
+            _naive(t) for t in (o.created_at, o.picked_at, o.packed_at, o.shipped_at) if t is not None
+        )
+        rows.append({
+            "id": o.id,
+            "so_number": o.so_number,
+            "customer_id": o.customer_id,
+            "customer_name": names.get(o.customer_id),
+            "status": o.status,
+            "item_count": count,
+            "total_quantity": total_qty,
+            "total_amount": o.total_amount,
+            "created_at": o.created_at,
+            "last_activity_at": last_activity,
+            "picked_pct": _pct(picked, alloc_qty),
+            "packed_pct": _pct(packed, alloc_qty),
+            "attention_reason": "expired_allocation" if o.id in blocked else None,
+        })
+    return paginated_body(rows, total, params, "Sales Orders Retrieved")
 
 
 def get_sales_order_service(sales_order_repo, sales_order_id):

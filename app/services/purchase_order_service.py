@@ -189,41 +189,52 @@ def create_purchase_order_service(
     )
 
 
-def get_purchase_orders_service(
-    po_repo: PurchaseOrderRepository,
-) -> list[PurchaseOrderSummaryResponse]:
-    purchase_orders = po_repo.get_all()
+def get_purchase_orders_service(po_repo: PurchaseOrderRepository, params) -> dict:
+    from app.core.pagination import paginate, paginated_body, resolve_ordering
 
-    results: list[
-        PurchaseOrderSummaryResponse
-    ] = []
+    sorts = {
+        "id": PurchaseOrder.id,
+        "created_at": PurchaseOrder.created_at,
+        "status": PurchaseOrder.status,
+        "po_number": PurchaseOrder.po_number,
+    }
+    ordering = resolve_ordering(params, sorts, "created_at", PurchaseOrder.id)
+    items, total = paginate(
+        po_repo.list_query(search=params.search, status=params.status), params, ordering
+    )
+    po_ids = [po.id for po in items]
+    item_agg = po_repo.item_aggregates(po_ids)
+    receipt_agg = po_repo.receipt_aggregates(po_ids)
+    names = po_repo.supplier_names([po.supplier_id for po in items if po.supplier_id])
 
-    for po in purchase_orders:
-        items = po_repo.get_items(po.id)
-
-        total_amount = sum(
-            (
-                _calculate_item_total(
-                    item.quantity,
-                    item.unit_price,
-                )
-                for item in items
-            ),
-            Decimal("0.00"),
+    rows = []
+    for po in items:
+        ordered, received, amount = item_agg.get(
+            po.id, (Decimal("0"), Decimal("0"), Decimal("0.00"))
         )
-
-        results.append(
-            PurchaseOrderSummaryResponse(
-                id=po.id,
-                po_number=po.po_number,
-                supplier_id=po.supplier_id,
-                status=po.status,
-                total_amount=total_amount,
-                created_at=po.created_at,
-            )
+        last_receipt_at, receipt_count = receipt_agg.get(po.id, (None, 0))
+        remaining = ordered - received
+        receiving_pct = (
+            float((received / ordered * 100).quantize(Decimal("0.1"))) if ordered else 0.0
         )
-
-    return results
+        rows.append({
+            "id": po.id,
+            "po_number": po.po_number,
+            "supplier_id": po.supplier_id,
+            "supplier_name": names.get(po.supplier_id),
+            "status": po.status,
+            "ordered_quantity": ordered,
+            "received_quantity": received,
+            "remaining_quantity": remaining,
+            "receiving_pct": receiving_pct,
+            "total_amount": amount.quantize(Decimal("0.01")),
+            "created_at": po.created_at,
+            "last_receipt_at": last_receipt_at,
+            "receipt_count": receipt_count,
+        })
+    return paginated_body(
+        rows, total, params, "Purchase orders retrieved successfully"
+    )
 
 
 def get_purchase_order_service(

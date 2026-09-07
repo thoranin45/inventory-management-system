@@ -29,32 +29,88 @@ from app.schemas.stock_balance_schema import (
 )
 
 
-def get_stock_balances_service(
-    repo: StockBalanceRepository,
-) -> list[StockBalance]:
-    return repo.get_all()
+_BALANCE_SORTS = {
+    "id": StockBalance.id,
+    "product_id": StockBalance.product_id,
+    "on_hand_qty": StockBalance.on_hand_qty,
+}
+
+
+def _enrich_balances(db: Session, rows, today, *, is_transit: bool) -> list[dict]:
+    from app.core import batch_eligibility
+
+    batch_ids = {r.batch_id for r in rows if r.batch_id is not None}
+    expiry = {}
+    if batch_ids:
+        for bid, exp in (
+            db.query(ProductBatch.id, ProductBatch.expiry_date)
+            .filter(ProductBatch.id.in_(batch_ids))
+            .all()
+        ):
+            expiry[bid] = exp
+    out = []
+    for r in rows:
+        exp = expiry.get(r.batch_id)
+        out.append({
+            "id": r.id,
+            "product_id": r.product_id,
+            "warehouse_id": r.warehouse_id,
+            "location_id": r.location_id,
+            "batch_id": r.batch_id,
+            "on_hand_qty": r.on_hand_qty,
+            "reserved_qty": r.reserved_qty,
+            "available_qty": r.available_qty,
+            "created_at": r.created_at,
+            "updated_at": r.updated_at,
+            "is_transit": is_transit,
+            "batch_expiry_date": exp,
+            "days_to_expiry": batch_eligibility.days_to_expiry(exp, today) if exp is not None else None,
+            "is_expired": batch_eligibility.is_expired(exp, today) if exp is not None else False,
+            "as_of_date": today,
+        })
+    return out
+
+
+def _balances_page(db, repo, params, query, *, is_transit, message):
+    from app.core.batch_eligibility import business_today
+    from app.core.pagination import paginate, paginated_body, resolve_ordering
+
+    ordering = resolve_ordering(params, _BALANCE_SORTS, "id", StockBalance.id)
+    items, total = paginate(query, params, ordering)
+    rows = _enrich_balances(db, items, business_today(), is_transit=is_transit)
+    return paginated_body(rows, total, params, message)
+
+
+def get_stock_balances_service(db: Session, repo: StockBalanceRepository, params) -> dict:
+    return _balances_page(
+        db, repo, params, repo.list_query(), is_transit=False,
+        message="Stock balances retrieved successfully",
+    )
+
+
+def get_in_transit_balances_service(db: Session, repo: StockBalanceRepository, params) -> dict:
+    return _balances_page(
+        db, repo, params, repo.in_transit_query(), is_transit=True,
+        message="In-transit stock balances retrieved successfully",
+    )
 
 
 def get_product_stock_balances_service(
     db: Session,
     repo: StockBalanceRepository,
     product_id: int,
-) -> list[StockBalance]:
-
+    params,
+) -> dict:
     product = (
         db.query(Product)
-        .filter(
-            Product.id == product_id,
-            Product.is_active.is_(True),
-        )
+        .filter(Product.id == product_id, Product.is_active.is_(True))
         .first()
     )
-
     if product is None:
         raise ProductNotFoundException()
-
-    return repo.get_by_product(
-        product_id
+    return _balances_page(
+        db, repo, params, repo.list_query(product_id=product_id), is_transit=False,
+        message="Stock balances retrieved successfully",
     )
 
 def create_stock_balance_service(

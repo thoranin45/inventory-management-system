@@ -28,10 +28,7 @@ router = APIRouter(
 )
 
 
-@router.get(
-    "",
-    response_model=InventoryMovementListResponse,
-)
+@router.get("")
 def get_inventory_movements(
     movement_repo: InventoryMovementRepositoryDependency,
 
@@ -40,10 +37,11 @@ def get_inventory_movements(
         ge=1,
     ),
 
-    size: int = Query(
+    page_size: int = Query(
         default=50,
         ge=1,
-        le=200,
+        le=100,
+        alias="page_size",
     ),
 
     product_id: int | None = Query(
@@ -90,12 +88,12 @@ def get_inventory_movements(
     current_user: User = Depends(
         require_warehouse
     ),
-) -> InventoryMovementListResponse:
+) -> dict:
 
     return search_inventory_movements_service(
         repo=movement_repo,
         page=page,
-        size=size,
+        size=page_size,
         product_id=product_id,
         warehouse_id=warehouse_id,
         location_id=location_id,

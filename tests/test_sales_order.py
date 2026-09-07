@@ -185,7 +185,7 @@ def _get_batches(
 
     assert response.status_code == 200
 
-    return response.json()["data"]
+    return response.json()["data"]["items"]
 
 
 def _get_batch(

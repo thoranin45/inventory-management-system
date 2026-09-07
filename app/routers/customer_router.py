@@ -6,6 +6,7 @@ from app.core.dependencies import (
     DatabaseSession,
     require_admin,
 )
+from app.core.pagination import ListParams, list_params
 from app.models import User
 from app.schemas.customer_schema import (
     CustomerCreate,
@@ -51,21 +52,12 @@ def create_customer(
     )
 
 
-@router.get(
-    "",
-    response_model=ApiResponse[list[CustomerResponse]],
-)
+@router.get("")
 def get_customers(
     customer_repo: CustomerRepositoryDependency,
-) -> ApiResponse[list[CustomerResponse]]:
-    customers = get_customers_service(
-        customer_repo=customer_repo,
-    )
-
-    return ApiResponse(
-        message="Customers retrieved successfully",
-        data=customers,
-    )
+    params: ListParams = Depends(list_params),
+) -> dict:
+    return get_customers_service(customer_repo=customer_repo, params=params)
 
 
 @router.get(

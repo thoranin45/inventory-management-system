@@ -2,6 +2,7 @@ from app.core.dependencies import require_warehouse
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
+import json
 import os
 import qrcode
 import barcode
@@ -69,7 +70,7 @@ def generate_qrcode(
         "product_name": product.product_name,
     }
 
-    img = qrcode.make(str(qr_data))
+    img = qrcode.make(json.dumps(qr_data))
 
     file_path = f"{folder}/{product.sku}_qr.png"
     img.save(file_path)

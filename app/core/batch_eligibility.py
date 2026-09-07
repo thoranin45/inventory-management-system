@@ -15,7 +15,7 @@ helpers only classify individual batches.
 """
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from app.core.config import settings
@@ -28,6 +28,14 @@ def business_timezone() -> ZoneInfo:
 def business_today() -> date:
     """Current business-calendar date in the configured timezone (default Asia/Bangkok)."""
     return datetime.now(business_timezone()).date()
+
+
+def business_day_bounds(day: date | None = None) -> tuple[datetime, datetime]:
+    """[start, end) timezone-aware datetimes for a business calendar day."""
+    tz = business_timezone()
+    day = day or business_today()
+    start = datetime.combine(day, time.min, tzinfo=tz)
+    return start, start + timedelta(days=1)
 
 
 def _expiry_of(batch) -> date | None:

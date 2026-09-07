@@ -21,6 +21,7 @@ from app.schemas.purchase_order_schema import (
     PurchaseOrderSummaryResponse,
     ReceivePO,
 )
+from app.core.pagination import ListParams, list_params
 from app.schemas.response import ApiResponse
 from app.services.purchase_order_service import (
     cancel_purchase_order_service, confirm_purchase_order_service,
@@ -67,27 +68,12 @@ def create_purchase_order(
     )
 
 
-@router.get(
-    "",
-    response_model=ApiResponse[
-        list[PurchaseOrderSummaryResponse]
-    ],
-)
+@router.get("")
 def get_purchase_orders(
     po_repo: PurchaseOrderRepositoryDependency,
-) -> ApiResponse[
-    list[PurchaseOrderSummaryResponse]
-]:
-    purchase_orders = get_purchase_orders_service(
-        po_repo=po_repo
-    )
-
-    return ApiResponse(
-        message=(
-            "Purchase orders retrieved successfully"
-        ),
-        data=purchase_orders,
-    )
+    params: ListParams = Depends(list_params),
+) -> dict:
+    return get_purchase_orders_service(po_repo=po_repo, params=params)
 
 
 @router.get(

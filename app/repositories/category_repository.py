@@ -11,6 +11,12 @@ class CategoryRepository(BaseRepository):
     def get_all(self):
         return self.db.query(Category).all()
 
+    def list_query(self, *, search: str | None = None):
+        query = self.db.query(Category)
+        if search:
+            query = query.filter(Category.category_name.ilike(f"%{search}%"))
+        return query
+
     def get_by_id(self, category_id: int):
         return self.db.query(Category).filter(
             Category.id == category_id

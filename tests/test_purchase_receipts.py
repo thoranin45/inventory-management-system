@@ -106,7 +106,7 @@ def test_batch_contract_and_retry(client, admin_headers, db_session, expiry):
     assert first.status_code == 200, first.text
     batches = client.get("/api/v1/batches", headers=admin_headers)
     assert batches.status_code == 200
-    batch = next(b for b in batches.json()["data"] if b["product_id"] == p["id"])
+    batch = next(b for b in batches.json()["data"]["items"] if b["product_id"] == p["id"])
     assert batch["mfg_date"] == payload["items"][0].get("mfg_date")
     assert batch["expiry_date"] == payload["items"][0].get("expiry_date")
     assert receive(client, admin_headers, po_id, payload=payload, key=key).json() == first.json()

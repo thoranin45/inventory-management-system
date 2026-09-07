@@ -8,6 +8,7 @@ from app.core.dependencies import (
     InventoryMovementRepositoryDependency,
     require_warehouse,
 )
+from app.core.pagination import ListParams, list_params
 from app.models import User
 from app.schemas.batch_schema import (
     BatchCreate,
@@ -58,20 +59,14 @@ def create_batch(
     )
 
 
-@router.get(
-    "",
-    response_model=ApiResponse[list[BatchResponse]],
-)
+@router.get("")
 def get_batches(
     batch_repo: BatchRepositoryDependency,
-) -> ApiResponse[list[BatchResponse]]:
-    batches = get_batches_service(
-        batch_repo=batch_repo,
-    )
-
-    return ApiResponse(
-        message="Batches retrieved successfully",
-        data=batches,
+    balance_repo: StockBalanceRepositoryDependency,
+    params: ListParams = Depends(list_params),
+) -> dict:
+    return get_batches_service(
+        batch_repo=batch_repo, balance_repo=balance_repo, params=params
     )
 
 

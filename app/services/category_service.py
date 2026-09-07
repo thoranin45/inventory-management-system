@@ -5,13 +5,17 @@ from app.core.exceptions import (
     CategoryInUseException,
     CategoryNotFoundException,
 )
+from app.core.pagination import ListParams, paginate, paginated_body, resolve_ordering
 from app.core.unit_of_work import UnitOfWork
 from app.models import Category, Product
 from app.repositories.category_repository import CategoryRepository
 from app.schemas.category_schema import (
     CategoryCreate,
+    CategoryResponse,
     CategoryUpdate,
 )
+
+_CATEGORY_SORTS = {"id": Category.id, "category_name": Category.category_name}
 
 
 def create_category_service(
@@ -40,8 +44,18 @@ def create_category_service(
 
 def get_categories_service(
     category_repo: CategoryRepository,
-) -> list[Category]:
-    return category_repo.get_all()
+    params: ListParams,
+) -> dict:
+    ordering = resolve_ordering(params, _CATEGORY_SORTS, "id", Category.id)
+    items, total = paginate(
+        category_repo.list_query(search=params.search), params, ordering
+    )
+    return paginated_body(
+        [CategoryResponse.model_validate(row) for row in items],
+        total,
+        params,
+        "Categories retrieved successfully",
+    )
 
 
 def get_category_service(

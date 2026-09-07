@@ -252,7 +252,7 @@ def test_stock_movement_report(
 
     assert response.status_code == 200
 
-    transactions = response.json()
+    transactions = response.json()["data"]["items"]
 
     transaction = next(
         (
@@ -269,7 +269,8 @@ def test_stock_movement_report(
 
     assert transaction is not None
     assert transaction["transaction_type"] == "IN"
-    assert transaction["quantity"] == 7
+    from decimal import Decimal as _D
+    assert _D(str(transaction["quantity"])) == 7
 
 
 def test_low_stock_report(

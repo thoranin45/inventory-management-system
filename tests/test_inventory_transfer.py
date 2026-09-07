@@ -375,9 +375,7 @@ def test_get_inventory_transfers(
 
     assert response.status_code == 200
 
-    body = response.json()
-
-    assert isinstance(body, list)
+    body = response.json()["data"]["items"]
 
     transfer_ids = [
         transfer["id"]
@@ -1343,7 +1341,7 @@ def test_get_inventory_movements(
 
     assert response.status_code == 200
 
-    body = response.json()
+    body = response.json()["data"]
 
     assert "items" in body
     assert "pagination" in body
@@ -1532,13 +1530,13 @@ def test_inventory_movement_pagination(
     _run_transfer_lifecycle(client, admin_headers, transfer)
 
     response = client.get(
-        "/api/v1/inventory-movements?page=1&size=1",
+        "/api/v1/inventory-movements?page=1&page_size=1",
         headers=admin_headers,
     )
 
     assert response.status_code == 200
 
-    body = response.json()
+    body = response.json()["data"]
 
     assert len(body["items"]) == 1
     assert body["pagination"]["page"] == 1
@@ -1583,7 +1581,7 @@ def test_filter_inventory_movements_by_type(
 
     assert response.status_code == 200
 
-    body = response.json()
+    body = response.json()["data"]
 
     assert len(body["items"]) >= 1
 
@@ -1630,7 +1628,7 @@ def test_filter_inventory_movements_by_product(
 
     assert response.status_code == 200
 
-    body = response.json()
+    body = response.json()["data"]
 
     assert len(body["items"]) >= 2
 
@@ -1680,7 +1678,7 @@ def test_filter_inventory_movements_by_warehouse(
 
     assert response.status_code == 200
 
-    body = response.json()
+    body = response.json()["data"]
 
     assert len(body["items"]) >= 1
 
@@ -1728,7 +1726,7 @@ def test_filter_inventory_movements_by_date(
 
     assert response.status_code == 200
 
-    body = response.json()
+    body = response.json()["data"]
 
     assert "items" in body
     assert "pagination" in body

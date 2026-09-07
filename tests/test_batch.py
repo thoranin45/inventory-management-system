@@ -304,7 +304,7 @@ def test_get_batches(
     assert body["message"] == (
         "Batches retrieved successfully"
     )
-    assert isinstance(body["data"], list)
+    body["data"] = body["data"]["items"]
 
     batch_ids = [
         batch["id"]
@@ -352,7 +352,7 @@ def test_get_expiring_batches(
     assert body["message"] == (
         "Expiring batches retrieved successfully"
     )
-    assert isinstance(body["data"], list)
+
 
     batch_ids = [
         batch["id"]

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Header, status
+from fastapi import APIRouter, Depends, Header, Query, status
 
 from app.core.dependencies import (
     DatabaseSession,
@@ -7,6 +7,7 @@ from app.core.dependencies import (
     StockBalanceRepositoryDependency,
     require_warehouse,
 )
+from app.core.pagination import ListParams, list_params
 from app.models import User
 from app.schemas.inventory_transfer_schema import (
     InventoryTransferCreate, TransferReceive, TransferReceiptResponse,
@@ -47,17 +48,19 @@ def create_inventory_transfer(
     )
 
 
-@router.get(
-    "",
-    response_model=list[InventoryTransferResponse],
-)
+@router.get("")
 def get_inventory_transfers(
     transfer_repo: InventoryTransferRepositoryDependency,
+    params: ListParams = Depends(list_params),
+    source_warehouse_id: int | None = Query(default=None, gt=0),
+    destination_warehouse_id: int | None = Query(default=None, gt=0),
     current_user: User = Depends(require_warehouse),
-) -> list[InventoryTransferResponse]:
-
+) -> dict:
     return get_inventory_transfers_service(
-        repo=transfer_repo,
+        transfer_repo,
+        params,
+        source_warehouse_id=source_warehouse_id,
+        destination_warehouse_id=destination_warehouse_id,
     )
 
 

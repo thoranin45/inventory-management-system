@@ -110,34 +110,75 @@ def get_product_service(
     return product
 
 
+_PRODUCT_SORTS = {
+    "id": Product.id,
+    "product_name": Product.product_name,
+    "sku": Product.sku,
+    "stock_qty": Product.stock_qty,
+    "created_at": Product.created_at,
+}
+
+
+def enrich_products(balance_repo, products, today, near_expiry_days: int) -> list[dict]:
+    """Phase 8: product rows + Phase 7 derived inventory categories. One grouped query.
+
+    Product.stock_qty keeps its Phase 2 meaning (total owned) and is echoed as
+    owned_quantity; the other quantities are derived operational views.
+    """
+    from decimal import Decimal
+
+    categories = balance_repo.inventory_categories_by_product(
+        today, near_expiry_days, [p.id for p in products]
+    )
+    rows = []
+    for p in products:
+        cat = categories.get(p.id, {})
+        rows.append({
+            "id": p.id,
+            "sku": p.sku,
+            "barcode": p.barcode,
+            "product_name": p.product_name,
+            "price": p.price,
+            "stock_qty": p.stock_qty,
+            "owned_quantity": p.stock_qty,
+            "operational_available_quantity": cat.get("operational_available_quantity", Decimal("0")),
+            "reserved_quantity": cat.get("reserved_quantity", Decimal("0")),
+            "expired_quantity": cat.get("expired_quantity", Decimal("0")),
+            "near_expiry_quantity": cat.get("near_expiry_quantity", Decimal("0")),
+            "transit_quantity": cat.get("transit_quantity", Decimal("0")),
+            "minimum_stock": p.minimum_stock,
+            "safety_stock": p.safety_stock,
+            "maximum_stock": p.maximum_stock,
+            "category_id": p.category_id,
+            "image_url": p.image_url,
+            "is_active": p.is_active,
+            "created_at": p.created_at,
+            "track_batch": p.track_batch,
+            "track_expiry": p.track_expiry,
+            "as_of_date": today,
+        })
+    return rows
+
+
 def get_products_service(
     product_repo: ProductRepository,
-    page: int,
-    size: int,
-) -> PaginatedData[ProductResponse]:
-    total, products = product_repo.get_active_paginated(
-        page=page,
-        size=size,
-    )
+    balance_repo,
+    params,
+) -> dict:
+    from app.core.batch_eligibility import business_today
+    from app.core.config import settings
+    from app.core.pagination import paginate, paginated_body, resolve_ordering
 
-    total_pages = (
-        math.ceil(total / size)
-        if total > 0
-        else 0
+    ordering = resolve_ordering(params, _PRODUCT_SORTS, "id", Product.id)
+    items, total = paginate(
+        product_repo.list_query(search=params.search, status=params.status),
+        params,
+        ordering,
     )
-
-    return PaginatedData(
-        items=[
-            ProductResponse.model_validate(product)
-            for product in products
-        ],
-        pagination=PaginationMeta(
-            page=page,
-            page_size=size,
-            total_items=total,
-            total_pages=total_pages,
-        ),
+    rows = enrich_products(
+        balance_repo, items, business_today(), settings.near_expiry_days
     )
+    return paginated_body(rows, total, params, "Products retrieved successfully")
 
 def update_product_service(
     db: Session,

@@ -126,7 +126,7 @@ def test_get_products(
     assert create_response.status_code in {200, 201}
 
     response = client.get(
-        "/api/v1/products?page=1&size=100",
+        "/api/v1/products?page=1&page_size=100",
         headers=admin_headers,
     )
 

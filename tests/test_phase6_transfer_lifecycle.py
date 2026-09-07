@@ -386,13 +386,13 @@ def test_transit_excluded_from_normal_stock_views_but_kept_in_global_total(
 
     listed = client.get(
         f"/api/v1/stock-balances/product/{product['id']}", headers=admin_headers
-    ).json()
+    ).json()["data"]["items"]
     transit_wh, _ = _transit_storage(db_session)
     assert all(row["warehouse_id"] != transit_wh.id for row in listed)
     # only the reduced operational source balance is visible
     assert sum(_d(row["on_hand_qty"]) for row in listed) == Decimal("15.000")
 
-    all_listed = client.get("/api/v1/stock-balances", headers=admin_headers).json()
+    all_listed = client.get("/api/v1/stock-balances", headers=admin_headers).json()["data"]["items"]
     assert all(row["warehouse_id"] != transit_wh.id for row in all_listed)
 
     # the authoritative product total still accounts for the in-transit goods

@@ -46,6 +46,14 @@ class BatchRepository:
             .all()
         )
 
+    def list_query(self, *, search: str | None = None, product_id: int | None = None):
+        query = self.db.query(ProductBatch)
+        if product_id is not None:
+            query = query.filter(ProductBatch.product_id == product_id)
+        if search:
+            query = query.filter(ProductBatch.lot_no.ilike(f"%{search}%"))
+        return query
+
     def get_expiring(
         self,
     ) -> list[ProductBatch]:

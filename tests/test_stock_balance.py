@@ -129,7 +129,7 @@ def _create_balance(
         order_id = reservation.json()["data"]["sales_order_id"]
         confirmation = client.post(f"/api/v1/sales-orders/{order_id}/confirm")
         assert confirmation.status_code == 200
-    return next(row for row in client.get(f"/api/v1/stock-balances/product/{product_id}").json()
+    return next(row for row in client.get(f"/api/v1/stock-balances/product/{product_id}").json()["data"]["items"]
                 if row["warehouse_id"] == warehouse_id and row["location_id"] == location_id)
 
 
@@ -194,9 +194,7 @@ def test_get_stock_balances(
 
     assert response.status_code == 200
 
-    body = response.json()
-
-    assert isinstance(body, list)
+    body = response.json()["data"]["items"]
 
     balance_ids = [
         item["id"]
@@ -235,9 +233,7 @@ def test_get_product_stock_balances(
 
     assert response.status_code == 200
 
-    body = response.json()
-
-    assert isinstance(body, list)
+    body = response.json()["data"]["items"]
     assert len(body) >= 1
 
     balance_ids = [
@@ -357,7 +353,7 @@ def test_adjust_stock_balance_rejected(
 
     assert response.status_code == 409
 
-    body = admin_client.get(f"/api/v1/stock-balances/product/{product['id']}").json()[0]
+    body = admin_client.get(f"/api/v1/stock-balances/product/{product['id']}").json()["data"]["items"][0]
 
     assert _decimal(
         body["on_hand_qty"]

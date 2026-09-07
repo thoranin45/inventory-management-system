@@ -151,7 +151,7 @@ def _get_batches(
 
     assert response.status_code == 200
 
-    return response.json()["data"]
+    return response.json()["data"]["items"]
 
 
 def _get_stock_history(
@@ -356,11 +356,9 @@ def test_get_purchase_orders_and_detail(
     assert list_body["message"] == (
         "Purchase orders retrieved successfully"
     )
-    assert isinstance(list_body["data"], list)
-
     po_ids = [
         item["id"]
-        for item in list_body["data"]
+        for item in list_body["data"]["items"]
     ]
 
     assert created["id"] in po_ids

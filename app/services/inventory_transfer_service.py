@@ -239,9 +239,61 @@ def create_inventory_transfer_service(
 
 
 def get_inventory_transfers_service(
-    repo: InventoryTransferRepository,
-) -> list[InventoryTransfer]:
-    return repo.get_all()
+    repo, params, *, source_warehouse_id=None, destination_warehouse_id=None
+) -> dict:
+    from app.core.pagination import paginate, paginated_body, resolve_ordering
+
+    sorts = {
+        "id": InventoryTransfer.id,
+        "created_at": InventoryTransfer.created_at,
+        "status": InventoryTransfer.status,
+        "transfer_number": InventoryTransfer.transfer_number,
+        "dispatched_at": InventoryTransfer.dispatched_at,
+    }
+    ordering = resolve_ordering(params, sorts, "created_at", InventoryTransfer.id)
+    query = repo.list_query(
+        search=params.search,
+        status=params.status,
+        source_warehouse_id=source_warehouse_id,
+        destination_warehouse_id=destination_warehouse_id,
+    )
+    items, total = paginate(query, params, ordering)
+    ids = [t.id for t in items]
+    item_agg = repo.item_aggregates(ids)
+    receipt_agg = repo.receipt_aggregates(ids)
+    wh_names = repo.warehouse_names(
+        [t.source_warehouse_id for t in items] + [t.destination_warehouse_id for t in items]
+    )
+    rows = []
+    for t in items:
+        line_count, total_qty, dispatched, received = item_agg.get(
+            t.id, (0, Decimal("0"), Decimal("0"), Decimal("0"))
+        )
+        outstanding = dispatched - received
+        progress_pct = (
+            float((received / total_qty * 100).quantize(Decimal("0.1")))
+            if total_qty and t.status in {"IN_TRANSIT", "PARTIALLY_RECEIVED", "COMPLETED"}
+            else 0.0
+        )
+        rows.append({
+            "id": t.id,
+            "transfer_number": t.transfer_number,
+            "source_warehouse_id": t.source_warehouse_id,
+            "source_warehouse_name": wh_names.get(t.source_warehouse_id),
+            "destination_warehouse_id": t.destination_warehouse_id,
+            "destination_warehouse_name": wh_names.get(t.destination_warehouse_id),
+            "status": t.status,
+            "line_count": line_count,
+            "total_quantity": total_qty,
+            "dispatched_quantity": dispatched,
+            "received_quantity": received,
+            "outstanding_quantity": outstanding,
+            "progress_pct": progress_pct,
+            "dispatched_at": t.dispatched_at,
+            "latest_receipt_at": receipt_agg.get(t.id),
+            "legacy_completed": t.legacy_completed,
+        })
+    return paginated_body(rows, total, params, "Inventory transfers retrieved successfully")
 
 
 def get_inventory_transfer_service(

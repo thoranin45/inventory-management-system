@@ -6,6 +6,7 @@ from app.core.dependencies import (
     SupplierRepositoryDependency,
     require_admin,
 )
+from app.core.pagination import ListParams, list_params
 from app.models import User
 from app.schemas.response import ApiResponse
 from app.schemas.supplier_schema import (
@@ -51,21 +52,12 @@ def create_supplier(
     )
 
 
-@router.get(
-    "",
-    response_model=ApiResponse[list[SupplierResponse]],
-)
+@router.get("")
 def get_suppliers(
     supplier_repo: SupplierRepositoryDependency,
-) -> ApiResponse[list[SupplierResponse]]:
-    suppliers = get_suppliers_service(
-        supplier_repo=supplier_repo,
-    )
-
-    return ApiResponse(
-        message="Suppliers retrieved successfully",
-        data=suppliers,
-    )
+    params: ListParams = Depends(list_params),
+) -> dict:
+    return get_suppliers_service(supplier_repo=supplier_repo, params=params)
 
 
 @router.get(

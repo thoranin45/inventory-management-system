@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import (
@@ -123,10 +125,58 @@ def create_batch_service(
     )
 
 
+def enrich_batches(balance_repo, batches, today, near_expiry_days: int) -> list[dict]:
+    """Phase 8: batch rows + derived operational/expiry fields. One grouped query."""
+    from app.core import batch_eligibility
+
+    categories = balance_repo.inventory_categories_by_batch(
+        today, near_expiry_days, [b.id for b in batches]
+    )
+    rows = []
+    for b in batches:
+        cat = categories.get(b.id, {})
+        rows.append({
+            "id": b.id,
+            "product_id": b.product_id,
+            "lot_no": b.lot_no,
+            "mfg_date": b.mfg_date,
+            "expiry_date": b.expiry_date,
+            "quantity": b.quantity,
+            "created_at": b.created_at,
+            "owned_quantity": b.quantity,
+            "operational_available_quantity": cat.get("operational_available_quantity", Decimal("0")),
+            "transit_quantity": cat.get("transit_quantity", Decimal("0")),
+            "days_to_expiry": batch_eligibility.days_to_expiry(b, today),
+            "is_expired": batch_eligibility.is_expired(b, today),
+            "is_near_expiry": batch_eligibility.is_near_expiry(b, today, near_expiry_days),
+            "as_of_date": today,
+        })
+    return rows
+
+
 def get_batches_service(
     batch_repo: BatchRepository,
-) -> list[ProductBatch]:
-    return batch_repo.get_all()
+    balance_repo,
+    params,
+) -> dict:
+    from app.core.batch_eligibility import business_today
+    from app.core.config import settings
+    from app.core.pagination import paginate, paginated_body, resolve_ordering
+    from app.models import ProductBatch as _PB
+
+    sorts = {
+        "id": _PB.id,
+        "created_at": _PB.created_at,
+        "expiry_date": _PB.expiry_date,
+        "lot_no": _PB.lot_no,
+    }
+    ordering = resolve_ordering(params, sorts, "created_at", _PB.id)
+    items, total = paginate(
+        batch_repo.list_query(search=params.search), params, ordering
+    )
+    today = business_today()
+    rows = enrich_batches(balance_repo, items, today, settings.near_expiry_days)
+    return paginated_body(rows, total, params, "Batches retrieved successfully")
 
 
 def get_expiring_batches_service(
