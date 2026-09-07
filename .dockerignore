@@ -4,7 +4,12 @@
 
 .env
 .env.*
-!.env.example
+!.env.*.example
+
+phase*-wip.patch
+phase*-targeted.txt
+phase*_edit.py
+*.patch
 
 venv/
 venv_py38_backup/

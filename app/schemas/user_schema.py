@@ -25,3 +25,13 @@ class UserRegister(BaseModel):
 class UserLogin(BaseModel):
     username: str
     password: str = Field(repr=False)
+
+
+class UserMe(BaseModel):
+    """Frontend-safe view of the authenticated user. Never carries the
+    password hash, token, or any other sensitive internal field."""
+
+    id: int
+    username: str | None = None
+    role: str | None = None
+    is_active: bool = True

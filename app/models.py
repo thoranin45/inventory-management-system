@@ -541,6 +541,16 @@ class User(Base):
 
     role = Column(String(50))
 
+    # Phase 9: allow a compromised or departed account to be disabled.
+    # Authorization reloads the DB user on every request, so flipping this to
+    # False makes existing JWTs unusable immediately (no blocklist needed).
+    is_active = Column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=text("true"),
+    )
+
 
 class ProductBatch(Base):
     __tablename__ = "product_batches"

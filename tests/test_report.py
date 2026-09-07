@@ -1,3 +1,4 @@
+import io
 from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -533,33 +534,25 @@ def test_export_stock_report(
         price=25,
     )
 
-    file_path = Path(
-        "exports/stock_report.xlsx"
+    response = warehouse_client.get(
+        "/api/v1/reports/export/stock"
     )
 
-    try:
-        response = warehouse_client.get(
-            "/api/v1/reports/export/stock"
-        )
+    _assert_excel_response(
+        response,
+        "stock_report.xlsx",
+    )
 
-        _assert_excel_response(
-            response,
-            "stock_report.xlsx",
-        )
+    # Phase 9: no shared on-disk file; the export streams back and is deleted.
+    assert not Path("exports/stock_report.xlsx").exists()
 
-        assert file_path.exists()
+    workbook = load_workbook(io.BytesIO(response.content))
+    worksheet = workbook["Stock Report"]
 
-        workbook = load_workbook(file_path)
-        worksheet = workbook["Stock Report"]
+    assert worksheet.max_row >= 2
+    assert worksheet["A1"].value == "Product ID"
 
-        assert worksheet.max_row >= 2
-        assert worksheet["A1"].value == "Product ID"
-
-        workbook.close()
-
-    finally:
-        if file_path.exists():
-            file_path.unlink()
+    workbook.close()
 
 
 def test_export_sales_report(
@@ -591,31 +584,22 @@ def test_export_sales_report(
         product["id"],
     )
 
-    file_path = Path(
-        "exports/sales_report.xlsx"
+    response = warehouse_client.get(
+        "/api/v1/reports/export/sales"
     )
 
-    try:
-        response = warehouse_client.get(
-            "/api/v1/reports/export/sales"
-        )
+    _assert_excel_response(
+        response,
+        "sales_report.xlsx",
+    )
 
-        _assert_excel_response(
-            response,
-            "sales_report.xlsx",
-        )
+    workbook = load_workbook(io.BytesIO(response.content))
+    worksheet = workbook["Sales Report"]
 
-        workbook = load_workbook(file_path)
-        worksheet = workbook["Sales Report"]
+    assert worksheet.max_row >= 2
+    assert worksheet["A1"].value == "SO Number"
 
-        assert worksheet.max_row >= 2
-        assert worksheet["A1"].value == "SO Number"
-
-        workbook.close()
-
-    finally:
-        if file_path.exists():
-            file_path.unlink()
+    workbook.close()
 
 
 def test_export_low_stock_report(
@@ -628,36 +612,27 @@ def test_export_low_stock_report(
         stock_qty=3,
     )
 
-    file_path = Path(
-        "exports/low_stock_report.xlsx"
+    response = warehouse_client.get(
+        (
+            "/api/v1/reports/"
+            "export/low-stock?threshold=10"
+        )
     )
 
-    try:
-        response = warehouse_client.get(
-            (
-                "/api/v1/reports/"
-                "export/low-stock?threshold=10"
-            )
-        )
+    _assert_excel_response(
+        response,
+        "low_stock_report.xlsx",
+    )
 
-        _assert_excel_response(
-            response,
-            "low_stock_report.xlsx",
-        )
+    workbook = load_workbook(io.BytesIO(response.content))
+    worksheet = workbook[
+        "Low Stock Report"
+    ]
 
-        workbook = load_workbook(file_path)
-        worksheet = workbook[
-            "Low Stock Report"
-        ]
+    assert worksheet.max_row >= 2
+    assert worksheet["E1"].value == "Threshold"
 
-        assert worksheet.max_row >= 2
-        assert worksheet["E1"].value == "Threshold"
-
-        workbook.close()
-
-    finally:
-        if file_path.exists():
-            file_path.unlink()
+    workbook.close()
 
 
 def test_export_expiring_report(
@@ -677,34 +652,25 @@ def test_export_expiring_report(
         expiry_days=30,
     )
 
-    file_path = Path(
-        "exports/expiring_report.xlsx"
+    response = warehouse_client.get(
+        (
+            "/api/v1/reports/"
+            "export/expiring?days=90"
+        )
     )
 
-    try:
-        response = warehouse_client.get(
-            (
-                "/api/v1/reports/"
-                "export/expiring?days=90"
-            )
-        )
+    _assert_excel_response(
+        response,
+        "expiring_report.xlsx",
+    )
 
-        _assert_excel_response(
-            response,
-            "expiring_report.xlsx",
-        )
+    workbook = load_workbook(io.BytesIO(response.content))
+    worksheet = workbook[
+        "Expiring Report"
+    ]
 
-        workbook = load_workbook(file_path)
-        worksheet = workbook[
-            "Expiring Report"
-        ]
+    assert worksheet.max_row >= 2
+    assert worksheet["A1"].value == "Batch ID"
+    assert worksheet["G1"].value == "Days Left"
 
-        assert worksheet.max_row >= 2
-        assert worksheet["A1"].value == "Batch ID"
-        assert worksheet["G1"].value == "Days Left"
-
-        workbook.close()
-
-    finally:
-        if file_path.exists():
-            file_path.unlink()
+    workbook.close()

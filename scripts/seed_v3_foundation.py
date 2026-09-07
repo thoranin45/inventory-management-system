@@ -1,5 +1,34 @@
-from app.database import SessionLocal
+"""Seed V3 foundation master data (units + MAIN warehouse/location).
+
+Idempotent, but it writes to a real database. Phase 9 guard: it will not run
+against the application ``DATABASE_URL`` silently.
+
+    SEED_CONFIRM=1 python scripts/seed_v3_foundation.py            # app DATABASE_URL
+    SEED_CONFIRM=1 SEED_DATABASE_URL=postgresql://... python scripts/seed_v3_foundation.py
+
+Without SEED_CONFIRM=1 the script prints the target database name and exits.
+"""
+import os
+import sys
+
+from sqlalchemy import create_engine
+from sqlalchemy.engine import make_url
+from sqlalchemy.orm import sessionmaker
+
+from app.database import SessionLocal as AppSessionLocal
+from app.database import engine as app_engine
 from app.models import Unit, Warehouse, WarehouseLocation
+
+
+def _session_factory():
+    override = os.environ.get("SEED_DATABASE_URL")
+    if override:
+        engine = create_engine(override)
+        return sessionmaker(bind=engine, autoflush=False, autocommit=False), engine
+    return AppSessionLocal, app_engine
+
+
+SessionLocal, _seed_bind = _session_factory()
 
 
 UNITS = [
@@ -111,6 +140,20 @@ def seed_main_warehouse(db):
 
 
 def main():
+    try:
+        db_name = make_url(str(_seed_bind.url)).database
+    except Exception:
+        db_name = "<unknown>"
+
+    if os.environ.get("SEED_CONFIRM") != "1":
+        print(
+            "Refusing to seed without confirmation.\n"
+            f"  Target database: {db_name}\n"
+            "  Re-run with SEED_CONFIRM=1 (and optionally SEED_DATABASE_URL=...)."
+        )
+        return 2
+
+    print(f"Seeding V3 foundation into database: {db_name}")
     db = SessionLocal()
 
     try:
@@ -120,6 +163,7 @@ def main():
         db.commit()
 
         print("V3 foundation seed completed.")
+        return 0
 
     except Exception:
         db.rollback()
@@ -130,4 +174,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main() or 0)

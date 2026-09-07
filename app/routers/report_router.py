@@ -1,7 +1,7 @@
 from app.core.dependencies import require_warehouse
 from app.core.quantity import encode_quantities, quantity_text
 from decimal import Decimal
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
@@ -14,9 +14,47 @@ from app.models import Product, SalesOrder, StockTransaction, ProductBatch
 
 from fastapi.responses import FileResponse
 from openpyxl import Workbook
+from starlette.background import BackgroundTask
 import os
+import uuid
 
 router = APIRouter(dependencies=[Depends(require_warehouse)], prefix="/reports", tags=["Reports"])
+
+# Bound spreadsheet exports so a single request cannot exhaust memory. Callers
+# hitting the cap must narrow their filters.
+_EXPORT_MAX_ROWS = 50_000
+_EXPORT_DIR = "exports"
+
+
+def _export_guard(row_count: int) -> None:
+    if row_count > _EXPORT_MAX_ROWS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Export too large ({row_count} rows > {_EXPORT_MAX_ROWS}); "
+                "narrow the filters and retry"
+            ),
+        )
+
+
+def _unique_export_path(prefix: str) -> str:
+    os.makedirs(_EXPORT_DIR, exist_ok=True)
+    return os.path.join(_EXPORT_DIR, f"{prefix}_{uuid.uuid4().hex}.xlsx")
+
+
+def _cleanup_file(path: str) -> None:
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def _xlsx_response(path: str, download_name: str) -> FileResponse:
+    return FileResponse(
+        path,
+        filename=download_name,
+        background=BackgroundTask(_cleanup_file, path),
+    )
 
 
 def _report_page(items, total, params, message):
@@ -369,138 +407,93 @@ def transfers_report(
 
     return get_inventory_transfers_service(InventoryTransferRepository(db), params)
 
+# --------------------------------------------------------------------------
+# Spreadsheet exports
+#
+# Phase 9: every export writes to a per-request unique file (no shared
+# ``exports/stock_report.xlsx`` that concurrent callers can corrupt or read
+# across users), streams it back, then deletes it via a BackgroundTask. Row
+# counts are bounded.
+# --------------------------------------------------------------------------
+
 @router.get("/export/stock")
 def export_stock_report(
     db: Session = Depends(get_db)
 ):
+    base = db.query(Product).filter(Product.is_active == True)
+    _export_guard(base.count())
+    products = base.all()
 
-    products = db.query(Product).filter(
-        Product.is_active == True
-    ).all()
-
-    os.makedirs(
-        "exports",
-        exist_ok=True
-    )
-
-    file_path = "exports/stock_report.xlsx"
-
+    file_path = _unique_export_path("stock_report")
     wb = Workbook()
     ws = wb.active
-
     ws.title = "Stock Report"
-
-    ws.append([
-        "Product ID",
-        "SKU",
-        "Product Name",
-        "Stock Qty",
-        "Price",
-        "Stock Value"
-    ])
-
+    ws.append(["Product ID", "SKU", "Product Name", "Stock Qty", "Price", "Stock Value"])
     for p in products:
-
         ws.append([
             p.id,
             p.sku,
             p.product_name,
             quantity_text(p.stock_qty),
             float(p.price),
-            float(p.price * p.stock_qty)
+            float(p.price * p.stock_qty),
         ])
-
     wb.save(file_path)
+    return _xlsx_response(file_path, "stock_report.xlsx")
 
-    return FileResponse(
-        file_path,
-        filename="stock_report.xlsx"
-    )
 
 @router.get("/export/sales")
 def export_sales_report(
     db: Session = Depends(get_db)
 ):
+    base = db.query(SalesOrder)
+    _export_guard(base.count())
+    orders = base.all()
 
-    orders = db.query(SalesOrder).all()
-
-    os.makedirs(
-        "exports",
-        exist_ok=True
-    )
-
-    file_path = "exports/sales_report.xlsx"
-
+    file_path = _unique_export_path("sales_report")
     wb = Workbook()
     ws = wb.active
-
     ws.title = "Sales Report"
-
-    ws.append([
-        "SO Number",
-        "Customer ID",
-        "Status",
-        "Total Amount",
-        "Created At"
-    ])
-
+    ws.append(["SO Number", "Customer ID", "Status", "Total Amount", "Created At"])
     for so in orders:
-
         ws.append([
             so.so_number,
             so.customer_id,
             so.status,
             float(so.total_amount),
-            str(so.created_at)
+            str(so.created_at),
         ])
-
     wb.save(file_path)
+    return _xlsx_response(file_path, "sales_report.xlsx")
 
-    return FileResponse(
-        file_path,
-        filename="sales_report.xlsx"
-    )
 
 @router.get("/export/low-stock")
 def export_low_stock_report(
     threshold: Decimal = Decimal("10.000"),
     db: Session = Depends(get_db)
 ):
-    products = db.query(Product).filter(
+    base = db.query(Product).filter(
         Product.is_active == True,
-        Product.stock_qty <= threshold
-    ).all()
+        Product.stock_qty <= threshold,
+    )
+    _export_guard(base.count())
+    products = base.all()
 
-    os.makedirs("exports", exist_ok=True)
-    file_path = "exports/low_stock_report.xlsx"
-
+    file_path = _unique_export_path("low_stock_report")
     wb = Workbook()
     ws = wb.active
     ws.title = "Low Stock Report"
-
-    ws.append([
-        "Product ID",
-        "SKU",
-        "Product Name",
-        "Stock Qty",
-        "Threshold"
-    ])
-
+    ws.append(["Product ID", "SKU", "Product Name", "Stock Qty", "Threshold"])
     for p in products:
         ws.append([
             p.id,
             p.sku,
             p.product_name,
             quantity_text(p.stock_qty),
-            format(threshold, "f")
+            format(threshold, "f"),
         ])
-
     wb.save(file_path)
-
-    return FileResponse(
-        file_path,
-        filename="low_stock_report.xlsx"
-    )
+    return _xlsx_response(file_path, "low_stock_report.xlsx")
 
 
 @router.get("/export/expiring")
@@ -511,31 +504,22 @@ def export_expiring_report(
     today = business_today()
     target_date = today + timedelta(days=days)
 
-    batches = db.query(ProductBatch).filter(
+    base = db.query(ProductBatch).filter(
         ProductBatch.quantity > 0,
         ProductBatch.expiry_date >= today,
         ProductBatch.expiry_date <= target_date,
-    ).order_by(
-        ProductBatch.expiry_date.asc()
-    ).all()
+    )
+    _export_guard(base.count())
+    batches = base.order_by(ProductBatch.expiry_date.asc()).all()
 
-    os.makedirs("exports", exist_ok=True)
-    file_path = "exports/expiring_report.xlsx"
-
+    file_path = _unique_export_path("expiring_report")
     wb = Workbook()
     ws = wb.active
     ws.title = "Expiring Report"
-
     ws.append([
-        "Batch ID",
-        "Product ID",
-        "Lot No",
-        "Quantity",
-        "MFG Date",
-        "Expiry Date",
-        "Days Left"
+        "Batch ID", "Product ID", "Lot No", "Quantity",
+        "MFG Date", "Expiry Date", "Days Left",
     ])
-
     for b in batches:
         ws.append([
             b.id,
@@ -544,12 +528,7 @@ def export_expiring_report(
             quantity_text(b.quantity),
             str(b.mfg_date),
             str(b.expiry_date),
-            (b.expiry_date - today).days
+            (b.expiry_date - today).days,
         ])
-
     wb.save(file_path)
-
-    return FileResponse(
-        file_path,
-        filename="expiring_report.xlsx"
-    )
+    return _xlsx_response(file_path, "expiring_report.xlsx")

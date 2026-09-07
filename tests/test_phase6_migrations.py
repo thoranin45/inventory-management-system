@@ -17,7 +17,7 @@ from tests.test_migrations import migration_engine, upgrade
 
 PHASE5 = "e51a00000001"
 PHASE6 = "e61a00000001"
-HEAD = "e71a00000001"
+HEAD = "e81a00000001"
 
 
 # --------------------------------------------------------------------------- #

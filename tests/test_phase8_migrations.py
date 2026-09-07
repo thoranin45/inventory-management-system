@@ -12,7 +12,7 @@ from tests.database_support import migration_config
 from tests.test_migrations import migration_engine, upgrade
 
 PHASE7 = "e61a00000001"
-HEAD = "e71a00000001"
+HEAD = "e81a00000001"
 
 _EXPECTED_INDEXES = {
     "sales_orders": "ix_sales_orders_status_created_at",

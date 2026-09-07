@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.core.dependencies import require_admin
 from app.core.security import (
+    get_current_user,
     validate_user_role,
     create_access_token,
     hash_password,
@@ -20,6 +21,7 @@ from app.database import get_db
 from app.models import User
 from app.schemas.user_schema import (
     UserLogin,
+    UserMe,
     UserRegister,
 )
 
@@ -184,6 +186,31 @@ def login_user(
 
     return generate_token(
         db_user
+    )
+
+
+@router.get(
+    "/me",
+    response_model=UserMe,
+    summary="Current authenticated user",
+)
+def read_current_user(
+    current_user: User = Depends(get_current_user),
+) -> UserMe:
+    """Frontend session bootstrap: who am I and what may I do.
+
+    Returns only id / username / role / is_active — never the password hash
+    or any token material.
+    """
+    role = getattr(current_user, "role", None)
+    if hasattr(role, "value"):
+        role = role.value
+
+    return UserMe(
+        id=current_user.id,
+        username=current_user.username,
+        role=role,
+        is_active=bool(getattr(current_user, "is_active", True)),
     )
 
 

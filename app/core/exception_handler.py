@@ -23,17 +23,26 @@ def _error_response(
     errors: list[ErrorDetail] | None = None,
     headers: dict[str, str] | None = None,
 ) -> JSONResponse:
+    request_id = _get_request_id(request)
+
     payload = ErrorResponse(
         success=False,
         message=message,
         errors=errors or [],
-        request_id=_get_request_id(request),
+        request_id=request_id,
     )
+
+    # Guarantee the correlation header on every error response, including a
+    # generic 500 produced by ServerErrorMiddleware (which sits outside the
+    # request-id middleware).
+    merged_headers = dict(headers or {})
+    if request_id:
+        merged_headers.setdefault("X-Request-ID", request_id)
 
     return JSONResponse(
         status_code=status_code,
         content=jsonable_encoder(payload),
-        headers=headers,
+        headers=merged_headers or None,
     )
 
 
@@ -121,6 +130,37 @@ async def validation_exception_handler(
         message="Validation error",
         request=request,
         errors=errors,
+    )
+
+
+async def unhandled_exception_handler(
+    request: Request,
+    exc: Exception,
+) -> JSONResponse:
+    """Last-resort handler for anything not otherwise typed.
+
+    The traceback is written to the server log only. The client receives a
+    generic envelope with the request id — never the exception string, a
+    stack trace, or any SQLAlchemy / PostgreSQL connection detail.
+    """
+    logger.error(
+        "UNHANDLED_EXCEPTION | "
+        f"route={getattr(request.scope.get('route'), 'path', 'unmatched')} | "
+        f"type={type(exc).__name__} | "
+        f"request_id={_get_request_id(request)}",
+        exc_info=exc,
+    )
+
+    return _error_response(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        message="Internal server error",
+        request=request,
+        errors=[
+            ErrorDetail(
+                message="An unexpected error occurred",
+                error_type="internal_error",
+            )
+        ],
     )
 
 

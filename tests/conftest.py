@@ -9,13 +9,18 @@ from dotenv import load_dotenv
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 from alembic import command
-from tests.database_support import make_schema_engine, migration_config
+from tests.database_support import (
+    make_schema_engine,
+    migration_config,
+    validate_test_url,
+)
 from sqlalchemy.orm import Session, sessionmaker
 
 # Keep test logging out of the production logs directory.
 logging.getLogger("inventory_system").addHandler(logging.NullHandler())
 
 from app.core.security import hash_password
+import app.database as app_database
 from app.database import get_db
 from app.main import app
 from app.models import (
@@ -47,6 +52,16 @@ TestingSessionLocal = sessionmaker(
     autocommit=False,
     expire_on_commit=False,
 )
+
+# Phase 9 defence in depth: neutralise the application's own engine for the
+# whole test session. Anything that bypasses the ``get_db`` override and
+# imports ``app.database.SessionLocal`` / ``engine`` directly (ad-hoc scripts,
+# a stray fixture) now hits the disposable per-run test schema, never the
+# database named in the app's DATABASE_URL. ``TEST_DATABASE_URL`` remains
+# separately guarded by ``make_schema_engine`` -> ``validate_test_url``.
+app_database.engine = test_engine
+app_database.SessionLocal = TestingSessionLocal
+validate_test_url(str(app_database.engine.url))
 
 
 def override_get_db() -> Generator[Session, None, None]:

@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -48,7 +48,9 @@ def create_access_token(
 ) -> str:
     to_encode = data.copy()
 
-    expire = datetime.now(timezone.utc) + (
+    now = datetime.now(timezone.utc)
+
+    expire = now + (
         expires_delta
         if expires_delta is not None
         else timedelta(
@@ -58,6 +60,7 @@ def create_access_token(
 
     to_encode.update(
         {
+            "iat": now,
             "exp": expire,
         }
     )
@@ -86,6 +89,7 @@ def get_current_user(
         Session,
         Depends(get_db),
     ],
+    request: Request = None,
 ) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -132,5 +136,13 @@ def get_current_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Inactive user",
         )
+
+    # Make the authenticated id available to the request logger without
+    # exposing username/role in bulk log lines.
+    if request is not None:
+        try:
+            request.state.user_id = user.id
+        except Exception:
+            pass
 
     return user

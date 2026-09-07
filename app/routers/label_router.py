@@ -1,6 +1,5 @@
 from app.core.dependencies import require_warehouse
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse
 
 from sqlalchemy.orm import Session
 
@@ -15,6 +14,10 @@ from reportlab.lib.styles import getSampleStyleSheet
 
 import os
 
+from starlette.background import BackgroundTask
+from starlette.responses import FileResponse
+
+from app.core.safe_paths import resolve_within
 from app.database import get_db
 from app.models import Product
 
@@ -22,6 +25,18 @@ router = APIRouter(dependencies=[Depends(require_warehouse)],
     prefix="/labels",
     tags=["Labels"]
 )
+
+_BARCODE_DIR = "app/static/barcodes"
+_QRCODE_DIR = "app/static/qrcodes"
+_LABEL_DIR = "app/static/labels"
+
+
+def _cleanup(path: str) -> None:
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
 
 @router.get("/product/{product_id}")
 def generate_product_label(
@@ -39,13 +54,9 @@ def generate_product_label(
             detail="Product not found"
         )
 
-    barcode_file = (
-        f"app/static/barcodes/{product.barcode}.png"
-    )
-
-    qr_file = (
-        f"app/static/qrcodes/{product.sku}_qr.png"
-    )
+    # All generated-file names come from the numeric id, never sku/barcode.
+    barcode_file = str(resolve_within(_BARCODE_DIR, f"product_{product.id}.png"))
+    qr_file = str(resolve_within(_QRCODE_DIR, f"product_{product.id}_qr.png"))
 
     # Phase 8: self-heal missing code images so the label never renders text-only.
     if product.barcode and not os.path.exists(barcode_file):
@@ -53,9 +64,9 @@ def generate_product_label(
             import barcode as _bc
             from barcode.writer import ImageWriter
 
-            os.makedirs("app/static/barcodes", exist_ok=True)
+            os.makedirs(_BARCODE_DIR, exist_ok=True)
             _bc.get("code128", product.barcode, writer=ImageWriter()).save(
-                f"app/static/barcodes/{product.barcode}"
+                str(resolve_within(_BARCODE_DIR, f"product_{product.id}"))
             )
         except Exception:
             pass
@@ -64,7 +75,7 @@ def generate_product_label(
             import json as _json
             import qrcode as _qr
 
-            os.makedirs("app/static/qrcodes", exist_ok=True)
+            os.makedirs(_QRCODE_DIR, exist_ok=True)
             _qr.make(_json.dumps({
                 "product_id": product.id, "sku": product.sku,
                 "barcode": product.barcode, "product_name": product.product_name,
@@ -72,13 +83,11 @@ def generate_product_label(
         except Exception:
             pass
 
-    os.makedirs(
-        "app/static/labels",
-        exist_ok=True
-    )
+    os.makedirs(_LABEL_DIR, exist_ok=True)
 
-    pdf_file = (
-        f"app/static/labels/{product.sku}.pdf"
+    # Unique per request: two concurrent label builds never share a file.
+    pdf_file = str(
+        resolve_within(_LABEL_DIR, f"product_{product.id}_{os.getpid()}_{os.urandom(4).hex()}.pdf")
     )
 
     doc = SimpleDocTemplate(pdf_file)
@@ -139,5 +148,6 @@ def generate_product_label(
     return FileResponse(
         pdf_file,
         media_type="application/pdf",
-        filename=f"{product.sku}.pdf"
+        filename=f"product_{product.id}_label.pdf",
+        background=BackgroundTask(_cleanup, pdf_file),
     )
