@@ -37,8 +37,14 @@ async function forwardedClientHeaders(): Promise<Record<string, string>> {
   const out: Record<string, string> = {};
   const clientIp = (h.get("x-real-ip") || "").trim();
   if (clientIp && !clientIp.includes(",")) out["x-forwarded-for"] = clientIp;
-  const proto = h.get("x-forwarded-proto");
-  if (proto) out["x-forwarded-proto"] = proto.split(",")[0].trim();
+  // We do NOT forward X-Forwarded-Proto. The BFF -> FastAPI hop is genuinely
+  // plain HTTP. Telling FastAPI the browser-facing scheme is "https" (via
+  // uvicorn --proxy-headers) makes Starlette build its trailing-slash
+  // redirects as absolute `https://api:8081/...` URLs; api:8081 has no TLS, so
+  // the redirect that `rawRequest`'s fetch then follows fails and surfaces as
+  // a BFF 502 (hit externally on /sales-orders and /audit-logs). Browser
+  // cookie security is handled by the Next BFF + COOKIE_SECURE, independent of
+  // FastAPI's view of the internal scheme.
   return out;
 }
 
