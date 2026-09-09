@@ -42,3 +42,4 @@ htmlcov/
 .env.db
 
 .env.production
+.env.demo

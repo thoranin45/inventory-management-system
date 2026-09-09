@@ -1,12 +1,46 @@
 import "server-only";
 
-import { cookies } from "next/headers";
+import { cookies, headers as nextHeaders } from "next/headers";
 import { z } from "zod";
 
 import { API_V1, serverConfig } from "@/lib/config";
 import { ApiError } from "./errors";
 
 type Query = Record<string, string | number | boolean | undefined | null>;
+
+/**
+ * Proxy headers this server layer passes on to FastAPI so the backend's
+ * rate limiter and request logger see the REAL client, not the Next/BFF
+ * container.
+ *
+ * We trust ONLY `X-Real-IP`. The reverse proxy in front of Next (nginx
+ * `demo.conf`) is the single component allowed to establish the client
+ * address: its `realip` module resolves the true client from the trusted
+ * proxy hop and writes it into `X-Real-IP` (`$remote_addr`), overwriting
+ * anything the browser sent. We deliberately do NOT read the raw
+ * `X-Forwarded-For` chain here — its left-most entries are attacker
+ * controlled — we only re-emit the one vetted value as a single-hop
+ * `X-Forwarded-For` for uvicorn `--proxy-headers`.
+ *
+ * Behind no proxy (local `next dev`, or a misconfigured front end that omits
+ * `X-Real-IP`) nothing is forwarded and behaviour is unchanged — FastAPI
+ * then uses the socket peer. This is transport plumbing only; no auth or
+ * business semantics change.
+ */
+async function forwardedClientHeaders(): Promise<Record<string, string>> {
+  let h: Awaited<ReturnType<typeof nextHeaders>>;
+  try {
+    h = await nextHeaders();
+  } catch {
+    return {}; // not in a request scope
+  }
+  const out: Record<string, string> = {};
+  const clientIp = (h.get("x-real-ip") || "").trim();
+  if (clientIp && !clientIp.includes(",")) out["x-forwarded-for"] = clientIp;
+  const proto = h.get("x-forwarded-proto");
+  if (proto) out["x-forwarded-proto"] = proto.split(",")[0].trim();
+  return out;
+}
 
 interface ServerRequestOptions {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -62,6 +96,13 @@ export async function rawRequest(path: string, opts: ServerRequestOptions = {}):
   if (auth) {
     const token = await getSessionToken();
     if (token) finalHeaders["authorization"] = `Bearer ${token}`;
+  }
+
+  // Pass the real client IP / scheme through to FastAPI (see helper above).
+  // Explicit `opts.headers` still win.
+  const forwarded = await forwardedClientHeaders();
+  for (const [k, v] of Object.entries(forwarded)) {
+    if (!(k in finalHeaders)) finalHeaders[k] = v;
   }
 
   try {
