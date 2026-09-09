@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Warehouse Console — Prototype</title>
+<meta name="description" content="Industrial Premium clickable prototype for the inventory web app. Mock data only.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="app" id="app">
+
+  <!-- top bar -->
+  <header class="topbar">
+    <button class="icon-btn hamburger" id="hamburger" aria-label="Open navigation" aria-expanded="false">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+    </button>
+    <a class="brand" href="#/dashboard">
+      <span class="glyph" aria-hidden="true">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-6 9 6v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 21V12h6v9"/></svg>
+      </span>
+      <span>Warehouse Console</span>
+    </a>
+
+    <button class="search-trigger" id="searchTrigger" aria-label="Open command palette">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+      <span>Search products, orders, lots&hellip;</span>
+      <span class="kbd" id="kHint">Ctrl K</span>
+    </button>
+
+    <span class="spacer"></span>
+
+    <button class="icon-btn" id="notifBtn" aria-label="Notifications (placeholder)">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10 21a2 2 0 0 0 4 0"/></svg>
+    </button>
+    <button class="icon-btn" id="themeBtn" aria-label="Toggle theme">
+      <svg id="themeIcon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></svg>
+    </button>
+    <button class="user-chip" id="userChip">
+      <span class="av">AT</span>
+      <span class="u-name">A. Thanawat</span>
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+    </button>
+  </header>
+
+  <!-- sidebar -->
+  <nav class="sidebar" id="sidebar" aria-label="Primary"></nav>
+  <div class="sidebar-scrim" id="sidebarScrim"></div>
+
+  <!-- routed content -->
+  <main class="content" id="content" tabindex="-1"></main>
+
+  <!-- bottom nav (mobile) -->
+  <nav class="bottom-nav" id="bottomNav" aria-label="Mobile"></nav>
+</div>
+
+<!-- overlays -->
+<div class="scrim" id="drawerScrim"></div>
+<aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-label="Detail" hidden></aside>
+
+<div class="palette-overlay" id="paletteOverlay" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="palette">
+    <div class="palette-input-row">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--faint)"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+      <input id="paletteInput" type="text" placeholder="Search or run a command&hellip;" autocomplete="off" spellcheck="false" aria-label="Command palette search">
+      <span class="kbd">Esc</span>
+    </div>
+    <div class="palette-results" id="paletteResults"></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modalOverlay" role="dialog" aria-modal="true">
+  <div class="modal" id="modal"></div>
+</div>
+
+<div class="toast-wrap" id="toastWrap" aria-live="polite"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
