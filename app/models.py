@@ -6,16 +6,53 @@ from sqlalchemy import (
     Numeric,
     DateTime,
     Date,
+    DateTime,
     Boolean,
     ForeignKey,
+    SmallInteger,
+    CheckConstraint,
+    UniqueConstraint,
+    PrimaryKeyConstraint,
+    Index,
+    text,
 )
 from sqlalchemy.sql import func
+from sqlalchemy.dialects.postgresql import JSONB
 
 Base = declarative_base()
 
 
 class Product(Base):
     __tablename__ = "products"
+
+    __table_args__ = (
+        CheckConstraint(
+            "stock_qty >= 0",
+            name="ck_products_stock_qty_non_negative",
+        ),
+
+        Index(
+            "ix_products_category_id",
+            "category_id",
+        ),
+        Index(
+            "ix_products_brand_id",
+            "brand_id",
+        ),
+        Index(
+            "ix_products_base_unit_id",
+            "base_unit_id",
+        ),
+        Index(
+            "ix_products_product_type",
+            "product_type",
+        ),
+        Index(
+            "ix_products_is_active",
+            "is_active",
+        ),
+        Index("ix_products_product_name", "product_name"),
+    )
 
     id = Column(Integer, primary_key=True)
 
@@ -27,7 +64,11 @@ class Product(Base):
 
     price = Column(Numeric(10, 2))
 
-    stock_qty = Column(Integer)
+    stock_qty = Column(
+         Numeric(18, 3),
+        nullable=False,
+        default=0,
+    )
 
     image_url = Column(String(500))
 
@@ -41,6 +82,84 @@ class Product(Base):
     created_at = Column(
         DateTime,
         server_default=func.now()
+    )
+
+    product_type = Column(
+        String(30),
+        nullable=False,
+        default="MERCHANDISE",
+        server_default="MERCHANDISE",
+    )
+
+    brand_id = Column(
+        Integer,
+        ForeignKey("brands.id", name="fk_products_brand_id"),
+        nullable=True,
+    )
+
+    base_unit_id = Column(
+        Integer,
+        ForeignKey("units.id", name="fk_products_base_unit_id"),
+        nullable=True,
+    )
+
+    standard_cost = Column(
+        Numeric(18, 4),
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+
+    minimum_stock = Column(
+        Numeric(18, 3),
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+
+    maximum_stock = Column(
+        Numeric(18, 3),
+        nullable=True,
+    )
+
+    safety_stock = Column(
+        Numeric(18, 3),
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+
+    shelf_life_days = Column(
+        Integer,
+        nullable=True,
+    )
+
+    track_batch = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
+    )
+
+    track_expiry = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
+    )
+
+    track_weight = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
+    )
+
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
     )
 
     transactions = relationship(
@@ -58,6 +177,22 @@ class Product(Base):
         back_populates="products"
     )
 
+    brand = relationship(
+        "Brand",
+        back_populates="products",
+    )
+
+    base_unit = relationship(
+        "Unit",
+        back_populates="products",
+    )
+
+    unit_conversions = relationship(
+        "ProductUnitConversion",
+        back_populates="product",
+    )
+
+    
 
 class Category(Base):
     __tablename__ = "categories"
@@ -79,9 +214,294 @@ class Category(Base):
         back_populates="category"
     )
 
+class Brand(Base):
+    __tablename__ = "brands"
+
+    __table_args__ = (
+        UniqueConstraint("brand_code", name="uq_brands_brand_code"),
+        UniqueConstraint("brand_name", name="uq_brands_brand_name"),
+        PrimaryKeyConstraint("id", name="pk_brands"),
+        Index(
+            "ix_brands_is_active",
+            "is_active",
+        ),
+    )
+
+    id = Column(
+        Integer,
+        primary_key=True,
+    )
+
+    brand_code = Column(
+        String(50),
+
+        nullable=True,
+    )
+
+    brand_name = Column(
+        String(255),
+
+        nullable=False,
+    )
+
+    is_active = Column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=text("true"),
+    )
+
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    products = relationship(
+        "Product",
+        back_populates="brand",
+    )
+
+
+class Unit(Base):
+    __tablename__ = "units"
+
+    __table_args__ = (
+        UniqueConstraint("code", name="uq_units_code"),
+        PrimaryKeyConstraint("id", name="pk_units"),
+        Index(
+            "ix_units_unit_type",
+            "unit_type",
+        ),
+        Index(
+            "ix_units_is_active",
+            "is_active",
+        ),
+    )
+
+    id = Column(
+        Integer,
+        primary_key=True,
+    )
+
+    code = Column(
+        String(20),
+
+        nullable=False,
+    )
+
+    name = Column(
+        String(100),
+        nullable=False,
+    )
+
+    unit_type = Column(
+        String(30),
+        nullable=False,
+    )
+
+    decimal_places = Column(
+        SmallInteger,
+        nullable=False,
+        default=3,
+        server_default="3",
+    )
+
+    is_active = Column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=text("true"),
+    )
+
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    products = relationship(
+        "Product",
+        back_populates="base_unit",
+    )
+
+    conversions_from = relationship(
+        "ProductUnitConversion",
+        foreign_keys="ProductUnitConversion.from_unit_id",
+        back_populates="from_unit",
+    )
+
+    conversions_to = relationship(
+        "ProductUnitConversion",
+        foreign_keys="ProductUnitConversion.to_unit_id",
+        back_populates="to_unit",
+    )
+
+
+class Warehouse(Base):
+    __tablename__ = "warehouses"
+
+    __table_args__ = (
+        UniqueConstraint("warehouse_code", name="uq_warehouses_warehouse_code"),
+        PrimaryKeyConstraint("id", name="pk_warehouses"),
+        Index(
+            "ix_warehouses_warehouse_type",
+            "warehouse_type",
+        ),
+        Index(
+            "ix_warehouses_is_active",
+            "is_active",
+        ),
+    )
+
+    id = Column(
+        Integer,
+        primary_key=True,
+    )
+
+    warehouse_code = Column(
+        String(50),
+
+        nullable=False,
+    )
+
+    warehouse_name = Column(
+        String(255),
+        nullable=False,
+    )
+
+    warehouse_type = Column(
+        String(50),
+        nullable=True,
+    )
+
+    address = Column(
+        String(500),
+        nullable=True,
+    )
+
+    is_active = Column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=text("true"),
+    )
+
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    locations = relationship(
+        "WarehouseLocation",
+        back_populates="warehouse",
+    )
+
+
+class WarehouseLocation(Base):
+    __tablename__ = "warehouse_locations"
+
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="pk_warehouse_locations"),
+        UniqueConstraint(
+            "warehouse_id",
+            "location_code",
+            name="uq_warehouse_location_code",
+        ),
+        Index(
+            "ix_warehouse_locations_warehouse_id",
+            "warehouse_id",
+        ),
+        Index(
+            "ix_warehouse_locations_location_type",
+            "location_type",
+        ),
+        Index(
+            "ix_warehouse_locations_is_active",
+            "is_active",
+        ),
+    )
+
+    id = Column(
+        Integer,
+        primary_key=True,
+    )
+
+    warehouse_id = Column(
+        Integer,
+        ForeignKey("warehouses.id", name="fk_warehouse_locations_warehouse_id"),
+        nullable=False,
+    )
+
+    location_code = Column(
+        String(50),
+        nullable=False,
+    )
+
+    location_name = Column(
+        String(255),
+        nullable=True,
+    )
+
+    location_type = Column(
+        String(50),
+        nullable=True,
+    )
+
+    is_active = Column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=text("true"),
+    )
+
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    warehouse = relationship(
+        "Warehouse",
+        back_populates="locations",
+    )
 
 class StockTransaction(Base):
     __tablename__ = "stock_transactions"
+
+    __table_args__ = (
+        Index("ix_stock_transactions_product_type", "product_id", "transaction_type"),
+        Index("ix_stock_transactions_created_at", "created_at"),
+    )
 
     id = Column(Integer, primary_key=True)
 
@@ -92,7 +512,10 @@ class StockTransaction(Base):
 
     transaction_type = Column(String(20))
 
-    quantity = Column(Integer)
+    quantity = Column(
+        Numeric(18, 3),
+        nullable=False,
+    )
 
     remark = Column(String(255))
 
@@ -118,38 +541,72 @@ class User(Base):
 
     role = Column(String(50))
 
+    # Phase 9: allow a compromised or departed account to be disabled.
+    # Authorization reloads the DB user on every request, so flipping this to
+    # False makes existing JWTs unusable immediately (no blocklist needed).
+    is_active = Column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=text("true"),
+    )
+
 
 class ProductBatch(Base):
     __tablename__ = "product_batches"
 
-    id = Column(Integer, primary_key=True)
+    __table_args__ = (
+        UniqueConstraint("product_id", "lot_no", name="uq_product_batches_product_lot"),
+        Index("ix_product_batches_product_expiry", "product_id", "expiry_date", "created_at", "id"),
+        Index("ix_product_batches_lot_no", "lot_no"),
+        CheckConstraint(
+            "quantity >= 0",
+            name="ck_product_batches_quantity_non_negative",
+        ),
+    )
+
+    id = Column(
+        Integer,
+        primary_key=True,
+    )
 
     product_id = Column(
         Integer,
-        ForeignKey("products.id")
+        ForeignKey("products.id"),
+        nullable=False,
     )
 
-    lot_no = Column(String(100), unique=True)
+    lot_no = Column(
+        String(100),
+
+    )
 
     mfg_date = Column(Date)
 
     expiry_date = Column(Date)
 
-    quantity = Column(Integer)
+    quantity = Column(
+        Numeric(18, 3),
+        nullable=False,
+    )
 
     created_at = Column(
         DateTime,
-        server_default=func.now()
+        server_default=func.now(),
     )
 
     product = relationship(
         "Product",
-        back_populates="batches"
+        back_populates="batches",
     )
 
 
 class Supplier(Base):
     __tablename__ = "suppliers"
+
+    __table_args__ = (
+        Index("ix_suppliers_supplier_name", "supplier_name"),
+    )
 
     id = Column(Integer, primary_key=True)
 
@@ -172,6 +629,11 @@ class Supplier(Base):
 class PurchaseOrder(Base):
     __tablename__ = "purchase_orders"
 
+    __table_args__ = (
+        Index("ix_purchase_orders_status_created_at", "status", "created_at"),
+        Index("ix_purchase_orders_supplier_id", "supplier_id"),
+    )
+
     id = Column(Integer, primary_key=True)
 
     po_number = Column(String(100), unique=True)
@@ -192,25 +654,67 @@ class PurchaseOrder(Base):
 class PurchaseOrderItem(Base):
     __tablename__ = "purchase_order_items"
 
-    id = Column(Integer, primary_key=True)
+    __table_args__ = (
+        UniqueConstraint("po_id", "product_id", name="uq_purchase_order_items_po_product"),
+        CheckConstraint(
+            "quantity > 0",
+            name="ck_purchase_order_items_quantity_positive",
+        ),
+        CheckConstraint(
+            "received_quantity >= 0",
+            name=(
+                "ck_purchase_order_items_"
+                "received_quantity_non_negative"
+            ),
+        ),
+        CheckConstraint(
+            "received_quantity <= quantity",
+            name=(
+                "ck_purchase_order_items_"
+                "received_quantity_lte_quantity"
+            ),
+        ),
+    )
+
+    id = Column(
+        Integer,
+        primary_key=True,
+    )
 
     po_id = Column(
         Integer,
-        ForeignKey("purchase_orders.id")
+        ForeignKey("purchase_orders.id"),
+        nullable=False,
     )
 
     product_id = Column(
         Integer,
-        ForeignKey("products.id")
+        ForeignKey("products.id"),
+        nullable=False,
     )
 
-    quantity = Column(Integer)
+    quantity = Column(
+        Numeric(18, 3),
+        nullable=False,
+    )
 
-    unit_price = Column(Numeric(10, 2))
+    received_quantity = Column(
+        Numeric(18, 3),
+        nullable=False,
+        server_default="0",
+    )
 
+    unit_price = Column(
+        Numeric(10, 2),
+        nullable=False,
+    )
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"
+
+    __table_args__ = (
+        Index("ix_audit_logs_created_at", "created_at"),
+    )
 
     id = Column(Integer, primary_key=True)
 
@@ -232,6 +736,10 @@ class AuditLog(Base):
 class Customer(Base):
     __tablename__ = "customers"
 
+    __table_args__ = (
+        Index("ix_customers_customer_name", "customer_name"),
+    )
+
     id = Column(Integer, primary_key=True)
     customer_name = Column(String(255))
     phone = Column(String(50))
@@ -241,6 +749,10 @@ class Customer(Base):
 
 class SalesOrder(Base):
     __tablename__ = "sales_orders"
+
+    __table_args__ = (
+        Index("ix_sales_orders_status_created_at", "status", "created_at"),
+    )
 
     id = Column(Integer, primary_key=True)
     so_number = Column(String(100), unique=True)
@@ -254,9 +766,25 @@ class SalesOrder(Base):
     total_amount = Column(Numeric(10, 2))
     created_at = Column(DateTime, server_default=func.now())
 
+    picked_at = Column(DateTime(timezone=True))
+    picked_by_user_id = Column(Integer, ForeignKey("users.id"))
+    packed_at = Column(DateTime(timezone=True))
+    packed_by_user_id = Column(Integer, ForeignKey("users.id"))
+    shipped_at = Column(DateTime(timezone=True))
+    shipped_by_user_id = Column(Integer, ForeignKey("users.id"))
+    shipment_number = Column(String(100), unique=True)
+
 
 class SalesOrderItem(Base):
     __tablename__ = "sales_order_items"
+
+    __table_args__ = (
+        UniqueConstraint("sales_order_id", "product_id", name="uq_sales_order_items_order_product"),
+        CheckConstraint(
+            "quantity > 0",
+            name="ck_sales_order_items_quantity_positive",
+        ),
+    )
 
     id = Column(Integer, primary_key=True)
 
@@ -270,14 +798,36 @@ class SalesOrderItem(Base):
         ForeignKey("products.id")
     )
 
-    quantity = Column(Integer)
+    quantity = Column(
+    Numeric(18, 3),
+    nullable=False,
+    )
     unit_price = Column(Numeric(10, 2))
     total_price = Column(Numeric(10, 2))
 
 class SalesOrderBatchAllocation(Base):
     __tablename__ = "sales_order_batch_allocations"
 
+    __table_args__ = (
+        CheckConstraint(
+            "(picked_quantity IS NULL AND packed_quantity IS NULL) OR (picked_quantity IS NOT NULL AND packed_quantity IS NOT NULL AND packed_quantity >= 0 AND picked_quantity >= packed_quantity AND quantity >= picked_quantity)",
+            name="ck_sales_allocations_fulfillment_quantities",
+        ),
+        Index("ix_sales_allocations_order_item", "sales_order_id", "sales_order_item_id", "id"),
+        CheckConstraint(
+            "quantity > 0",
+            name=(
+                "ck_sales_order_batch_allocations_"
+                "quantity_positive"
+            ),
+        ),
+    )
+
     id = Column(Integer, primary_key=True)
+
+    stock_balance_id = Column(Integer, ForeignKey("stock_balances.id"))
+    picked_quantity = Column(Numeric(18, 3))
+    packed_quantity = Column(Numeric(18, 3))
 
     sales_order_id = Column(
         Integer,
@@ -299,9 +849,721 @@ class SalesOrderBatchAllocation(Base):
         ForeignKey("product_batches.id")
     )
 
-    quantity = Column(Integer)
+    quantity = Column(
+    Numeric(18, 3),
+    nullable=False,
+    )
 
     created_at = Column(
         DateTime,
         server_default=func.now()
     )
+
+class ProductUnitConversion(Base):
+    __tablename__ = "product_unit_conversions"
+
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="pk_product_unit_conversions"),
+        UniqueConstraint(
+            "product_id",
+            "from_unit_id",
+            "to_unit_id",
+            name="uq_product_unit_conversion",
+        ),
+        CheckConstraint(
+            "conversion_factor > 0",
+            name="ck_conversion_factor_positive",
+        ),
+        CheckConstraint(
+            "from_unit_id <> to_unit_id",
+            name="ck_conversion_units_different",
+        ),
+        Index(
+            "ix_product_unit_conversions_product_id",
+            "product_id",
+        ),
+        Index(
+            "ix_product_unit_conversions_from_unit_id",
+            "from_unit_id",
+        ),
+        Index(
+            "ix_product_unit_conversions_to_unit_id",
+            "to_unit_id",
+        ),
+    )
+
+    id = Column(
+        Integer,
+        primary_key=True,
+    )
+
+    product_id = Column(
+        Integer,
+        ForeignKey("products.id", name="fk_product_unit_conversions_product_id"),
+        nullable=False,
+    )
+
+    from_unit_id = Column(
+        Integer,
+        ForeignKey("units.id", name="fk_product_unit_conversions_from_unit_id"),
+        nullable=False,
+    )
+
+    to_unit_id = Column(
+        Integer,
+        ForeignKey("units.id", name="fk_product_unit_conversions_to_unit_id"),
+        nullable=False,
+    )
+
+    conversion_factor = Column(
+        Numeric(18, 6),
+        nullable=False,
+    )
+
+    is_active = Column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=text("true"),
+    )
+
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    product = relationship(
+        "Product",
+        back_populates="unit_conversions",
+    )
+
+    from_unit = relationship(
+        "Unit",
+        foreign_keys=[from_unit_id],
+        back_populates="conversions_from",
+    )
+
+    to_unit = relationship(
+        "Unit",
+        foreign_keys=[to_unit_id],
+        back_populates="conversions_to",
+    )
+
+class StockBalance(Base):
+    __tablename__ = "stock_balances"
+
+    id = Column(
+        Integer,
+        primary_key=True,
+    )
+
+    product_id = Column(
+        Integer,
+        ForeignKey(
+            "products.id",
+            name="fk_stock_balances_product_id",
+        ),
+        nullable=False,
+    )
+
+    warehouse_id = Column(
+        Integer,
+        ForeignKey(
+            "warehouses.id",
+            name="fk_stock_balances_warehouse_id",
+        ),
+        nullable=False,
+    )
+
+    location_id = Column(
+        Integer,
+        ForeignKey(
+            "warehouse_locations.id",
+            name="fk_stock_balances_location_id",
+        ),
+        nullable=False,
+    )  
+
+    batch_id = Column(
+        Integer,
+        ForeignKey(
+            "product_batches.id",
+            name="fk_stock_balances_batch_id",
+        ),
+        nullable=True,
+    )
+
+    on_hand_qty = Column(
+        Numeric(18, 3),
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+
+    reserved_qty = Column(
+        Numeric(18, 3),
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    product = relationship(
+        "Product",
+    )
+
+    warehouse = relationship(
+        "Warehouse",
+    )
+
+    location = relationship(
+        "WarehouseLocation",
+    )
+
+    batch = relationship(
+        "ProductBatch",
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "on_hand_qty >= 0",
+            name="ck_stock_balances_on_hand_non_negative",
+        ),
+        CheckConstraint(
+            "reserved_qty >= 0",
+            name="ck_stock_balances_reserved_non_negative",
+        ),
+        CheckConstraint(
+            "reserved_qty <= on_hand_qty",
+            name="ck_stock_balances_reserved_lte_on_hand",
+        ),
+
+        # สินค้าที่ไม่ได้ track batch:
+        # 1 Product + Warehouse + Location
+        # มี balance ได้เพียง record เดียว
+        Index(
+            "uq_stock_balances_no_batch",
+            "product_id",
+            "warehouse_id",
+            "location_id",
+            unique=True,
+            postgresql_where=text(
+                "batch_id IS NULL"
+            ),
+        ),
+
+        # สินค้าที่ track batch:
+        # แยก balance ต่อ Lot/Batch
+        Index(
+            "uq_stock_balances_with_batch",
+            "product_id",
+            "warehouse_id",
+            "location_id",
+            "batch_id",
+            unique=True,
+            postgresql_where=text(
+                "batch_id IS NOT NULL"
+            ),
+        ),
+
+        Index(
+            "ix_stock_balances_product_id",
+            "product_id",
+        ),
+        Index(
+            "ix_stock_balances_warehouse_id",
+            "warehouse_id",
+        ),
+        Index(
+            "ix_stock_balances_location_id",
+            "location_id",
+        ),
+        Index(
+            "ix_stock_balances_batch_id",
+            "batch_id",
+        ),
+    )
+
+    @property
+    def available_qty(self):
+        return (
+            self.on_hand_qty
+            - self.reserved_qty
+        )
+
+class InventoryTransfer(Base):
+    dispatched_at = Column(DateTime(timezone=True))
+    dispatched_by_user_id = Column(Integer, ForeignKey("users.id"))
+    legacy_completed = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    __tablename__ = "inventory_transfers"
+
+    id = Column(
+        Integer,
+        primary_key=True,
+    )
+
+    transfer_number = Column(
+        String(50),
+        nullable=False,
+
+    )
+
+    status = Column(
+        String(30),
+        nullable=False,
+        default="DRAFT",
+        server_default="DRAFT",
+    )
+
+    source_warehouse_id = Column(
+        Integer,
+        ForeignKey("warehouses.id", name="fk_inventory_transfers_source_warehouse"),
+        nullable=False,
+    )
+
+    destination_warehouse_id = Column(
+        Integer,
+        ForeignKey("warehouses.id", name="fk_inventory_transfers_destination_warehouse"),
+        nullable=False,
+    )
+
+    requested_by_user_id = Column(
+        Integer,
+        ForeignKey("users.id", name="fk_inventory_transfers_requested_by_user"),
+        nullable=True,
+    )
+
+    completed_by_user_id = Column(
+        Integer,
+        ForeignKey("users.id", name="fk_inventory_transfers_completed_by_user"),
+        nullable=True,
+    )
+
+    remark = Column(
+        String(500),
+        nullable=True,
+    )
+
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    completed_at = Column(
+        DateTime,
+        nullable=True,
+    )
+
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    items = relationship(
+        "InventoryTransferItem",
+        back_populates="transfer",
+        cascade="all, delete-orphan",
+    )
+
+    source_warehouse = relationship(
+        "Warehouse",
+        foreign_keys=[source_warehouse_id],
+    )
+
+    destination_warehouse = relationship(
+        "Warehouse",
+        foreign_keys=[destination_warehouse_id],
+    )
+
+    requested_by = relationship(
+        "User",
+        foreign_keys=[requested_by_user_id],
+    )
+
+    completed_by = relationship(
+        "User",
+        foreign_keys=[completed_by_user_id],
+    )
+
+    __table_args__ = (
+        UniqueConstraint("transfer_number", name="uq_inventory_transfers_transfer_number"),
+        CheckConstraint(
+            "source_warehouse_id <> destination_warehouse_id",
+            name=(
+                "ck_inventory_transfers_"
+                "different_warehouses"
+            ),
+        ),
+        Index(
+            "ix_inventory_transfers_status",
+            "status",
+        ),
+        Index(
+            "ix_inventory_transfers_source_warehouse",
+            "source_warehouse_id",
+        ),
+        Index(
+            "ix_inventory_transfers_destination_warehouse",
+            "destination_warehouse_id",
+        ),
+        Index(
+            "ix_inventory_transfers_created_at",
+            "created_at",
+        ),
+    )
+
+
+class InventoryTransferItem(Base):
+    dispatched_quantity = Column(Numeric(18, 3))
+    received_quantity = Column(Numeric(18, 3))
+    source_stock_balance_id = Column(Integer, ForeignKey("stock_balances.id"))
+    transit_stock_balance_id = Column(Integer, ForeignKey("stock_balances.id"))
+
+    @property
+    def outstanding_quantity(self):
+        if self.dispatched_quantity is None or self.received_quantity is None:
+            return None
+        return self.dispatched_quantity - self.received_quantity
+
+    __tablename__ = "inventory_transfer_items"
+
+    id = Column(
+        Integer,
+        primary_key=True,
+    )
+
+    transfer_id = Column(
+        Integer,
+        ForeignKey("inventory_transfers.id", name="fk_inventory_transfer_items_transfer"),
+        nullable=False,
+    )
+
+    product_id = Column(
+        Integer,
+        ForeignKey("products.id", name="fk_inventory_transfer_items_product"),
+        nullable=False,
+    )
+
+    batch_id = Column(
+        Integer,
+        ForeignKey("product_batches.id", name="fk_inventory_transfer_items_batch"),
+        nullable=True,
+    )
+
+    from_location_id = Column(
+        Integer,
+        ForeignKey("warehouse_locations.id", name="fk_inventory_transfer_items_from_location"),
+        nullable=False,
+    )
+
+    to_location_id = Column(
+        Integer,
+        ForeignKey("warehouse_locations.id", name="fk_inventory_transfer_items_to_location"),
+        nullable=False,
+    )
+
+    quantity = Column(
+        Numeric(18, 3),
+        nullable=False,
+    )
+
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    transfer = relationship(
+        "InventoryTransfer",
+        back_populates="items",
+    )
+
+    product = relationship(
+        "Product",
+    )
+
+    batch = relationship(
+        "ProductBatch",
+    )
+
+    from_location = relationship(
+        "WarehouseLocation",
+        foreign_keys=[from_location_id],
+    )
+
+    to_location = relationship(
+        "WarehouseLocation",
+        foreign_keys=[to_location_id],
+    )
+
+    __table_args__ = (
+        CheckConstraint("(dispatched_quantity IS NULL AND received_quantity IS NULL) OR (dispatched_quantity IS NOT NULL AND received_quantity IS NOT NULL AND received_quantity >= 0 AND received_quantity <= dispatched_quantity AND dispatched_quantity <= quantity AND (dispatched_quantity = 0 OR dispatched_quantity = quantity))", name="ck_transfer_item_progress"),
+        CheckConstraint("from_location_id <> to_location_id", name="ck_inventory_transfer_items_different_locations"),
+        CheckConstraint(
+            "quantity > 0",
+            name=(
+                "ck_inventory_transfer_items_"
+                "quantity_positive"
+            ),
+        ),
+        Index(
+            "uq_inventory_transfer_items_no_batch",
+            "transfer_id",
+            "product_id",
+            "from_location_id",
+            "to_location_id",
+            unique=True,
+            postgresql_where=text(
+                "batch_id IS NULL"
+            ),
+        ),
+        Index(
+            "uq_inventory_transfer_items_with_batch",
+            "transfer_id",
+            "product_id",
+            "batch_id",
+            "from_location_id",
+            "to_location_id",
+            unique=True,
+            postgresql_where=text(
+                "batch_id IS NOT NULL"
+            ),
+        ),
+        Index(
+            "ix_inventory_transfer_items_transfer_id",
+            "transfer_id",
+        ),
+        Index(
+            "ix_inventory_transfer_items_product_id",
+            "product_id",
+        ),
+        Index(
+            "ix_inventory_transfer_items_batch_id",
+            "batch_id",
+        ),
+    )
+
+class InventoryMovement(Base):
+    transfer_item_id = Column(Integer, ForeignKey("inventory_transfer_items.id"))
+    transfer_receipt_id = Column(Integer, ForeignKey("inventory_transfer_receipts.id"))
+    __tablename__ = "inventory_movements"
+
+    purchase_receipt_id = Column(Integer, ForeignKey("purchase_order_receipts.id"))
+    purchase_order_item_id = Column(Integer, ForeignKey("purchase_order_items.id"))
+    stock_transaction_id = Column(Integer, ForeignKey("stock_transactions.id"))
+
+    id = Column(
+        Integer,
+        primary_key=True,
+    )
+
+    product_id = Column(
+        Integer,
+        ForeignKey("products.id"),
+        nullable=False,
+    )
+
+    batch_id = Column(
+        Integer,
+        ForeignKey("product_batches.id"),
+        nullable=True,
+    )
+
+    warehouse_id = Column(
+        Integer,
+        ForeignKey("warehouses.id"),
+        nullable=False,
+    )
+
+    location_id = Column(
+        Integer,
+        ForeignKey("warehouse_locations.id"),
+        nullable=False,
+    )
+
+    movement_type = Column(
+        String(50),
+        nullable=False,
+    )
+
+    quantity = Column(
+        Numeric(18, 3),
+        nullable=False,
+    )
+
+    balance_before = Column(
+        Numeric(18, 3),
+        nullable=False,
+    )
+
+    balance_after = Column(
+        Numeric(18, 3),
+        nullable=False,
+    )
+
+    reference_type = Column(
+        String(50),
+        nullable=True,
+    )
+
+    reference_id = Column(
+        Integer,
+        nullable=True,
+    )
+
+    reference_number = Column(
+        String(100),
+        nullable=True,
+    )
+
+    remark = Column(
+        String(500),
+        nullable=True,
+    )
+
+    created_by_user_id = Column(
+        Integer,
+        ForeignKey("users.id"),
+        nullable=True,
+    )
+
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    product = relationship(
+        "Product",
+    )
+
+    batch = relationship(
+        "ProductBatch",
+    )
+
+    warehouse = relationship(
+        "Warehouse",
+    )
+
+    location = relationship(
+        "WarehouseLocation",
+    )
+
+    created_by = relationship(
+        "User",
+    )
+
+    __table_args__ = (
+        UniqueConstraint("purchase_receipt_id", "purchase_order_item_id", name="uq_receipt_movement_item"),
+        CheckConstraint(
+            "quantity <> 0",
+            name=(
+                "ck_inventory_movements_"
+                "quantity_non_zero"
+            ),
+        ),
+
+        CheckConstraint(
+            "balance_before >= 0",
+            name=(
+                "ck_inventory_movements_"
+                "balance_before_non_negative"
+            ),
+        ),
+
+        CheckConstraint(
+            "balance_after >= 0",
+            name=(
+                "ck_inventory_movements_"
+                "balance_after_non_negative"
+            ),
+        ),
+
+        Index(
+            "ix_inventory_movements_product_id",
+            "product_id",
+        ),
+
+        Index(
+            "ix_inventory_movements_batch_id",
+            "batch_id",
+        ),
+
+        Index(
+            "ix_inventory_movements_warehouse_id",
+            "warehouse_id",
+        ),
+
+        Index(
+            "ix_inventory_movements_location_id",
+            "location_id",
+        ),
+
+        Index(
+            "ix_inventory_movements_movement_type",
+            "movement_type",
+        ),
+
+        Index(
+            "ix_inventory_movements_reference",
+            "reference_type",
+            "reference_id",
+        ),
+
+        Index(
+            "ix_inventory_movements_created_at",
+            "created_at",
+        ),
+    )
+
+
+class PurchaseOrderReceipt(Base):
+    __tablename__ = "purchase_order_receipts"
+    __table_args__ = (
+        UniqueConstraint("po_id", "operation_key", name="uq_po_receipt_operation"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    po_id = Column(Integer, ForeignKey("purchase_orders.id"), nullable=False)
+    receipt_number = Column(String(100), unique=True, nullable=False)
+    operation_key = Column(String(128), nullable=False)
+    request_fingerprint = Column(String(64), nullable=False)
+    received_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    received_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    response_snapshot = Column(JSONB, nullable=False)
+
+
+class InventoryTransferReceipt(Base):
+    __tablename__ = "inventory_transfer_receipts"
+    __table_args__ = (UniqueConstraint("transfer_id", "operation_key", name="uq_transfer_receipt_operation"),)
+    id = Column(Integer, primary_key=True)
+    transfer_id = Column(Integer, ForeignKey("inventory_transfers.id"), nullable=False)
+    receipt_number = Column(String(100), unique=True, nullable=False)
+    operation_key = Column(String(128), nullable=False)
+    request_fingerprint = Column(String(64), nullable=False)
+    received_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    received_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    response_snapshot = Column(JSONB, nullable=False)

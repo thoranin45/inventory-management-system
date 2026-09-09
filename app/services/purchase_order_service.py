@@ -1,10 +1,13 @@
+import hashlib
+import json
+from uuid import uuid4
 from decimal import Decimal
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import (
-    DuplicateLotNumberException,
+    AppException, DuplicateLotNumberException,
     InvalidBatchDateException,
     InvalidPurchaseOrderStatusException,
     MissingPurchaseOrderReceiveItemException,
@@ -14,14 +17,16 @@ from app.core.exceptions import (
     PurchaseOrderNotFoundException,
     SupplierNotFoundException,
     UnexpectedPurchaseOrderReceiveItemException,
+    PurchaseOrderOverReceiveException,
 )
 from app.core.unit_of_work import UnitOfWork
 from app.models import (
-    AuditLog,
+    AuditLog, PurchaseOrderReceipt,
     ProductBatch,
     PurchaseOrder,
     PurchaseOrderItem,
     StockTransaction,
+    InventoryMovement,
 )
 from app.repositories.batch_repository import BatchRepository
 from app.repositories.product_repository import ProductRepository
@@ -38,20 +43,26 @@ from app.schemas.purchase_order_schema import (
     PurchaseOrderResponse,
     PurchaseOrderSummaryResponse,
     ReceivePO,
-    ReceivedBatchResponse,
+    ReceivedBatchResponse, ReceivedItemResponse,
+)
+from app.repositories.inventory_movement_repository import (
+    InventoryMovementRepository,
+)
+from app.repositories.stock_balance_repository import (
+    StockBalanceRepository,
 )
 
-
 PO_STATUS_PENDING = "PENDING"
+PO_STATUS_PARTIALLY_RECEIVED = "PARTIALLY_RECEIVED"
 PO_STATUS_RECEIVED = "RECEIVED"
 PO_STATUS_CANCELLED = "CANCELLED"
 
 
 def _calculate_item_total(
-    quantity: int,
+    quantity: Decimal,
     unit_price: Decimal,
 ) -> Decimal:
-    return Decimal(quantity) * unit_price
+    return quantity * unit_price
 
 
 def _build_po_response(
@@ -78,6 +89,13 @@ def _build_po_response(
                 po_id=item.po_id,
                 product_id=item.product_id,
                 quantity=item.quantity,
+                received_quantity=(
+                    item.received_quantity
+                ),
+                remaining_quantity=(
+                    item.quantity
+                    - item.received_quantity
+                ),
                 unit_price=item.unit_price,
                 total_price=item_total,
             )
@@ -124,9 +142,9 @@ def create_purchase_order_service(
         ] = product
 
     po = PurchaseOrder(
-        po_number="TEMP",
+        po_number=None,
         supplier_id=data.supplier_id,
-        status=PO_STATUS_PENDING,
+        status="DRAFT",
     )
 
     created_items: list[PurchaseOrderItem] = []
@@ -171,41 +189,52 @@ def create_purchase_order_service(
     )
 
 
-def get_purchase_orders_service(
-    po_repo: PurchaseOrderRepository,
-) -> list[PurchaseOrderSummaryResponse]:
-    purchase_orders = po_repo.get_all()
+def get_purchase_orders_service(po_repo: PurchaseOrderRepository, params) -> dict:
+    from app.core.pagination import paginate, paginated_body, resolve_ordering
 
-    results: list[
-        PurchaseOrderSummaryResponse
-    ] = []
+    sorts = {
+        "id": PurchaseOrder.id,
+        "created_at": PurchaseOrder.created_at,
+        "status": PurchaseOrder.status,
+        "po_number": PurchaseOrder.po_number,
+    }
+    ordering = resolve_ordering(params, sorts, "created_at", PurchaseOrder.id)
+    items, total = paginate(
+        po_repo.list_query(search=params.search, status=params.status), params, ordering
+    )
+    po_ids = [po.id for po in items]
+    item_agg = po_repo.item_aggregates(po_ids)
+    receipt_agg = po_repo.receipt_aggregates(po_ids)
+    names = po_repo.supplier_names([po.supplier_id for po in items if po.supplier_id])
 
-    for po in purchase_orders:
-        items = po_repo.get_items(po.id)
-
-        total_amount = sum(
-            (
-                _calculate_item_total(
-                    item.quantity,
-                    item.unit_price,
-                )
-                for item in items
-            ),
-            Decimal("0.00"),
+    rows = []
+    for po in items:
+        ordered, received, amount = item_agg.get(
+            po.id, (Decimal("0"), Decimal("0"), Decimal("0.00"))
         )
-
-        results.append(
-            PurchaseOrderSummaryResponse(
-                id=po.id,
-                po_number=po.po_number,
-                supplier_id=po.supplier_id,
-                status=po.status,
-                total_amount=total_amount,
-                created_at=po.created_at,
-            )
+        last_receipt_at, receipt_count = receipt_agg.get(po.id, (None, 0))
+        remaining = ordered - received
+        receiving_pct = (
+            float((received / ordered * 100).quantize(Decimal("0.1"))) if ordered else 0.0
         )
-
-    return results
+        rows.append({
+            "id": po.id,
+            "po_number": po.po_number,
+            "supplier_id": po.supplier_id,
+            "supplier_name": names.get(po.supplier_id),
+            "status": po.status,
+            "ordered_quantity": ordered,
+            "received_quantity": received,
+            "remaining_quantity": remaining,
+            "receiving_pct": receiving_pct,
+            "total_amount": amount.quantize(Decimal("0.01")),
+            "created_at": po.created_at,
+            "last_receipt_at": last_receipt_at,
+            "receipt_count": receipt_count,
+        })
+    return paginated_body(
+        rows, total, params, "Purchase orders retrieved successfully"
+    )
 
 
 def get_purchase_order_service(
@@ -225,149 +254,134 @@ def get_purchase_order_service(
     )
 
 
+def _receipt_fingerprint(po_id: int, data: ReceivePO) -> str:
+    # Defaults are a stable request token, not a lookup of mutable master data.
+    payload = {"version": 1, "po_id": po_id,
+               "storage": "MAIN/DEFAULT" if data.warehouse_id is None and data.location_id is None else [data.warehouse_id, data.location_id],
+               "items": [{"product_id": i.product_id, "quantity": format(i.quantity, ".3f"),
+                          "lot_no": i.lot_no, "mfg_date": i.mfg_date.isoformat() if i.mfg_date else None,
+                          "expiry_date": i.expiry_date.isoformat() if i.expiry_date else None}
+                         for i in sorted(data.items, key=lambda i: i.product_id)]}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+def confirm_purchase_order_service(db, po_repo, product_repo, po_id, current_user):
+    with UnitOfWork(db):
+        po = po_repo.get_by_id_for_update(po_id)
+        if po is None:
+            raise PurchaseOrderNotFoundException()
+        if po.status != "DRAFT":
+            raise InvalidPurchaseOrderStatusException()
+        items = po_repo.get_items_for_update(po.id)
+        if not items or len({i.product_id for i in items}) != len(items):
+            raise InvalidPurchaseOrderStatusException()
+        for item in items:
+            if item.quantity <= 0 or item.received_quantity != 0:
+                raise InvalidPurchaseOrderStatusException()
+            if product_repo.get_by_id(item.product_id) is None:
+                raise ProductNotFoundException()
+        po.status = "CONFIRMED"
+        db.add(AuditLog(username=current_user.username, action="CONFIRM_PURCHASE_ORDER", table_name="purchase_orders",
+                        record_id=po.id, description=f"Confirm {po.po_number}: DRAFT -> CONFIRMED"))
+    return PurchaseOrderActionResponse(id=po.id, po_number=po.po_number, status=po.status)
+
+
 def receive_purchase_order_service(
-    db: Session,
-    po_repo: PurchaseOrderRepository,
-    product_repo: ProductRepository,
-    batch_repo: BatchRepository,
-    stock_repo: StockRepository,
-    po_id: int,
-    data: ReceivePO,
-    current_user: Any,
+    db: Session, po_repo: PurchaseOrderRepository, product_repo: ProductRepository,
+    batch_repo: BatchRepository, stock_repo: StockRepository, balance_repo: StockBalanceRepository,
+    movement_repo: InventoryMovementRepository, po_id: int, data: ReceivePO, current_user: Any,
+    operation_key: str,
 ) -> PurchaseOrderReceiveResponse:
-    po = po_repo.get_by_id(po_id)
-
-    if po is None:
-        raise PurchaseOrderNotFoundException()
-
-    if po.status == PO_STATUS_RECEIVED:
-        raise PurchaseOrderAlreadyReceivedException()
-
-    if po.status == PO_STATUS_CANCELLED:
-        raise PurchaseOrderCancelledException()
-
-    if po.status != PO_STATUS_PENDING:
-        raise InvalidPurchaseOrderStatusException()
-
-    po_items = po_repo.get_items(po.id)
-
-    receive_items_by_product = {
-        item.product_id: item
-        for item in data.items
-    }
-
-    po_product_ids = {
-        item.product_id
-        for item in po_items
-    }
-
-    for receive_item in data.items:
-        if receive_item.product_id not in po_product_ids:
-            raise UnexpectedPurchaseOrderReceiveItemException(
-                receive_item.product_id
-            )
-
-    for po_item in po_items:
-        if (
-            po_item.product_id
-            not in receive_items_by_product
-        ):
-            raise MissingPurchaseOrderReceiveItemException(
-                po_item.product_id
-            )
-
-    received_batches: list[
-        ReceivedBatchResponse
-    ] = []
-
-    with UnitOfWork(db) as uow:
-        for po_item in po_items:
-            receive_item = receive_items_by_product[
-                po_item.product_id
-            ]
-
-            product = product_repo.get_by_id(
-                po_item.product_id
-            )
-
+    fingerprint = _receipt_fingerprint(po_id, data)
+    with UnitOfWork(db):
+        po = po_repo.get_by_id_for_update(po_id)
+        if po is None:
+            raise PurchaseOrderNotFoundException()
+        existing = po_repo.get_receipt(po.id, operation_key)
+        if existing is not None:
+            if existing.request_fingerprint != fingerprint:
+                raise AppException(message="Idempotency-Key already used with a different payload", status_code=409)
+            return PurchaseOrderReceiveResponse.model_validate(existing.response_snapshot)
+        if po.status == PO_STATUS_RECEIVED:
+            raise PurchaseOrderAlreadyReceivedException()
+        if po.status == PO_STATUS_CANCELLED:
+            raise PurchaseOrderCancelledException()
+        if po.status not in {"CONFIRMED", PO_STATUS_PARTIALLY_RECEIVED}:
+            raise InvalidPurchaseOrderStatusException()
+        po_items = po_repo.get_items_for_update(po.id)
+        by_product = {i.product_id: i for i in po_items}
+        if not po_items or len(by_product) != len(po_items):
+            raise InvalidPurchaseOrderStatusException()
+        for line in data.items:
+            item = by_product.get(line.product_id)
+            if item is None:
+                raise UnexpectedPurchaseOrderReceiveItemException(line.product_id)
+            if line.quantity > item.quantity - item.received_quantity:
+                raise PurchaseOrderOverReceiveException(line.product_id)
+        balance_repo.lock_inventory([line.product_id for line in data.items])
+        warehouse, location = balance_repo.resolve_storage(data.warehouse_id, data.location_id)
+        products = {}
+        for line in data.items:
+            product = product_repo.get_by_id_for_update(line.product_id)
             if product is None:
                 raise ProductNotFoundException()
-
-            if (
-                receive_item.expiry_date
-                <= receive_item.mfg_date
-            ):
-                raise InvalidBatchDateException()
-
-            existing_batch = batch_repo.get_by_lot_no(
-                receive_item.lot_no
-            )
-
-            if existing_batch is not None:
-                raise DuplicateLotNumberException()
-
-            batch = ProductBatch(
-                product_id=product.id,
-                lot_no=receive_item.lot_no,
-                mfg_date=receive_item.mfg_date,
-                expiry_date=receive_item.expiry_date,
-                quantity=po_item.quantity,
-            )
-
-            batch_repo.create(batch)
-
-            product.stock_qty += po_item.quantity
-
-            transaction = StockTransaction(
-                product_id=product.id,
-                transaction_type="IN_PO",
-                quantity=po_item.quantity,
-                remark=(
-                    f"Receive from {po.po_number}; "
-                    f"Lot: {receive_item.lot_no}"
-                ),
-            )
-
-            stock_repo.create_transaction(
-                transaction
-            )
-
-            db.flush()
-
-            received_batches.append(
-                ReceivedBatchResponse(
-                    batch_id=batch.id,
-                    product_id=product.id,
-                    lot_no=batch.lot_no,
-                    received_quantity=po_item.quantity,
-                    current_stock=product.stock_qty,
-                )
-            )
-
-        po.status = PO_STATUS_RECEIVED
-        po_repo.update(po)
-
-        audit = AuditLog(
-            username=current_user.username,
-            action="RECEIVE_PURCHASE_ORDER",
-            table_name="purchase_orders",
-            record_id=po.id,
-            description=(
-                f"Receive {po.po_number}; "
-                f"{len(received_batches)} batch(es)"
-            ),
-        )
-
-        db.add(audit)
-
-    uow.refresh(po)
-
-    return PurchaseOrderReceiveResponse(
-        id=po.id,
-        po_number=po.po_number,
-        status=po.status,
-        received_batches=received_batches,
-    )
+            products[product.id] = product
+            if product.track_expiry and not product.track_batch:
+                raise AppException(message="Invalid product tracking configuration", status_code=409)
+            if not product.track_batch:
+                if any(v is not None for v in (line.lot_no, line.mfg_date, line.expiry_date)):
+                    raise AppException(message="Non-batch products cannot receive lot or date metadata", status_code=422)
+            else:
+                if line.lot_no is None:
+                    raise AppException(message="Batch product requires lot_no", status_code=422)
+                if product.track_expiry and (line.mfg_date is None or line.expiry_date is None):
+                    raise AppException(message="Expiry-tracked product requires manufacturing and expiry dates", status_code=422)
+                if line.expiry_date is not None and line.mfg_date is not None and line.expiry_date <= line.mfg_date:
+                    raise InvalidBatchDateException()
+                if batch_repo.get_by_lot_no(product.id, line.lot_no) is not None:
+                    raise DuplicateLotNumberException()
+        receipt = po_repo.create_receipt(PurchaseOrderReceipt(po_id=po.id,
+            receipt_number="POR-" + uuid4().hex, operation_key=operation_key,
+            request_fingerprint=fingerprint, received_by_user_id=current_user.id, response_snapshot={}))
+        received_batches, received_items = [], []
+        for line in data.items:
+            product = products[line.product_id]
+            item = by_product[product.id]
+            batch = None
+            if product.track_batch:
+                batch = batch_repo.create_if_lot_not_exists(ProductBatch(product_id=product.id,
+                    lot_no=line.lot_no, mfg_date=line.mfg_date, expiry_date=line.expiry_date, quantity=Decimal(0)))
+                if batch is None:
+                    raise DuplicateLotNumberException()
+            balance = balance_repo.get_or_create_balance(product_id=product.id, warehouse_id=warehouse.id,
+                location_id=location.id, batch_id=batch.id if batch else None)
+            before = balance.on_hand_qty
+            balance.on_hand_qty += line.quantity
+            item.received_quantity += line.quantity
+            transaction = stock_repo.create_transaction(StockTransaction(product_id=product.id,
+                transaction_type="IN_PO", quantity=line.quantity,
+                remark=f"Receive from {po.po_number}; Receipt: {receipt.receipt_number}"))
+            movement_repo.create(InventoryMovement(product_id=product.id, batch_id=batch.id if batch else None,
+                warehouse_id=balance.warehouse_id, location_id=balance.location_id, movement_type="PURCHASE_RECEIPT",
+                quantity=line.quantity, balance_before=before, balance_after=balance.on_hand_qty,
+                reference_type="PURCHASE_ORDER", reference_id=po.id, reference_number=po.po_number,
+                remark=f"Receipt: {receipt.receipt_number}", created_by_user_id=current_user.id,
+                purchase_receipt_id=receipt.id, purchase_order_item_id=item.id, stock_transaction_id=transaction.id))
+            balance_repo.sync_aggregates(product.id, current_user.username)
+            received_items.append(ReceivedItemResponse(po_item_id=item.id, product_id=product.id,
+                batch_id=batch.id if batch else None, stock_balance_id=balance.id,
+                received_quantity=line.quantity, current_stock=product.stock_qty))
+            if batch:
+                received_batches.append(ReceivedBatchResponse(batch_id=batch.id, product_id=product.id,
+                    lot_no=batch.lot_no, received_quantity=line.quantity, current_stock=product.stock_qty))
+        po.status = PO_STATUS_RECEIVED if all(i.received_quantity == i.quantity for i in po_items) else PO_STATUS_PARTIALLY_RECEIVED
+        result = PurchaseOrderReceiveResponse(id=po.id, po_number=po.po_number, status=po.status,
+            receipt_id=receipt.id, receipt_number=receipt.receipt_number,
+            received_batches=received_batches, received_items=received_items)
+        receipt.response_snapshot = result.model_dump(mode="json")
+        db.add(AuditLog(username=current_user.username, action="RECEIVE_PURCHASE_ORDER", table_name="purchase_orders",
+            record_id=po.id, description=f"Receive {po.po_number}; {receipt.receipt_number}; status={po.status}"))
+    return result
 
 
 def cancel_purchase_order_service(
@@ -376,35 +390,56 @@ def cancel_purchase_order_service(
     po_id: int,
     current_user: Any,
 ) -> PurchaseOrderActionResponse:
-    po = po_repo.get_by_id(po_id)
-
-    if po is None:
-        raise PurchaseOrderNotFoundException()
-
-    if po.status == PO_STATUS_RECEIVED:
-        raise PurchaseOrderAlreadyReceivedException()
-
-    if po.status == PO_STATUS_CANCELLED:
-        raise PurchaseOrderCancelledException()
-
-    if po.status != PO_STATUS_PENDING:
-        raise InvalidPurchaseOrderStatusException()
 
     with UnitOfWork(db) as uow:
+        po = po_repo.get_by_id_for_update(
+            po_id
+        )
+
+        if po is None:
+            raise PurchaseOrderNotFoundException()
+
+        if po.status == PO_STATUS_RECEIVED:
+            raise PurchaseOrderAlreadyReceivedException()
+
+        if po.status == PO_STATUS_CANCELLED:
+            raise PurchaseOrderCancelledException()
+
+        # PO ที่รับของไปบางส่วนแล้ว
+        # ไม่ควร Cancel ตรง ๆ เพราะมี stock เข้าไปแล้ว
+        if po.status == PO_STATUS_PARTIALLY_RECEIVED:
+            raise InvalidPurchaseOrderStatusException()
+
+        if po.status not in {"DRAFT", "CONFIRMED"}:
+            raise InvalidPurchaseOrderStatusException()
+
+        items = po_repo.get_items_for_update(po.id)
+        if not items or any(item.received_quantity != 0 for item in items):
+            raise InvalidPurchaseOrderStatusException()
+
         po.status = PO_STATUS_CANCELLED
-        po_repo.update(po)
+
+        po_repo.update(
+            po
+        )
 
         audit = AuditLog(
             username=current_user.username,
             action="CANCEL_PURCHASE_ORDER",
             table_name="purchase_orders",
             record_id=po.id,
-            description=f"Cancel {po.po_number}",
+            description=(
+                f"Cancel {po.po_number}"
+            ),
         )
 
-        db.add(audit)
+        db.add(
+            audit
+        )
 
-    uow.refresh(po)
+    uow.refresh(
+        po
+    )
 
     return PurchaseOrderActionResponse(
         id=po.id,

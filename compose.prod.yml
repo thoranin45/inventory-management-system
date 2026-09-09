@@ -1,0 +1,112 @@
+name: inventory-system
+
+# Production compose.
+#
+# - The API image is PINNED via ${API_IMAGE}; ":latest" is not used.
+#   Set API_IMAGE=ghcr.io/OWNER/inventory-management-system:vX.Y.Z (or :<sha>).
+# - The API container starts the application only. Database migrations are an
+#   explicit, gated step:
+#       docker compose -f compose.prod.yml --profile migrate run --rm migrate
+#   Run it AFTER a verified backup and preflight. See docs/deployment.md.
+# - PostgreSQL has no published host port.
+# - Container healthcheck uses /health (liveness). Readiness (/ready) is
+#   verified out-of-band during a deploy.
+
+services:
+  db:
+    image: postgres:18
+    container_name: inventory-postgres
+    restart: unless-stopped
+
+    env_file:
+      - .env.production
+
+    environment:
+      PGDATA: /var/lib/postgresql/data/pgdata
+
+    expose:
+      - "5432"
+
+    volumes:
+      - inventory_postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  api:
+    image: ${API_IMAGE:?set API_IMAGE to a pinned tag, e.g. ghcr.io/OWNER/inventory-management-system:v1.0.0}
+    container_name: inventory-api
+    restart: unless-stopped
+
+    env_file:
+      - .env.production
+
+    expose:
+      - "8081"
+
+    depends_on:
+      db:
+        condition: service_healthy
+
+    # No command override: the image's CMD starts uvicorn with --proxy-headers
+    # and does NOT run migrations.
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8081/health', timeout=3).status==200 else 1)"
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+    volumes:
+      - inventory_uploads:/app/uploads
+      - inventory_exports:/app/exports
+      - inventory_logs:/app/logs
+      - inventory_invoices:/app/app/static/invoices
+
+  # One-shot migration runner. Never starts automatically.
+  migrate:
+    image: ${API_IMAGE:?set API_IMAGE to a pinned tag}
+    profiles: ["migrate"]
+    env_file:
+      - .env.production
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["alembic", "upgrade", "head"]
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: inventory-nginx
+    restart: unless-stopped
+
+    ports:
+      - "80:80"
+
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  inventory_postgres_data:
+  inventory_uploads:
+  inventory_exports:
+  inventory_logs:
+  inventory_invoices:

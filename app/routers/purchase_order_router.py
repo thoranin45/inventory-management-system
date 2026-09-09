@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, status
+from app.core.dependencies import require_warehouse
+from fastapi import APIRouter, Depends, Header, status
 
 from app.core.dependencies import (
     BatchRepositoryDependency,
@@ -7,6 +8,8 @@ from app.core.dependencies import (
     PurchaseOrderRepositoryDependency,
     StockRepositoryDependency,
     SupplierRepositoryDependency,
+    InventoryMovementRepositoryDependency,
+    StockBalanceRepositoryDependency,
     require_admin,
 )
 from app.models import User
@@ -18,9 +21,10 @@ from app.schemas.purchase_order_schema import (
     PurchaseOrderSummaryResponse,
     ReceivePO,
 )
+from app.core.pagination import ListParams, list_params
 from app.schemas.response import ApiResponse
 from app.services.purchase_order_service import (
-    cancel_purchase_order_service,
+    cancel_purchase_order_service, confirm_purchase_order_service,
     create_purchase_order_service,
     get_purchase_order_service,
     get_purchase_orders_service,
@@ -28,7 +32,7 @@ from app.services.purchase_order_service import (
 )
 
 
-router = APIRouter(
+router = APIRouter(dependencies=[Depends(require_warehouse)],
     prefix="/purchase-orders",
     tags=["Purchase Orders"],
 )
@@ -64,27 +68,12 @@ def create_purchase_order(
     )
 
 
-@router.get(
-    "",
-    response_model=ApiResponse[
-        list[PurchaseOrderSummaryResponse]
-    ],
-)
+@router.get("")
 def get_purchase_orders(
     po_repo: PurchaseOrderRepositoryDependency,
-) -> ApiResponse[
-    list[PurchaseOrderSummaryResponse]
-]:
-    purchase_orders = get_purchase_orders_service(
-        po_repo=po_repo
-    )
-
-    return ApiResponse(
-        message=(
-            "Purchase orders retrieved successfully"
-        ),
-        data=purchase_orders,
-    )
+    params: ListParams = Depends(list_params),
+) -> dict:
+    return get_purchase_orders_service(po_repo=po_repo, params=params)
 
 
 @router.get(
@@ -122,21 +111,35 @@ def receive_purchase_order(
     product_repo: ProductRepositoryDependency,
     batch_repo: BatchRepositoryDependency,
     stock_repo: StockRepositoryDependency,
-    current_user: User = Depends(require_admin),
-) -> ApiResponse[PurchaseOrderReceiveResponse]:
+    balance_repo: StockBalanceRepositoryDependency,
+    movement_repo: InventoryMovementRepositoryDependency,
+    operation_key: str = Header(..., alias="Idempotency-Key", min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$"),
+    current_user: User = Depends(
+        require_warehouse
+    ),
+) -> ApiResponse[
+    PurchaseOrderReceiveResponse
+]:
+
     result = receive_purchase_order_service(
         db=db,
         po_repo=po_repo,
         product_repo=product_repo,
         batch_repo=batch_repo,
         stock_repo=stock_repo,
+        balance_repo=balance_repo,
+        movement_repo=movement_repo,
         po_id=po_id,
         data=data,
         current_user=current_user,
+        operation_key=operation_key,
     )
 
     return ApiResponse(
-        message="Purchase order received successfully",
+        message=(
+            "Purchase order received "
+            "successfully"
+        ),
         data=result,
     )
 
@@ -164,3 +167,12 @@ def cancel_purchase_order(
         message="Purchase order cancelled successfully",
         data=result,
     )
+
+
+@router.post("/{po_id}/confirm", response_model=ApiResponse[PurchaseOrderActionResponse])
+def confirm_purchase_order(po_id: int, db: DatabaseSession,
+                           po_repo: PurchaseOrderRepositoryDependency,
+                           product_repo: ProductRepositoryDependency,
+                           current_user: User = Depends(require_admin)):
+    result = confirm_purchase_order_service(db, po_repo, product_repo, po_id, current_user)
+    return ApiResponse(message="Purchase order confirmed successfully", data=result)

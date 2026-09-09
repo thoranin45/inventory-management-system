@@ -1,5 +1,9 @@
+from app.core.dependencies import require_admin
+from app.models import User
+from app.core.dependencies import require_warehouse
 from fastapi import (
     APIRouter,
+    Depends,
     File,
     Query,
     UploadFile,
@@ -11,7 +15,9 @@ from app.core.dependencies import (
     CurrentUser,
     DatabaseSession,
     ProductRepositoryDependency,
+    StockBalanceRepositoryDependency,
 )
+from app.core.pagination import ListParams, list_params
 from app.schemas.product_schema import (
     ProductCreate,
     ProductResponse,
@@ -35,7 +41,7 @@ from app.services.product_service import (
 )
 
 
-router = APIRouter(
+router = APIRouter(dependencies=[Depends(require_warehouse)],
     prefix="/products",
     tags=["Products"],
 )
@@ -51,7 +57,7 @@ def create_product(
     db: DatabaseSession,
     product_repo: ProductRepositoryDependency,
     category_repo: CategoryRepositoryDependency,
-    current_user: CurrentUser,
+    current_user: User = Depends(require_admin),
 ) -> ApiResponse[ProductResponse]:
     product = create_product_service(
         db=db,
@@ -67,34 +73,15 @@ def create_product(
     )
 
 
-@router.get(
-    "",
-    response_model=ApiResponse[
-        PaginatedData[ProductResponse]
-    ],
-)
+@router.get("")
 def get_products(
     product_repo: ProductRepositoryDependency,
+    balance_repo: StockBalanceRepositoryDependency,
     current_user: CurrentUser,
-    page: int = Query(
-        default=1,
-        ge=1,
-    ),
-    size: int = Query(
-        default=20,
-        ge=1,
-        le=100,
-    ),
-) -> ApiResponse[PaginatedData[ProductResponse]]:
-    result = get_products_service(
-        product_repo=product_repo,
-        page=page,
-        size=size,
-    )
-
-    return ApiResponse(
-        message="Products retrieved successfully",
-        data=result,
+    params: ListParams = Depends(list_params),
+) -> dict:
+    return get_products_service(
+        product_repo=product_repo, balance_repo=balance_repo, params=params
     )
 
 
@@ -189,7 +176,7 @@ def update_product(
     db: DatabaseSession,
     product_repo: ProductRepositoryDependency,
     category_repo: CategoryRepositoryDependency,
-    current_user: CurrentUser,
+    current_user: User = Depends(require_admin),
 ) -> ApiResponse[ProductResponse]:
     product = update_product_service(
         db=db,
@@ -214,7 +201,7 @@ def delete_product(
     product_id: int,
     db: DatabaseSession,
     product_repo: ProductRepositoryDependency,
-    current_user: CurrentUser,
+    current_user: User = Depends(require_admin),
 ) -> ApiResponse[ProductResponse]:
     product = delete_product_service(
         db=db,
@@ -237,7 +224,7 @@ def restore_product(
     product_id: int,
     db: DatabaseSession,
     product_repo: ProductRepositoryDependency,
-    current_user: CurrentUser,
+    current_user: User = Depends(require_admin),
 ) -> ApiResponse[ProductResponse]:
     product = restore_product_service(
         db=db,
@@ -260,7 +247,7 @@ def upload_product_image(
     product_id: int,
     db: DatabaseSession,
     product_repo: ProductRepositoryDependency,
-    current_user: CurrentUser,
+    current_user: User = Depends(require_admin),
     file: UploadFile = File(...),
 ) -> ApiResponse[ProductResponse]:
     product = upload_product_image_service(

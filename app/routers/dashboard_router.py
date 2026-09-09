@@ -1,93 +1,163 @@
+from app.core.dependencies import require_warehouse
 from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
-from sqlalchemy import func
 
-from app.database import get_db
-from app.models import Product, StockTransaction, ProductBatch
-from datetime import date, timedelta
+from app.core.dependencies import (
+    DashboardRepositoryDependency,
+    DatabaseSession,
+    InventoryTransferRepositoryDependency,
+    PurchaseOrderRepositoryDependency,
+    SalesOrderRepositoryDependency,
+    StockBalanceRepositoryDependency,
+)
+from app.core.response import success_response
+from app.services.dashboard_service import (
+    get_dashboard_service,
+    get_expired_batches_service,
+    get_expiring_soon_service,
+    get_low_stock_products_service,
+    get_recent_transactions_service,
+    get_stock_summary_service,
+    get_top_stock_service,
+    get_total_stock_value_service,
+)
+from app.services.dashboard_summary_service import get_dashboard_summary_service
 
-router = APIRouter()
+
+router = APIRouter(dependencies=[Depends(require_warehouse)], )
 
 
 @router.get("/dashboard")
-def get_dashboard(db: Session = Depends(get_db)):
-    return {
-        "total_products": db.query(Product).count(),
-        "total_stock": db.query(func.coalesce(func.sum(Product.stock_qty), 0)).scalar(),
-        "total_stock_in": db.query(func.coalesce(func.sum(StockTransaction.quantity), 0))
-        .filter(StockTransaction.transaction_type == "IN")
-        .scalar(),
-        "total_stock_out": db.query(func.coalesce(func.sum(StockTransaction.quantity), 0))
-        .filter(StockTransaction.transaction_type == "OUT")
-        .scalar(),
-        "low_stock_products": db.query(Product).filter(Product.stock_qty <= 10).count(),
-    }
+def get_dashboard(
+    dashboard_repo: DashboardRepositoryDependency,
+):
+    result = get_dashboard_service(
+        dashboard_repo=dashboard_repo
+    )
+
+    return success_response(
+        "Dashboard retrieved successfully",
+        result,
+    )
+
+
+@router.get("/dashboard/summary")
+def get_dashboard_summary(
+    db: DatabaseSession,
+    balance_repo: StockBalanceRepositoryDependency,
+    sales_repo: SalesOrderRepositoryDependency,
+    po_repo: PurchaseOrderRepositoryDependency,
+    transfer_repo: InventoryTransferRepositoryDependency,
+) -> dict:
+    return get_dashboard_summary_service(
+        db, balance_repo, sales_repo, po_repo, transfer_repo
+    )
 
 
 @router.get("/dashboard/low-stock")
-def get_low_stock_products(db: Session = Depends(get_db)):
-    return db.query(Product).filter(Product.stock_qty <= 10).all()
+def get_low_stock_products(
+    dashboard_repo: DashboardRepositoryDependency,
+):
+    result = get_low_stock_products_service(
+        dashboard_repo=dashboard_repo
+    )
+
+    return success_response(
+        "Low stock products retrieved successfully",
+        {
+            "items": result,
+        },
+    )
 
 
 @router.get("/dashboard/recent-transactions")
-def get_dashboard_recent_transactions(db: Session = Depends(get_db)):
-    return db.query(StockTransaction).order_by(
-        StockTransaction.created_at.desc()
-    ).limit(10).all()
+def get_dashboard_recent_transactions(
+    dashboard_repo: DashboardRepositoryDependency,
+):
+    result = get_recent_transactions_service(
+        dashboard_repo=dashboard_repo
+    )
+
+    return success_response(
+        "Recent transactions retrieved successfully",
+        {
+            "items": result,
+        },
+    )
 
 
 @router.get("/dashboard/stock-summary")
-def get_stock_summary(db: Session = Depends(get_db)):
-    products = db.query(Product).all()
+def get_stock_summary(
+    dashboard_repo: DashboardRepositoryDependency,
+):
+    result = get_stock_summary_service(
+        dashboard_repo=dashboard_repo
+    )
 
-    return [
+    return success_response(
+        "Stock summary retrieved successfully",
         {
-            "product_id": product.id,
-            "sku": product.sku,
-            "barcode": product.barcode,
-            "product_name": product.product_name,
-            "price": float(product.price),
-            "stock_qty": product.stock_qty,
-            "stock_value": float(product.price) * product.stock_qty,
-        }
-        for product in products
-    ]
+            "items": result,
+        },
+    )
 
 
 @router.get("/dashboard/top-stock")
-def get_top_stock(db: Session = Depends(get_db)):
-    return db.query(Product).order_by(Product.stock_qty.desc()).limit(10).all()
+def get_top_stock(
+    dashboard_repo: DashboardRepositoryDependency,
+):
+    result = get_top_stock_service(
+        dashboard_repo=dashboard_repo
+    )
+
+    return success_response(
+        "Top stock products retrieved successfully",
+        {
+            "items": result,
+        },
+    )
 
 
 @router.get("/dashboard/stock-value")
-def get_total_stock_value(db: Session = Depends(get_db)):
-    products = db.query(Product).all()
-
-    total_value = sum(
-        float(product.price) * product.stock_qty
-        for product in products
+def get_total_stock_value(
+    dashboard_repo: DashboardRepositoryDependency,
+):
+    result = get_total_stock_value_service(
+        dashboard_repo=dashboard_repo
     )
 
-    return {"total_stock_value": total_value}
+    return success_response(
+        "Total stock value retrieved successfully",
+        result,
+    )
+
 
 @router.get("/dashboard/expiring-soon")
-def expiring_soon(db: Session = Depends(get_db)):
+def expiring_soon(
+    dashboard_repo: DashboardRepositoryDependency,
+):
+    result = get_expiring_soon_service(
+        dashboard_repo=dashboard_repo
+    )
 
-    target_date = date.today() + timedelta(days=90)
+    return success_response(
+        "Expiring batches retrieved successfully",
+        {
+            "items": result,
+        },
+    )
 
-    batches = db.query(ProductBatch).filter(
-        ProductBatch.expiry_date <= target_date
-    ).all()
-
-    return batches
 
 @router.get("/dashboard/expired")
-def expired_batches(db: Session = Depends(get_db)):
+def expired_batches(
+    dashboard_repo: DashboardRepositoryDependency,
+):
+    result = get_expired_batches_service(
+        dashboard_repo=dashboard_repo
+    )
 
-    today = date.today()
-
-    batches = db.query(ProductBatch).filter(
-        ProductBatch.expiry_date < today
-    ).all()
-
-    return batches
+    return success_response(
+        "Expired batches retrieved successfully",
+        {
+            "items": result,
+        },
+    )

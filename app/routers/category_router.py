@@ -1,3 +1,4 @@
+from app.core.dependencies import require_warehouse
 from fastapi import APIRouter, Depends, status
 
 from app.core.dependencies import (
@@ -5,6 +6,7 @@ from app.core.dependencies import (
     DatabaseSession,
     require_admin,
 )
+from app.core.pagination import ListParams, list_params
 from app.models import User
 from app.schemas.category_schema import (
     CategoryCreate,
@@ -21,7 +23,7 @@ from app.services.category_service import (
 )
 
 
-router = APIRouter(
+router = APIRouter(dependencies=[Depends(require_warehouse)],
     prefix="/categories",
     tags=["Categories"],
 )
@@ -50,21 +52,12 @@ def create_category(
     )
 
 
-@router.get(
-    "",
-    response_model=ApiResponse[list[CategoryResponse]],
-)
+@router.get("")
 def get_categories(
     category_repo: CategoryRepositoryDependency,
-) -> ApiResponse[list[CategoryResponse]]:
-    categories = get_categories_service(
-        category_repo=category_repo,
-    )
-
-    return ApiResponse(
-        message="Categories retrieved successfully",
-        data=categories,
-    )
+    params: ListParams = Depends(list_params),
+) -> dict:
+    return get_categories_service(category_repo=category_repo, params=params)
 
 
 @router.get(

@@ -11,6 +11,12 @@ class SupplierRepository(BaseRepository):
     def get_all(self):
         return self.db.query(Supplier).all()
 
+    def list_query(self, *, search: str | None = None):
+        query = self.db.query(Supplier)
+        if search:
+            query = query.filter(Supplier.supplier_name.ilike(f"%{search}%"))
+        return query
+
     def get_by_id(self, supplier_id: int):
         return self.db.query(Supplier).filter(
             Supplier.id == supplier_id

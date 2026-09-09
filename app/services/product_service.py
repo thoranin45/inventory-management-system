@@ -1,10 +1,16 @@
+import io
 import math
 import os
 import shutil
 from typing import Any
+from uuid import uuid4
 
 from fastapi import HTTPException, UploadFile, status
+from PIL import Image, UnidentifiedImageError
 from sqlalchemy.orm import Session
+
+from app.core.config import settings
+from app.core.safe_paths import resolve_within
 
 from app.core.exceptions import (
     CategoryNotFoundException,
@@ -67,6 +73,8 @@ def create_product_service(
         price=data.price,
         stock_qty=data.stock_qty,
         category_id=data.category_id,
+        track_batch=data.track_batch,
+        track_expiry=data.track_expiry,
         is_active=True,
     )
 
@@ -108,34 +116,75 @@ def get_product_service(
     return product
 
 
+_PRODUCT_SORTS = {
+    "id": Product.id,
+    "product_name": Product.product_name,
+    "sku": Product.sku,
+    "stock_qty": Product.stock_qty,
+    "created_at": Product.created_at,
+}
+
+
+def enrich_products(balance_repo, products, today, near_expiry_days: int) -> list[dict]:
+    """Phase 8: product rows + Phase 7 derived inventory categories. One grouped query.
+
+    Product.stock_qty keeps its Phase 2 meaning (total owned) and is echoed as
+    owned_quantity; the other quantities are derived operational views.
+    """
+    from decimal import Decimal
+
+    categories = balance_repo.inventory_categories_by_product(
+        today, near_expiry_days, [p.id for p in products]
+    )
+    rows = []
+    for p in products:
+        cat = categories.get(p.id, {})
+        rows.append({
+            "id": p.id,
+            "sku": p.sku,
+            "barcode": p.barcode,
+            "product_name": p.product_name,
+            "price": p.price,
+            "stock_qty": p.stock_qty,
+            "owned_quantity": p.stock_qty,
+            "operational_available_quantity": cat.get("operational_available_quantity", Decimal("0")),
+            "reserved_quantity": cat.get("reserved_quantity", Decimal("0")),
+            "expired_quantity": cat.get("expired_quantity", Decimal("0")),
+            "near_expiry_quantity": cat.get("near_expiry_quantity", Decimal("0")),
+            "transit_quantity": cat.get("transit_quantity", Decimal("0")),
+            "minimum_stock": p.minimum_stock,
+            "safety_stock": p.safety_stock,
+            "maximum_stock": p.maximum_stock,
+            "category_id": p.category_id,
+            "image_url": p.image_url,
+            "is_active": p.is_active,
+            "created_at": p.created_at,
+            "track_batch": p.track_batch,
+            "track_expiry": p.track_expiry,
+            "as_of_date": today,
+        })
+    return rows
+
+
 def get_products_service(
     product_repo: ProductRepository,
-    page: int,
-    size: int,
-) -> PaginatedData[ProductResponse]:
-    total, products = product_repo.get_active_paginated(
-        page=page,
-        size=size,
-    )
+    balance_repo,
+    params,
+) -> dict:
+    from app.core.batch_eligibility import business_today
+    from app.core.config import settings
+    from app.core.pagination import paginate, paginated_body, resolve_ordering
 
-    total_pages = (
-        math.ceil(total / size)
-        if total > 0
-        else 0
+    ordering = resolve_ordering(params, _PRODUCT_SORTS, "id", Product.id)
+    items, total = paginate(
+        product_repo.list_query(search=params.search, status=params.status),
+        params,
+        ordering,
     )
-
-    return PaginatedData(
-        items=[
-            ProductResponse.model_validate(product)
-            for product in products
-        ],
-        pagination=PaginationMeta(
-            page=page,
-            page_size=size,
-            total_items=total,
-            total_pages=total_pages,
-        ),
+    rows = enrich_products(
+        balance_repo, items, business_today(), settings.near_expiry_days
     )
+    return paginated_body(rows, total, params, "Products retrieved successfully")
 
 def update_product_service(
     db: Session,
@@ -149,7 +198,7 @@ def update_product_service(
     Update an existing product.
     """
 
-    product = product_repo.get_by_id(product_id)
+    product = product_repo.get_by_id_for_update(product_id)
 
     if product is None:
         raise ProductNotFoundException()
@@ -195,6 +244,30 @@ def update_product_service(
         f"category_id={product.category_id}"
     )
 
+    new_track_batch = (
+        data.track_batch
+        if data.track_batch is not None
+        else product.track_batch
+    )
+
+    new_track_expiry = (
+        data.track_expiry
+        if data.track_expiry is not None
+        else product.track_expiry
+    )
+
+    if new_track_expiry and not new_track_batch:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "track_expiry requires "
+                "track_batch=True"
+            ),
+        )
+
+    if new_track_batch != product.track_batch and (product.stock_qty or product_repo.has_inventory_evidence(product.id)):
+        raise HTTPException(409, "Tracking mode cannot change after inventory or allocation history exists")
+    
     update_data = data.model_dump(
         exclude_unset=True
     )
@@ -366,18 +439,10 @@ def upload_product_image_service(
             detail="Filename is required",
         )
 
-    allowed_extensions = {
-        "jpg",
-        "jpeg",
-        "png",
-        "webp",
-    }
-
-    allowed_content_types = {
-        "image/jpeg",
-        "image/png",
-        "image/webp",
-    }
+    allowed_extensions = {"jpg", "jpeg", "png", "webp"}
+    allowed_content_types = {"image/jpeg", "image/png", "image/webp"}
+    # Detected image format -> the single canonical stored extension.
+    _format_to_ext = {"jpeg": "jpg", "png": "png", "webp": "webp"}
 
     if "." not in file.filename:
         raise HTTPException(
@@ -385,64 +450,72 @@ def upload_product_image_service(
             detail="File extension is required",
         )
 
-    extension = (
-        file.filename
-        .rsplit(".", 1)[-1]
-        .lower()
-    )
-
-    if extension not in allowed_extensions:
+    declared_extension = file.filename.rsplit(".", 1)[-1].lower()
+    if declared_extension not in allowed_extensions:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "Only jpg, jpeg, png, "
-                "and webp files are allowed"
-            ),
+            detail="Only jpg, jpeg, png, and webp files are allowed",
         )
 
-    if (
-        file.content_type is not None
-        and file.content_type not in allowed_content_types
-    ):
+    # Phase 9: Content-Type must be present and allowed (no longer optional).
+    if file.content_type not in allowed_content_types:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid image content type",
+            detail="A supported image Content-Type is required",
         )
 
-    upload_directory = os.path.join(
-        "uploads",
-        "products",
-    )
+    # Phase 9: enforce a hard size cap by reading a bounded amount.
+    max_bytes = settings.max_upload_bytes
+    raw = file.file.read(max_bytes + 1)
+    if not raw:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded file is empty",
+        )
+    if len(raw) > max_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Image exceeds the {max_bytes} byte limit",
+        )
 
-    os.makedirs(
-        upload_directory,
-        exist_ok=True,
-    )
+    # Phase 9: verify the bytes really are a decodable image of an allowed
+    # type. ``verify()`` consumes the stream, so re-open to read the format.
+    try:
+        with Image.open(io.BytesIO(raw)) as probe:
+            probe.verify()
+        with Image.open(io.BytesIO(raw)) as probe:
+            detected_format = (probe.format or "").lower()
+    except (UnidentifiedImageError, OSError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File is not a valid image",
+        )
 
-    filename = (
-        f"product_{product_id}.{extension}"
-    )
+    if detected_format not in _format_to_ext:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only JPEG, PNG and WEBP images are supported",
+        )
 
-    file_path = os.path.join(
-        upload_directory,
-        filename,
-    )
+    extension = _format_to_ext[detected_format]
+
+    upload_directory = os.path.join("uploads", "products")
+    os.makedirs(upload_directory, exist_ok=True)
+
+    filename = f"product_{product_id}.{extension}"
+    # Server-controlled name; containment check is defence in depth.
+    file_path = str(resolve_within(upload_directory, filename))
+    temp_path = f"{file_path}.{uuid4().hex}.part"
 
     previous_image_url = product.image_url
 
     try:
-        with open(
-            file_path,
-            "wb",
-        ) as buffer:
-            shutil.copyfileobj(
-                file.file,
-                buffer,
-            )
+        with open(temp_path, "wb") as buffer:
+            buffer.write(raw)
+        # Atomic swap: a concurrent upload never sees a half-written file.
+        os.replace(temp_path, file_path)
 
-        product.image_url = (
-            f"/uploads/products/{filename}"
-        )
+        product.image_url = f"/uploads/products/{filename}"
 
         with UnitOfWork(db) as uow:
             product_repo.update(product)
@@ -463,6 +536,20 @@ def upload_product_image_service(
 
         uow.refresh(product)
 
+        # Remove stale variants left by a previous upload with a different
+        # extension (e.g. product_5.png when the new image is product_5.jpg).
+        for other_ext in allowed_extensions:
+            if other_ext == extension:
+                continue
+            stale = os.path.join(
+                upload_directory, f"product_{product_id}.{other_ext}"
+            )
+            if os.path.exists(stale):
+                try:
+                    os.remove(stale)
+                except OSError:
+                    pass
+
         return product
 
     except HTTPException:
@@ -471,13 +558,15 @@ def upload_product_image_service(
     except Exception as exc:
         product.image_url = previous_image_url
 
-        if os.path.exists(file_path):
-            os.remove(file_path)
+        for path in (temp_path, file_path):
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
 
         raise HTTPException(
-            status_code=(
-                status.HTTP_500_INTERNAL_SERVER_ERROR
-            ),
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to upload product image",
         ) from exc
 

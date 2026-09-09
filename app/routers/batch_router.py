@@ -3,9 +3,12 @@ from fastapi import APIRouter, Depends, status
 from app.core.dependencies import (
     BatchRepositoryDependency,
     DatabaseSession,
+    StockBalanceRepositoryDependency,
     StockRepositoryDependency,
+    InventoryMovementRepositoryDependency,
     require_warehouse,
 )
+from app.core.pagination import ListParams, list_params
 from app.models import User
 from app.schemas.batch_schema import (
     BatchCreate,
@@ -20,7 +23,7 @@ from app.services.batch_service import (
 )
 
 
-router = APIRouter(
+router = APIRouter(dependencies=[Depends(require_warehouse)],
     prefix="/batches",
     tags=["Batches"],
 )
@@ -36,13 +39,18 @@ def create_batch(
     db: DatabaseSession,
     stock_repo: StockRepositoryDependency,
     batch_repo: BatchRepositoryDependency,
+    movement_repo: InventoryMovementRepositoryDependency,
+    balance_repo: StockBalanceRepositoryDependency,
     current_user: User = Depends(require_warehouse),
 ) -> ApiResponse[BatchCreateResponse]:
     result = create_batch_service(
         db=db,
         stock_repo=stock_repo,
         batch_repo=batch_repo,
+        balance_repo=balance_repo,
+        movement_repo=movement_repo,
         data=data,
+        created_by_user_id=current_user.id,
     )
 
     return ApiResponse(
@@ -51,20 +59,14 @@ def create_batch(
     )
 
 
-@router.get(
-    "",
-    response_model=ApiResponse[list[BatchResponse]],
-)
+@router.get("")
 def get_batches(
     batch_repo: BatchRepositoryDependency,
-) -> ApiResponse[list[BatchResponse]]:
-    batches = get_batches_service(
-        batch_repo=batch_repo,
-    )
-
-    return ApiResponse(
-        message="Batches retrieved successfully",
-        data=batches,
+    balance_repo: StockBalanceRepositoryDependency,
+    params: ListParams = Depends(list_params),
+) -> dict:
+    return get_batches_service(
+        batch_repo=batch_repo, balance_repo=balance_repo, params=params
     )
 
 

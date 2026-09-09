@@ -11,7 +11,13 @@ from pydantic import (
 
 class PurchaseOrderItemCreate(BaseModel):
     product_id: int = Field(..., gt=0)
-    quantity: int = Field(..., gt=0)
+    quantity: Decimal = Field(
+        ...,
+        gt=0,
+        max_digits=18,
+        decimal_places=3,
+        allow_inf_nan=False,
+    )
     unit_price: Decimal = Field(..., ge=0)
 
 
@@ -39,19 +45,32 @@ class PurchaseOrderCreate(BaseModel):
 
 
 class ReceivePOItem(BaseModel):
-    product_id: int = Field(..., gt=0)
-
-    lot_no: str = Field(
+    product_id: int = Field(
         ...,
+        gt=0,
+    )
+
+    quantity: Decimal = Field(
+        ...,
+        gt=0,
+        max_digits=18,
+        decimal_places=3,
+        allow_inf_nan=False,
+    )
+
+    lot_no: str | None = Field(
+        default=None,
         min_length=1,
         max_length=100,
     )
 
-    mfg_date: date
-    expiry_date: date
+    mfg_date: date | None = None
+    expiry_date: date | None = None
 
 
 class ReceivePO(BaseModel):
+    warehouse_id: int | None = Field(default=None, gt=0)
+    location_id: int | None = Field(default=None, gt=0)
     items: list[ReceivePOItem] = Field(
         ...,
         min_length=1,
@@ -69,16 +88,6 @@ class ReceivePO(BaseModel):
                 "Duplicate product_id is not allowed"
             )
 
-        lot_numbers = [
-            item.lot_no.strip().lower()
-            for item in self.items
-        ]
-
-        if len(lot_numbers) != len(set(lot_numbers)):
-            raise ValueError(
-                "Duplicate lot_no is not allowed"
-            )
-
         return self
 
 
@@ -86,7 +95,9 @@ class PurchaseOrderItemResponse(BaseModel):
     id: int
     po_id: int
     product_id: int
-    quantity: int
+    quantity: Decimal
+    received_quantity: Decimal
+    remaining_quantity: Decimal
     unit_price: Decimal
     total_price: Decimal
 
@@ -124,8 +135,17 @@ class ReceivedBatchResponse(BaseModel):
     batch_id: int
     product_id: int
     lot_no: str
-    received_quantity: int
-    current_stock: int
+    received_quantity: Decimal
+    current_stock: Decimal
+
+
+class ReceivedItemResponse(BaseModel):
+    po_item_id: int
+    product_id: int
+    batch_id: int | None
+    stock_balance_id: int
+    received_quantity: Decimal
+    current_stock: Decimal
 
 
 class PurchaseOrderReceiveResponse(BaseModel):
@@ -133,3 +153,6 @@ class PurchaseOrderReceiveResponse(BaseModel):
     po_number: str
     status: str
     received_batches: list[ReceivedBatchResponse]
+    received_items: list[ReceivedItemResponse]
+    receipt_id: int
+    receipt_number: str

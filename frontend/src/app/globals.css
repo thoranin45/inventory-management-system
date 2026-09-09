@@ -1,0 +1,654 @@
+@import "tailwindcss";
+
+/* ============================================================
+   Warehouse Console — Design V1 (ported verbatim from
+   frontend-prototype/styles.css). Do not reinterpret.
+   Single family: Sarabun. Plain zero. Tabular numerals.
+   ============================================================ */
+
+/* Dark variant: an explicit data-theme wins; "system" (no attribute) is
+   handled by the prefers-color-scheme media query on the tokens below. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+:root {
+  --bg: #f4f5f6;
+  --surface: #ffffff;
+  --surface-raised: #ffffff;
+  --surface-sunken: #eceeef;
+  --border: #e9ebee;
+  --border-strong: #cdd0d4;
+  --foreground: #16181b;
+  --muted: #59606a;
+  --faint: #8a9099;
+  --accent: #e4572e;
+  --accent-fg: #ffffff;
+  --accent-subtle: #fbebe4;
+  --accent-line: #efc7b6;
+  --primary: #16181b;
+  --primary-fg: #ffffff;
+  --success: #1f8a54;
+  --success-subtle: #e4f2ea;
+  --warning: #b0770f;
+  --warning-subtle: #faefd9;
+  --danger: #c23b3b;
+  --danger-subtle: #f9e8e8;
+  --info: #2f6db8;
+  --info-subtle: #e7effa;
+  --focus: var(--accent);
+
+  --shadow-sm: 0 1px 2px rgba(18, 20, 24, 0.05), 0 1px 2px rgba(18, 20, 24, 0.03);
+  --shadow-md: 0 4px 12px -2px rgba(18, 20, 24, 0.1), 0 2px 6px -2px rgba(18, 20, 24, 0.06);
+  --shadow-lg: 0 24px 48px -12px rgba(18, 20, 24, 0.22), 0 8px 20px -8px rgba(18, 20, 24, 0.12);
+  --shadow-panel: 0 1px 3px rgba(18, 20, 24, 0.05), 0 12px 28px -14px rgba(18, 20, 24, 0.12);
+
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 14px;
+  --r-xl: 16px;
+  --r-full: 999px;
+
+  --frame-pad: 6px;
+  --frame-gap: 8px;
+
+  --dur-1: 120ms;
+  --dur-2: 160ms;
+  --dur-3: 220ms;
+  --ease: cubic-bezier(0.2, 0.6, 0.2, 1);
+
+  /* Sarabun is self-hosted by next/font and exposed as --font-sarabun. */
+  --font-display: var(--font-sarabun), "Sarabun", "Segoe UI", system-ui, -apple-system, "Noto Sans Thai", sans-serif;
+  --font-body: var(--font-display);
+
+  --sidebar-w: 240px;
+  --topbar-h: 52px;
+  --content-max: 1200px;
+  --drawer-w: 420px;
+
+  color-scheme: light;
+}
+
+/* system dark (no explicit choice) */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0b0c0e;
+    --surface: #131519;
+    --surface-raised: #1a1d22;
+    --surface-sunken: #0e0f12;
+    --border: #24272d;
+    --border-strong: #363a41;
+    --foreground: #ecedef;
+    --muted: #9aa1a9;
+    --faint: #666d76;
+    --accent: #f26b41;
+    --accent-fg: #1b0e08;
+    --accent-subtle: #291611;
+    --accent-line: #4a2a1e;
+    --primary: #ecedef;
+    --primary-fg: #131519;
+    --success: #40ba7d;
+    --success-subtle: #122619;
+    --warning: #dba544;
+    --warning-subtle: #29200f;
+    --danger: #e56464;
+    --danger-subtle: #2c1515;
+    --info: #5f9be0;
+    --info-subtle: #111f2c;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.45);
+    --shadow-md: 0 6px 16px -4px rgba(0, 0, 0, 0.55), 0 2px 6px -2px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 28px 56px -16px rgba(0, 0, 0, 0.7), 0 10px 24px -10px rgba(0, 0, 0, 0.5);
+    --shadow-panel: 0 1px 3px rgba(0, 0, 0, 0.45), 0 14px 30px -16px rgba(0, 0, 0, 0.6);
+    color-scheme: dark;
+  }
+}
+
+/* explicit dark choice (next-themes stamps data-theme="dark") */
+:root[data-theme="dark"] {
+  --bg: #0b0c0e;
+  --surface: #131519;
+  --surface-raised: #1a1d22;
+  --surface-sunken: #0e0f12;
+  --border: #24272d;
+  --border-strong: #363a41;
+  --foreground: #ecedef;
+  --muted: #9aa1a9;
+  --faint: #666d76;
+  --accent: #f26b41;
+  --accent-fg: #1b0e08;
+  --accent-subtle: #291611;
+  --accent-line: #4a2a1e;
+  --primary: #ecedef;
+  --primary-fg: #131519;
+  --success: #40ba7d;
+  --success-subtle: #122619;
+  --warning: #dba544;
+  --warning-subtle: #29200f;
+  --danger: #e56464;
+  --danger-subtle: #2c1515;
+  --info: #5f9be0;
+  --info-subtle: #111f2c;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --shadow-md: 0 6px 16px -4px rgba(0, 0, 0, 0.55), 0 2px 6px -2px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 28px 56px -16px rgba(0, 0, 0, 0.7), 0 10px 24px -10px rgba(0, 0, 0, 0.5);
+  --shadow-panel: 0 1px 3px rgba(0, 0, 0, 0.45), 0 14px 30px -16px rgba(0, 0, 0, 0.6);
+  color-scheme: dark;
+}
+
+/* expose the tokens to Tailwind's utility layer (bg-surface, text-muted, …) */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-border-token: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-subtle: var(--accent-subtle);
+  --color-primary: var(--primary);
+  --color-primary-fg: var(--primary-fg);
+  --color-success: var(--success);
+  --color-success-subtle: var(--success-subtle);
+  --color-warning: var(--warning);
+  --color-warning-subtle: var(--warning-subtle);
+  --color-danger: var(--danger);
+  --color-danger-subtle: var(--danger-subtle);
+  --color-info: var(--info);
+  --color-info-subtle: var(--info-subtle);
+  --radius-xs: var(--r-xs);
+  --radius-sm: var(--r-sm);
+  --radius-md: var(--r-md);
+  --radius-lg: var(--r-lg);
+  --radius-xl: var(--r-xl);
+  --font-sans: var(--font-body);
+}
+
+/* ---------- base (in @layer base so Tailwind utilities can override) ---------- */
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+    min-width: 0;
+  }
+  html,
+  body {
+    height: 100%;
+  }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--foreground);
+    font-family: var(--font-body);
+    font-size: 14px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    /* plain, lining zero everywhere; quantities add tnum below */
+    font-feature-settings: "lnum" 1, "zero" 0;
+  }
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    line-height: 1.3;
+    margin: 0;
+    text-wrap: balance;
+  }
+  a,
+  a:visited {
+    color: inherit;
+    text-decoration: none;
+  }
+  button {
+    font: inherit;
+    color: inherit;
+  }
+  input,
+  select {
+    font: inherit;
+  }
+  ::selection {
+    background: var(--accent-subtle);
+    color: var(--accent);
+  }
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+    border-radius: var(--r-xs);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* numeric contexts: tabular + lining ON, special zero OFF (plain 0) */
+.tnum,
+.qty,
+.money,
+.pct,
+.mono {
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: "tnum" 1, "lnum" 1, "zero" 0;
+}
+
+/* ---------- utility classes ported from the prototype ---------- */
+.wc-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-panel);
+}
+.wc-section-label {
+  font-family: var(--font-display);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.wc-scrollbar-none {
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.wc-scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* ---------- floating app shell (ported verbatim from the prototype) ---------- */
+.wc-app {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) 1fr;
+  grid-template-rows: var(--topbar-h) 1fr;
+  height: 100vh;
+  height: 100dvh;
+  gap: var(--frame-gap);
+  padding: var(--frame-pad);
+  background: var(--bg);
+}
+.wc-topbar {
+  grid-column: 1 / 3;
+  grid-row: 1;
+}
+.wc-sidebar {
+  grid-column: 1;
+  grid-row: 2;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-sm);
+  overflow-y: auto;
+  z-index: 25;
+}
+.wc-content {
+  grid-column: 2;
+  grid-row: 2;
+  overflow-y: auto;
+  scroll-behavior: smooth;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-sm);
+  padding: 18px 20px;
+}
+
+/* tablet / iPad — sidebar becomes a slide-over; topbar + content stay panels */
+@media (max-width: 1023.98px) {
+  .wc-app {
+    grid-template-columns: 0 1fr;
+    column-gap: 0;
+    row-gap: var(--frame-gap);
+  }
+  .wc-sidebar-slot {
+    display: none;
+  }
+}
+
+/* phone — drop the floating frame, edge-to-edge, bottom nav clearance */
+@media (max-width: 767.98px) {
+  :root {
+    --topbar-h: calc(50px + env(safe-area-inset-top));
+  }
+  .wc-app {
+    grid-template-rows: var(--topbar-h) 1fr;
+    padding: 0;
+    gap: 0;
+  }
+  .wc-content {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    padding: 12px 12px calc(64px + env(safe-area-inset-bottom));
+  }
+}
+
+/* the slide-over sidebar (Radix Dialog content) */
+.wc-sidebar-drawer {
+  position: fixed;
+  left: var(--frame-pad);
+  top: calc(var(--frame-pad) + var(--topbar-h) + var(--frame-gap));
+  bottom: var(--frame-pad);
+  width: 264px;
+  z-index: 49;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-lg);
+  overflow-y: auto;
+  transition: transform var(--dur-3) var(--ease);
+}
+.wc-sidebar-drawer[data-state="closed"] {
+  transform: translateX(calc(-100% - var(--frame-pad) - 6px));
+}
+@media (max-width: 767.98px) {
+  .wc-sidebar-drawer {
+    left: 0;
+    top: var(--topbar-h);
+    bottom: 0;
+    border-radius: 0;
+    width: 264px;
+  }
+}
+.wc-sidebar-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 48;
+  background: rgba(10, 11, 13, 0.4);
+}
+
+/* ---------- dashboard composition (ported from the approved prototype) ---------- */
+.wc-dash {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.wc-kpi-zone {
+  display: grid;
+  grid-template-columns: minmax(260px, 300px) 1fr;
+  gap: 16px;
+  align-items: stretch;
+}
+.wc-kpi-rest {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+}
+.wc-work-zone {
+  display: grid;
+  grid-template-columns: 1.6fr 1fr;
+  gap: 16px;
+  align-items: stretch;
+}
+.wc-lower-zone {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+.wc-lower-zone > .wc-activity {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+}
+.wc-lower-zone > .wc-condition {
+  grid-column: 2;
+  grid-row: 1;
+}
+.wc-lower-zone > .wc-summary {
+  grid-column: 2;
+  grid-row: 2;
+}
+@media (max-width: 1200px) {
+  .wc-kpi-zone {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 1120px) {
+  .wc-work-zone,
+  .wc-lower-zone {
+    grid-template-columns: 1fr;
+  }
+  .wc-lower-zone > .wc-activity,
+  .wc-lower-zone > .wc-condition,
+  .wc-lower-zone > .wc-summary {
+    grid-column: 1;
+    grid-row: auto;
+  }
+}
+@media (min-width: 768px) and (max-width: 1120px) {
+  .wc-kpi-rest {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+@media (max-width: 1023.98px) {
+  .wc-dash {
+    gap: 16px;
+  }
+}
+@media (max-width: 767.98px) {
+  .wc-dash {
+    gap: 14px;
+  }
+  .wc-kpi-rest {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* ---------- picking / packing work console (ported from the approved prototype) ---------- */
+.wc-work-layout {
+  display: grid;
+  grid-template-columns: 1fr 360px;
+  gap: 16px;
+  align-items: start;
+}
+.wc-work-side {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.wc-work-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 14px 16px;
+}
+
+/* success / miss flash on a line — one bg pulse, no layout shift, no scroll jump */
+.wc-line-hit {
+  animation: wc-line-hit 600ms var(--ease);
+}
+.wc-line-miss {
+  animation: wc-line-miss 520ms var(--ease);
+}
+@keyframes wc-line-hit {
+  0% {
+    background: var(--success-subtle);
+    border-color: var(--success);
+  }
+  100% {
+    background: var(--surface);
+  }
+}
+@keyframes wc-line-miss {
+  0%,
+  60% {
+    background: var(--danger-subtle);
+    border-color: var(--danger);
+  }
+  100% {
+    background: var(--surface);
+  }
+}
+
+@media (min-width: 1024px) and (max-width: 1199.98px) {
+  .wc-work-layout {
+    grid-template-columns: 1fr 320px;
+  }
+}
+
+/* iPad portrait / phone — scan area is a controlled fixed bottom dock */
+@media (max-width: 1023.98px) {
+  .wc-work-layout {
+    display: block;
+  }
+  .wc-work-main {
+    padding-bottom: 300px; /* fallback; WorkConsoleLayout measures the exact value */
+  }
+  .wc-work-side {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    top: auto;
+    z-index: 44;
+    gap: 8px;
+    background: var(--surface);
+    border-top: 1px solid var(--border-strong);
+    box-shadow: 0 -10px 28px -14px rgba(16, 24, 40, 0.28);
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+    max-height: 25dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    transition: transform var(--dur-2) var(--ease);
+  }
+  /* trim the verbose desktop panel to essentials inside the dock */
+  .wc-work-side .wc-scan-panel {
+    border: 0;
+    border-radius: 0;
+    padding: 0;
+    gap: 6px;
+    background: transparent;
+  }
+  .wc-work-side .wc-scan-focuslock,
+  .wc-work-side .wc-scan-sound,
+  .wc-work-side .wc-scan-hint,
+  .wc-work-side .wc-console-hint,
+  .wc-work-side .wc-preview-panel {
+    display: none;
+  }
+  .wc-work-side .wc-scan-msg {
+    min-height: 0;
+    font-size: 12px;
+    line-height: 1.35;
+    max-height: 2.8em;
+    overflow: hidden;
+  }
+  .wc-work-side .wc-scan-input {
+    height: 46px;
+    font-size: 16px; /* iOS: ≥16px avoids the focus zoom */
+  }
+
+  /* "More" open => the one bottom surface is the nav; the dock drops away */
+  .wc-app[data-nav-open] .wc-work-side {
+    transform: translateY(115%);
+    pointer-events: none;
+  }
+
+  /* software keyboard: dock rides just above it, chrome collapses to the input */
+  html[data-kb] .wc-work-side {
+    bottom: var(--wc-kb-inset, 0px);
+    max-height: 46dvh;
+  }
+  html[data-kb] .wc-work-side .wc-scan-status,
+  html[data-kb] .wc-work-side .wc-scan-msg {
+    display: none;
+  }
+  html[data-kb] .wc-bottom-nav {
+    transform: translateY(120%);
+  }
+}
+
+/* phone — the dock sits above the fixed bottom nav */
+@media (max-width: 767.98px) {
+  .wc-work-side {
+    bottom: calc(54px + env(safe-area-inset-bottom));
+  }
+  html[data-kb] .wc-work-side {
+    bottom: var(--wc-kb-inset, 0px);
+  }
+  .wc-preview-panel {
+    display: none;
+  }
+}
+
+/* ---------- PO receiving console ----------
+   Deliberately NOT the 25dvh scan dock: receiving needs form space, so the
+   fields stay in normal page flow and only a slim action bar is fixed on
+   small screens. */
+.wc-receive-layout {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 16px;
+  align-items: start;
+}
+.wc-receive-side {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.wc-receive-dock {
+  display: none;
+}
+@media (min-width: 1024px) and (max-width: 1199.98px) {
+  .wc-receive-layout {
+    grid-template-columns: 1fr 300px;
+  }
+}
+@media (max-width: 1023.98px) {
+  .wc-receive-layout {
+    display: block;
+  }
+  .wc-receive-main {
+    /* clear the slim fixed action bar (+ bottom nav on phones) */
+    padding-bottom: 84px;
+  }
+  .wc-receive-side {
+    position: static;
+    margin-top: 14px;
+  }
+  .wc-receive-dock {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 44;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    background: var(--surface);
+    border-top: 1px solid var(--border-strong);
+    box-shadow: 0 -10px 28px -14px rgba(16, 24, 40, 0.28);
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+  }
+  /* "More" open → hide the action bar (one bottom surface at a time) */
+  .wc-app[data-nav-open] .wc-receive-dock {
+    transform: translateY(120%);
+  }
+}
+@media (max-width: 767.98px) {
+  .wc-receive-main {
+    padding-bottom: calc(84px + 54px + env(safe-area-inset-bottom));
+  }
+  .wc-receive-dock {
+    bottom: calc(54px + env(safe-area-inset-bottom));
+  }
+}

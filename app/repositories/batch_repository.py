@@ -1,3 +1,4 @@
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.models import ProductBatch
@@ -12,11 +13,13 @@ class BatchRepository:
 
     def get_by_lot_no(
         self,
+        product_id: int,
         lot_no: str,
     ) -> ProductBatch | None:
         return (
             self.db.query(ProductBatch)
             .filter(
+                ProductBatch.product_id == product_id,
                 ProductBatch.lot_no == lot_no
             )
             .first()
@@ -43,6 +46,14 @@ class BatchRepository:
             .all()
         )
 
+    def list_query(self, *, search: str | None = None, product_id: int | None = None):
+        query = self.db.query(ProductBatch)
+        if product_id is not None:
+            query = query.filter(ProductBatch.product_id == product_id)
+        if search:
+            query = query.filter(ProductBatch.lot_no.ilike(f"%{search}%"))
+        return query
+
     def get_expiring(
         self,
     ) -> list[ProductBatch]:
@@ -56,4 +67,43 @@ class BatchRepository:
                 ProductBatch.id.asc(),
             )
             .all()
+        )
+
+    def create_if_lot_not_exists(
+        self,
+        batch: ProductBatch,
+    ) -> ProductBatch | None:
+        statement = (
+            insert(ProductBatch)
+            .values(
+                product_id=batch.product_id,
+                lot_no=batch.lot_no,
+                mfg_date=batch.mfg_date,
+                expiry_date=batch.expiry_date,
+                quantity=batch.quantity,
+            )
+            .on_conflict_do_nothing(
+                index_elements=[
+                    ProductBatch.product_id,
+                    ProductBatch.lot_no,
+                ]
+            )
+            .returning(
+                ProductBatch.id
+            )
+        )
+
+        batch_id = self.db.execute(
+            statement
+        ).scalar_one_or_none()
+
+        if batch_id is None:
+            return None
+
+        return (
+            self.db.query(ProductBatch)
+            .filter(
+                ProductBatch.id == batch_id
+            )
+            .first()
         )

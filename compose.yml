@@ -1,0 +1,116 @@
+name: inventory-system
+
+services:
+  db:
+    image: postgres:18
+    container_name: inventory-postgres
+    restart: unless-stopped
+
+    env_file:
+      - .env.db
+
+    ports:
+    - "5433:5432"
+
+    volumes:
+      - inventory_postgres_data:/var/lib/postgresql
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U postgres -d inventory_db"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    container_name: inventory-api
+    restart: unless-stopped
+
+    env_file:
+      - .env.api
+
+    expose:
+      - "8081"
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/health', timeout=3)"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+    volumes:
+      - inventory_uploads:/app/uploads
+      - inventory_exports:/app/exports
+      - inventory_logs:/app/logs
+      - inventory_invoices:/app/app/static/invoices
+
+    depends_on:
+      db:
+        condition: service_healthy
+
+    command: >
+      sh -c "
+      alembic upgrade head &&
+      uvicorn app.main:app
+      --host 0.0.0.0
+      --port 8081
+      "
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: inventory-nginx
+    restart: unless-stopped
+
+    ports:
+      - "80:80"
+
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+
+    depends_on:
+      api:
+        condition: service_healthy
+        
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "-q",
+          "--spider",
+          "http://127.0.0.1/"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  inventory_postgres_data:
+    name: inventory-postgres-data
+
+  inventory_uploads:
+    name: inventory-uploads
+
+  inventory_exports:
+    name: inventory-exports
+
+  inventory_logs:
+    name: inventory-logs
+
+  inventory_invoices:
+    name: inventory-invoices  

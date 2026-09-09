@@ -3,7 +3,7 @@ import os
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
-from app.core.config import settings
+from scripts.check_phase3_preflight import require_compatible_inventory
 
 from logging.config import fileConfig
 
@@ -66,6 +66,13 @@ def run_migrations_online() -> None:
 
     """
 
+    supplied_connection = config.attributes.get("connection")
+    if supplied_connection is not None:
+        migrate_connection(supplied_connection)
+        return
+
+    from app.core.config import settings
+
     config.set_main_option(
         "sqlalchemy.url",
         settings.database_url
@@ -77,13 +84,19 @@ def run_migrations_online() -> None:
         poolclass=pool.NullPool,
     )
 
-    with connectable.connect() as connection:
-        context.configure(
-            connection=connection, target_metadata=target_metadata
-        )
+    try:
+        with connectable.connect() as connection:
+            migrate_connection(connection)
+    finally:
+        connectable.dispose()
 
-        with context.begin_transaction():
-            context.run_migrations()
+
+def migrate_connection(connection) -> None:
+    context.configure(connection=connection, target_metadata=target_metadata)
+    with context.begin_transaction():
+        # Check before historical migrations, including the former NULL-stock rewrite.
+        require_compatible_inventory(connection)
+        context.run_migrations()
 
 
 if context.is_offline_mode():

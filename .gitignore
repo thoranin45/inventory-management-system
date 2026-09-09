@@ -25,4 +25,20 @@ backups/
 # VS Code
 .vscode/
 
-Add-Content .gitignore "`napp/static/invoices/*.pdf"
+# Generated files
+app/static/invoices/
+app/static/labels/
+app/static/barcodes/
+app/static/qrcodes/
+
+.env.test
+
+.coverage
+htmlcov/
+.pytest_cache/
+.env.docker
+
+.env.api
+.env.db
+
+.env.production

@@ -1,3 +1,4 @@
+from app.core.dependencies import require_warehouse
 from fastapi import APIRouter, Depends, status
 
 from app.core.dependencies import (
@@ -5,6 +6,7 @@ from app.core.dependencies import (
     SupplierRepositoryDependency,
     require_admin,
 )
+from app.core.pagination import ListParams, list_params
 from app.models import User
 from app.schemas.response import ApiResponse
 from app.schemas.supplier_schema import (
@@ -21,7 +23,7 @@ from app.services.supplier_service import (
 )
 
 
-router = APIRouter(
+router = APIRouter(dependencies=[Depends(require_warehouse)],
     prefix="/suppliers",
     tags=["Suppliers"],
 )
@@ -50,21 +52,12 @@ def create_supplier(
     )
 
 
-@router.get(
-    "",
-    response_model=ApiResponse[list[SupplierResponse]],
-)
+@router.get("")
 def get_suppliers(
     supplier_repo: SupplierRepositoryDependency,
-) -> ApiResponse[list[SupplierResponse]]:
-    suppliers = get_suppliers_service(
-        supplier_repo=supplier_repo,
-    )
-
-    return ApiResponse(
-        message="Suppliers retrieved successfully",
-        data=suppliers,
-    )
+    params: ListParams = Depends(list_params),
+) -> dict:
+    return get_suppliers_service(supplier_repo=supplier_repo, params=params)
 
 
 @router.get(

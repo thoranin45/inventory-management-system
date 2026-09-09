@@ -9,6 +9,12 @@ from app.repositories.product_repository import ProductRepository
 from app.repositories.purchase_order_repository import (
     PurchaseOrderRepository,
 )
+from app.repositories.sales_order_repository import (
+    SalesOrderRepository,
+)
+from app.repositories.dashboard_repository import (
+    DashboardRepository,
+)
 from app.repositories.stock_repository import StockRepository
 from app.repositories.supplier_repository import SupplierRepository
 
@@ -53,3 +59,13 @@ def get_purchase_order_repository(
     db: Session = Depends(get_db)
 ) -> PurchaseOrderRepository:
     return PurchaseOrderRepository(db)
+
+def get_sales_order_repository(
+    db: Session = Depends(get_db),
+) -> SalesOrderRepository:
+    return SalesOrderRepository(db)
+
+def get_dashboard_repository(
+    db: Session = Depends(get_db),
+) -> DashboardRepository:
+    return DashboardRepository(db)

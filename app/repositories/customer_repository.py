@@ -26,6 +26,13 @@ class CustomerRepository:
             .all()
         )
 
+    def list_query(self, *, search: str | None = None):
+        query = self.db.query(Customer)
+        if search:
+            like = f"%{search}%"
+            query = query.filter(Customer.customer_name.ilike(like))
+        return query
+
     def get_by_id(
         self,
         customer_id: int,

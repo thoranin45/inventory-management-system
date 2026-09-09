@@ -1,11 +1,18 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
-from app.models import Product
+from app.models import Product, ProductBatch, StockBalance, InventoryMovement, StockTransaction, SalesOrderBatchAllocation, SalesOrderItem
 from app.repositories.base_repository import BaseRepository
 
 
 class ProductRepository(BaseRepository):
+    def has_inventory_evidence(self, product_id: int) -> bool:
+        return any(
+            self.db.query(model.id).filter(model.product_id == product_id).first() is not None
+            for model in (ProductBatch, StockBalance, InventoryMovement, StockTransaction,
+                          SalesOrderBatchAllocation, SalesOrderItem)
+        )
+
     def __init__(self, db: Session):
         super().__init__(
             db,
@@ -14,6 +21,20 @@ class ProductRepository(BaseRepository):
 
     def get_by_id(self, product_id: int):
         return self.get_active_by_id(product_id)
+
+    def get_by_id_for_update(
+        self,
+        product_id: int,
+    ) -> Product | None:
+        return (
+            self.db.query(Product)
+            .filter(
+                Product.id == product_id,
+                Product.is_active.is_(True),
+            )
+            .with_for_update()
+            .first()
+        )
 
     def get_by_sku(self, sku: str):
         return self.db.query(Product).filter(
@@ -36,6 +57,26 @@ class ProductRepository(BaseRepository):
             )
         ).all()
 
+    def list_query(self, *, search: str | None = None, status: str | None = None,
+                   category_id: int | None = None):
+        query = self.db.query(Product)
+        if status == "inactive":
+            query = query.filter(Product.is_active.is_(False))
+        elif status != "all":
+            query = query.filter(Product.is_active.is_(True))
+        if category_id is not None:
+            query = query.filter(Product.category_id == category_id)
+        if search:
+            like = f"%{search}%"
+            query = query.filter(
+                or_(
+                    Product.product_name.ilike(like),
+                    Product.sku.ilike(like),
+                    Product.barcode.ilike(like),
+                )
+            )
+        return query
+
     def get_active_by_barcode(self, barcode: str):
         return self.db.query(Product).filter(
             Product.barcode == barcode,
@@ -47,4 +88,3 @@ class ProductRepository(BaseRepository):
             Product.is_active == False
         ).all()
 
-    
