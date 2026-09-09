@@ -196,7 +196,19 @@ def test_demo_env_example_uses_internal_service_hostnames():
 def test_real_demo_env_is_git_ignored():
     txt = _read(".gitignore")
     assert any(line.strip() == ".env.demo" for line in txt.splitlines())
-    assert not (ROOT / ".env.demo").exists(), "a real .env.demo must never be committed"
+    # An operator following docs/demo-deployment.md WILL have a local
+    # .env.demo (cp from the template). The invariant is that it is never
+    # tracked — not that it is absent from disk.
+    tracked = subprocess.run(
+        ["git", "ls-files", "--error-unmatch", ".env.demo"],
+        capture_output=True, text=True, cwd=str(ROOT),
+    )
+    assert tracked.returncode != 0, "a real .env.demo must never be git-tracked"
+    ignored = subprocess.run(
+        ["git", "check-ignore", "-q", ".env.demo"],
+        capture_output=True, text=True, cwd=str(ROOT),
+    )
+    assert ignored.returncode == 0, ".env.demo must be matched by .gitignore"
 
 
 # --------------------------------------------------------------------------- #
@@ -284,3 +296,13 @@ def test_bff_forwards_only_the_vetted_x_real_ip():
     assert 'h.get("x-real-ip")' in fn
     assert 'h.get("x-forwarded-for")' not in fn   # never read the raw XFF chain
     assert 'xff' not in fn                        # no left-most-hop fallback var
+
+
+def test_bff_does_not_forward_x_forwarded_proto_to_fastapi():
+    """Forwarding the browser-facing HTTPS scheme makes Starlette emit absolute
+    https://api:8081/... trailing-slash redirects that rawRequest's fetch can't
+    follow (api is plain HTTP) -> BFF 502 on /sales-orders and /audit-logs."""
+    src = _read("frontend/src/lib/api/server.ts")
+    fn = src.split("forwardedClientHeaders", 1)[1].split("\n}\n", 1)[0]
+    assert 'out["x-forwarded-proto"]' not in fn
+    assert 'h.get("x-forwarded-proto")' not in fn
