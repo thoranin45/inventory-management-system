@@ -1,0 +1,26 @@
+# Keep the frontend build context small and free of local secrets.
+# (Kept deliberately minimal so `docker build` type-checks the exact same
+#  source tree as a local `npm run build`.)
+.git
+.gitignore
+.dockerignore
+Dockerfile
+
+node_modules
+.next
+out
+build
+coverage
+.nyc_output
+
+# real env files never ship; the *.example templates are fine
+.env
+.env.*
+!.env*.example
+
+# editor / OS cruft
+.vscode
+.idea
+.DS_Store
+*.log
+npm-debug.log*
