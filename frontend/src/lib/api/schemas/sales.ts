@@ -233,6 +233,10 @@ export const SCAN_ERROR_COPY: Record<string, string> = {
   PRODUCT_NOT_IN_ORDER: "That product isn’t on this order. Nothing was counted.",
   ALLOCATION_IDENTIFICATION_REQUIRED: "More than one allocation matches — choose which batch this scan counts against.",
   ALLOCATION_SCAN_EXCEEDS_REMAINING: "That would exceed the quantity required for this allocation. Nothing was counted.",
+  ALLOCATION_NOT_IN_ORDER: "That line isn’t part of this order. Nothing was counted.",
+  SCANNED_PRODUCT_MISMATCHES_LINE: "That item doesn’t match the line you’re scanning. Nothing was counted.",
+  UNDO_BELOW_ZERO: "There’s nothing left to undo on that line.",
+  UNDO_BELOW_PACKED: "Can’t undo below what’s already packed on that line.",
 };
 
 /* ---- POST /sales-orders/{id}/complete-picking | complete-packing ---- */
@@ -267,6 +271,10 @@ export const scanResolveSchema = z.object({
     track_batch: z.boolean(),
     track_expiry: z.boolean(),
     operational_available_quantity: numeric,
+    // Phase 12D — lets a lookup-only caller (Stock page scan) classify
+    // In stock / Low stock / Out of stock without a second round trip.
+    minimum_stock: numeric.nullish(),
+    safety_stock: numeric.nullish(),
   }),
   batches: z.array(scanResolveBatchSchema).default([]),
   as_of_date: z.string().nullish(),

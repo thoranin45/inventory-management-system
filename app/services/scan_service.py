@@ -57,6 +57,12 @@ def resolve_barcode_service(db, product_repo, balance_repo, barcode: str, contex
             "track_batch": product.track_batch,
             "track_expiry": product.track_expiry,
             "operational_available_quantity": op_available,
+            # Phase 12D: lets a lookup-only caller (Stock page scan) classify
+            # In stock / Low stock / Out of stock the same way the Stock and
+            # Products lists do, without a second round trip. Already-loaded
+            # ORM columns — no extra query.
+            "minimum_stock": product.minimum_stock,
+            "safety_stock": product.safety_stock,
         },
         "batches": batches,
         "as_of_date": today,

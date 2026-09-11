@@ -671,6 +671,92 @@ class StockBalanceRepository:
             query = query.filter(StockBalance.batch_id.in_(batch_ids))
         return {row.key: self._category_row(row) for row in query.all()}
 
+    def lot_and_location_summary_by_product(
+        self, today: date, product_ids: list[int]
+    ) -> dict[int, dict]:
+        """Phase 12D: display-only lot/location summary for the Stock page list.
+
+        Two bulk queries (never one per row): balances joined to Warehouse +
+        WarehouseLocation for location codes, and balances joined to
+        ProductBatch for lot numbers / expiry. Both are grouped in Python
+        per product_id — bounded by the callers's page of product_ids, so
+        this never scans the whole table and never issues N+1 queries.
+
+        This is a convenience rollup for the table row (which lot/location to
+        show when there is exactly one, or how many when there are several);
+        it is NOT the authoritative stock-status source — that stays
+        `inventory_categories_by_product` (expired/near-expiry/available).
+        """
+        if not product_ids:
+            return {}
+
+        loc_rows = (
+            self.db.query(
+                StockBalance.product_id,
+                Warehouse.warehouse_code,
+                WarehouseLocation.location_code,
+            )
+            .join(Warehouse, Warehouse.id == StockBalance.warehouse_id)
+            .join(WarehouseLocation, WarehouseLocation.id == StockBalance.location_id)
+            .filter(
+                StockBalance.product_id.in_(product_ids),
+                StockBalance.on_hand_qty > 0,
+            )
+            .group_by(StockBalance.product_id, Warehouse.warehouse_code, WarehouseLocation.location_code)
+            .all()
+        )
+        locations_by_product: dict[int, list[tuple[str, str]]] = {}
+        for pid, wh_code, loc_code in loc_rows:
+            locations_by_product.setdefault(pid, []).append((wh_code, loc_code))
+
+        lot_rows = (
+            self.db.query(
+                StockBalance.product_id,
+                ProductBatch.lot_no,
+                ProductBatch.expiry_date,
+            )
+            .join(ProductBatch, ProductBatch.id == StockBalance.batch_id)
+            .filter(
+                StockBalance.product_id.in_(product_ids),
+                StockBalance.batch_id.isnot(None),
+                StockBalance.on_hand_qty > 0,
+            )
+            .group_by(StockBalance.product_id, ProductBatch.lot_no, ProductBatch.expiry_date)
+            .all()
+        )
+        lots_by_product: dict[int, list[tuple[str | None, object]]] = {}
+        for pid, lot_no, expiry_date in lot_rows:
+            lots_by_product.setdefault(pid, []).append((lot_no, expiry_date))
+
+        out: dict[int, dict] = {}
+        for pid in product_ids:
+            locs = locations_by_product.get(pid, [])
+            lots = lots_by_product.get(pid, [])
+
+            # Nearest-relevant lot: soonest not-yet-expired first (FEFO), else
+            # the most recently expired one — never a lot chosen at random.
+            nearest_lot_no = None
+            nearest_expiry_date = None
+            not_expired = sorted((l for l in lots if l[1] is not None and l[1] >= today), key=lambda l: l[1])
+            if not_expired:
+                nearest_lot_no, nearest_expiry_date = not_expired[0]
+            else:
+                expired = sorted((l for l in lots if l[1] is not None and l[1] < today), key=lambda l: l[1], reverse=True)
+                if expired:
+                    nearest_lot_no, nearest_expiry_date = expired[0]
+                elif lots:
+                    nearest_lot_no, nearest_expiry_date = lots[0]
+
+            out[pid] = {
+                "lot_count": len(lots),
+                "nearest_lot_no": nearest_lot_no,
+                "nearest_expiry_date": nearest_expiry_date,
+                "location_count": len(locs),
+                "primary_warehouse_code": locs[0][0] if len(locs) == 1 else None,
+                "primary_location_code": locs[0][1] if len(locs) == 1 else None,
+            }
+        return out
+
     def inventory_category_totals(self, today: date, near_expiry_days: int) -> dict:
         """System-wide operational rollup for the dashboard summary. One query."""
         near_cutoff = today + timedelta(days=near_expiry_days)

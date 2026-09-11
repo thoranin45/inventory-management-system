@@ -1,7 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { Pencil, Power, RotateCcw } from "lucide-react";
+import Link from "next/link";
+import { PackagePlus, Pencil, Power, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -167,25 +168,35 @@ function ProductDetailBody({ product, onClose }: { product: ProductRow; onClose:
         <StatusBadge tone={product.is_active ? "success" : "neutral"} label={product.is_active ? "Active" : "Inactive"} />
       </div>
 
-      {canWrite ? (
-        <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" onClick={() => setEditing(true)}>
-            <Pencil aria-hidden className="h-4 w-4" />
-            Edit
+      <div className="flex flex-wrap gap-2">
+        {product.is_active ? (
+          <Button variant="primary" asChild>
+            <Link href={`/stock-in?product=${product.id}`}>
+              <PackagePlus aria-hidden className="h-4 w-4" />
+              Stock In
+            </Link>
           </Button>
-          {product.is_active ? (
-            <Button variant="danger" onClick={() => setActivationOpen(true)}>
-              <Power aria-hidden className="h-4 w-4" />
-              Deactivate
+        ) : null}
+        {canWrite ? (
+          <>
+            <Button variant="secondary" onClick={() => setEditing(true)}>
+              <Pencil aria-hidden className="h-4 w-4" />
+              Edit
             </Button>
-          ) : (
-            <Button variant="primary" onClick={() => setActivationOpen(true)}>
-              <RotateCcw aria-hidden className="h-4 w-4" />
-              Restore
-            </Button>
-          )}
-        </div>
-      ) : null}
+            {product.is_active ? (
+              <Button variant="danger" onClick={() => setActivationOpen(true)}>
+                <Power aria-hidden className="h-4 w-4" />
+                Deactivate
+              </Button>
+            ) : (
+              <Button variant="primary" onClick={() => setActivationOpen(true)}>
+                <RotateCcw aria-hidden className="h-4 w-4" />
+                Restore
+              </Button>
+            )}
+          </>
+        ) : null}
+      </div>
 
       <Section title="Identity">
         <Row label="Product name">{product.product_name}</Row>

@@ -39,7 +39,19 @@ const EMPTY: FormValues = {
  * track_expiry ⇒ track_batch rule and the transforms that drop empty
  * optionals) is the authoritative gate on submit.
  */
-function CreateForm({ onClose, onCreated }: { onClose: () => void; onCreated: (p: ProductDetail) => void }) {
+function CreateForm({
+  initialBarcode,
+  onClose,
+  onCreated,
+}: {
+  /** Pre-fills the Barcode field — the "New product" onboarding entry point
+   *  from a scanned barcode Product Master could not find. Still editable;
+   *  we never assume the scanned code is otherwise correct. */
+  initialBarcode?: string;
+  onClose: () => void;
+  onCreated: (p: ProductDetail) => void;
+}) {
+  const defaults = initialBarcode ? { ...EMPTY, barcode: initialBarcode } : EMPTY;
   const {
     control,
     register,
@@ -48,7 +60,7 @@ function CreateForm({ onClose, onCreated }: { onClose: () => void; onCreated: (p
     reset,
     setError,
     formState: { errors },
-  } = useForm<FormValues>({ defaultValues: EMPTY, mode: "onBlur" });
+  } = useForm<FormValues>({ defaultValues: defaults, mode: "onBlur" });
   const create = useCreateProduct();
   const [formError, setFormError] = React.useState<{ message: string; requestId?: string } | null>(null);
 
@@ -155,15 +167,20 @@ export function CreateProductDrawer({
   open,
   onOpenChange,
   onCreated,
+  initialBarcode,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   onCreated: (p: ProductDetail) => void;
+  /** Pre-fills Barcode — used by the "scan an unknown barcode" onboarding flow. */
+  initialBarcode?: string;
 }) {
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
       <DrawerContent title="New product">
-        {open ? <CreateForm onClose={() => onOpenChange(false)} onCreated={onCreated} /> : null}
+        {open ? (
+          <CreateForm initialBarcode={initialBarcode} onClose={() => onOpenChange(false)} onCreated={onCreated} />
+        ) : null}
       </DrawerContent>
     </Drawer>
   );

@@ -130,15 +130,21 @@ def enrich_products(balance_repo, products, today, near_expiry_days: int) -> lis
 
     Product.stock_qty keeps its Phase 2 meaning (total owned) and is echoed as
     owned_quantity; the other quantities are derived operational views.
+
+    Phase 12D adds a display-only lot/location summary (2 more bulk queries,
+    still O(1) regardless of page size — see
+    ``StockBalanceRepository.lot_and_location_summary_by_product``). These new
+    keys are additive; every existing key keeps its old meaning.
     """
     from decimal import Decimal
 
-    categories = balance_repo.inventory_categories_by_product(
-        today, near_expiry_days, [p.id for p in products]
-    )
+    ids = [p.id for p in products]
+    categories = balance_repo.inventory_categories_by_product(today, near_expiry_days, ids)
+    summaries = balance_repo.lot_and_location_summary_by_product(today, ids)
     rows = []
     for p in products:
         cat = categories.get(p.id, {})
+        summ = summaries.get(p.id, {})
         rows.append({
             "id": p.id,
             "sku": p.sku,
@@ -162,6 +168,14 @@ def enrich_products(balance_repo, products, today, near_expiry_days: int) -> lis
             "track_batch": p.track_batch,
             "track_expiry": p.track_expiry,
             "as_of_date": today,
+            # Phase 12D — Stock page list enrichment (display-only; see
+            # lot_and_location_summary_by_product docstring for FEFO nearest-lot rule).
+            "lot_count": summ.get("lot_count", 0),
+            "nearest_lot_no": summ.get("nearest_lot_no"),
+            "nearest_expiry_date": summ.get("nearest_expiry_date"),
+            "location_count": summ.get("location_count", 0),
+            "primary_warehouse_code": summ.get("primary_warehouse_code"),
+            "primary_location_code": summ.get("primary_location_code"),
         })
     return rows
 
@@ -170,6 +184,7 @@ def get_products_service(
     product_repo: ProductRepository,
     balance_repo,
     params,
+    category_id: int | None = None,
 ) -> dict:
     from app.core.batch_eligibility import business_today
     from app.core.config import settings
@@ -177,7 +192,7 @@ def get_products_service(
 
     ordering = resolve_ordering(params, _PRODUCT_SORTS, "id", Product.id)
     items, total = paginate(
-        product_repo.list_query(search=params.search, status=params.status),
+        product_repo.list_query(search=params.search, status=params.status, category_id=category_id),
         params,
         ordering,
     )
