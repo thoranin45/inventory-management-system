@@ -33,3 +33,10 @@ app/static/invoices/*.pdf
 
 *.db
 *.log
+# Frontend has its own build context (frontend/Dockerfile + frontend/.dockerignore).
+# The API image (this dir + root Dockerfile COPY . .) needs nothing from it:
+# grep of app/ alembic/ scripts/ finds no imports or file reads of frontend/,
+# only incidental strings in comments. Excluding the whole tree keeps 600MB+ of
+# node_modules / .next / out / coverage / .turbo / test-results out of the
+# root build context (was the ~2.5GB pathological API image).
+frontend/
