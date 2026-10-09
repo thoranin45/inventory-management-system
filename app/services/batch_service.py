@@ -5,9 +5,9 @@ from decimal import Decimal
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import (
-    AppException,
     DefaultStorageNotConfiguredException,
     DuplicateLotNumberException,
+    IdempotencyKeyConflictException,
     InvalidBatchDateException,
     MissingBatchDatesException,
     NonBatchProductBatchException,
@@ -85,10 +85,7 @@ def create_batch_service(
                 existing.operation_type != "BATCH_IN"
                 or existing.request_fingerprint != fingerprint
             ):
-                raise AppException(
-                    message="Idempotency-Key already used with a different payload",
-                    status_code=409,
-                )
+                raise IdempotencyKeyConflictException()
             return BatchCreateResponse.model_validate(existing.response_snapshot)
 
     warehouse, location = balance_repo.resolve_storage(data.warehouse_id, data.location_id)

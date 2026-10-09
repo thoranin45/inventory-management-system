@@ -228,6 +228,30 @@ class PartialBatchDatesException(AppException):
         )
 
 
+class IdempotencyKeyConflictException(AppException):
+    """An ``Idempotency-Key`` was reused for a request that isn't a byte-identical
+    replay of the one it was first used for.
+
+    Raised two ways, both meaning the same thing to the client:
+      1. Synchronously, when the stored receipt's fingerprint doesn't match
+         the current request (same key, different body).
+      2. From a lost race: ``stock_operation_receipts.operation_key`` is
+         globally unique with no parent row to lock, so two concurrent
+         requests reusing the same key for *different* products aren't
+         serialised by the per-product inventory lock and can both pass the
+         synchronous check. The loser's INSERT hits the unique constraint;
+         the repository converts that into this same exception instead of a
+         generic integrity error, and the caller's transaction rolls back
+         whole (no partial stock apply either way).
+    """
+
+    def __init__(self):
+        super().__init__(
+            message="Idempotency-Key already used with a different payload",
+            status_code=status.HTTP_409_CONFLICT,
+        )
+
+
 class PurchaseOrderNotFoundException(AppException):
     def __init__(self):
         super().__init__(

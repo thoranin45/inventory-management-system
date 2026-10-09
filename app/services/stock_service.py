@@ -6,9 +6,9 @@ from sqlalchemy.orm import Session
 
 from app.core import batch_eligibility
 from app.core.exceptions import (
-    AppException,
     BatchStockAdjustmentException,
     BatchTrackedStockInException,
+    IdempotencyKeyConflictException,
     InsufficientBatchStockException,
     InsufficientStockException,
     ProductNotFoundException,
@@ -87,10 +87,7 @@ def stock_in_service(
                     existing.operation_type != "STOCK_IN"
                     or existing.request_fingerprint != fingerprint
                 ):
-                    raise AppException(
-                        message="Idempotency-Key already used with a different payload",
-                        status_code=409,
-                    )
+                    raise IdempotencyKeyConflictException()
                 return StockOperationResponse.model_validate(existing.response_snapshot)
 
         warehouse, location = balance_repo.resolve_storage(data.warehouse_id, data.location_id)

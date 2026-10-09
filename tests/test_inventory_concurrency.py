@@ -18,7 +18,8 @@ from app.database import get_db
 from app.main import app
 from app.models import (
     User, Warehouse, WarehouseLocation, Product, ProductBatch, StockBalance,
-    StockTransaction, InventoryMovement, PurchaseOrderItem, SalesOrder, SalesOrderBatchAllocation,
+    StockOperationReceipt, StockTransaction, InventoryMovement, PurchaseOrderItem,
+    SalesOrder, SalesOrderBatchAllocation,
 )
 from tests.conftest import TEST_DATABASE_URL
 from tests.database_support import isolated_schema
@@ -441,8 +442,6 @@ def test_stock_in_same_idempotency_key_applies_once(concurrent_inventory):
     Both workers serialise on the per-product advisory lock; the loser replays
     the committed receipt instead of applying a second movement.
     """
-    from app.models import StockOperationReceipt
-
     s = concurrent_inventory
     product = _create_product(s.client, s.headers)
     key = "idem-race-" + uuid4().hex
@@ -458,6 +457,60 @@ def test_stock_in_same_idempotency_key_applies_once(concurrent_inventory):
         assert db.query(InventoryMovement).filter_by(
             product_id=product["id"], movement_type="STOCK_IN").count() == 1
         assert db.query(StockTransaction).filter_by(product_id=product["id"]).count() == 1
+
+
+def test_stock_in_same_idempotency_key_different_products_conflicts_safely(concurrent_inventory):
+    """Same Idempotency-Key, two DIFFERENT products, genuinely concurrent.
+
+    ``stock_operation_receipts.operation_key`` is globally unique with no
+    parent row to scope it (unlike PO/transfer receipts, which key off their
+    parent id). ``lock_inventory`` locks each request's own product only, so
+    two different products are NOT serialised against each other by it the
+    way two requests for the SAME product are in
+    ``test_stock_in_same_idempotency_key_applies_once`` above — both workers
+    can pass the synchronous "no existing receipt" check before either
+    commits.
+
+    A barrier on the INSERT itself (rather than relying on incidental thread
+    scheduling) forces that exact collision every run, so this is a
+    deterministic repro of the race, not a probabilistic one. The loser must
+    get a clean 409 — never a bare 500 from an uncaught IntegrityError — and
+    its entire stock mutation must roll back, not just the receipt insert.
+    """
+    s = concurrent_inventory
+    first = _create_product(s.client, s.headers)
+    second = _create_product(s.client, s.headers)
+    key = "idem-cross-product-" + uuid4().hex
+
+    barrier = Barrier(2, timeout=6)
+
+    def before_insert(connection, cursor, statement, parameters, context, executemany):
+        if "INSERT INTO stock_operation_receipts" in statement:
+            barrier.wait()
+
+    event.listen(s.engine, "before_cursor_execute", before_insert)
+    try:
+        request_a = ("POST", "/api/v1/stock/in", {"product_id": first["id"], "quantity": "4.000"}, key)
+        request_b = ("POST", "/api/v1/stock/in", {"product_id": second["id"], "quantity": "9.000"}, key)
+        responses = overlap(s, [request_a, request_b], "products", sorted({first["id"], second["id"]}))
+    finally:
+        event.remove(s.engine, "before_cursor_execute", before_insert)
+
+    assert sorted(r.status_code for r in responses) == [200, 409]
+    loser = next(r for r in responses if r.status_code == 409)
+    assert "different payload" in loser.text
+    assert loser.json()["request_id"]
+
+    winner_is_first = responses[0].status_code == 200
+    winner_id, winner_qty = (first["id"], Decimal("4.000")) if winner_is_first else (second["id"], Decimal("9.000"))
+    loser_id = second["id"] if winner_is_first else first["id"]
+
+    with s.sessions() as db:
+        assert db.query(StockOperationReceipt).filter_by(operation_key=key).count() == 1
+        assert db.get(Product, winner_id).stock_qty == winner_qty
+        assert db.get(Product, loser_id).stock_qty == Decimal("0.000")  # rolled back whole, not half-applied
+        assert db.query(InventoryMovement).filter_by(movement_type="STOCK_IN").count() == 1
+        assert db.query(StockTransaction).count() == 1
 
 
 def _receipt_race_order(s, products, quantity="1.000"):

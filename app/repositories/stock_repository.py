@@ -1,10 +1,12 @@
 from datetime import date
 
 from sqlalchemy import func, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from decimal import Decimal
 
+from app.core.exceptions import IdempotencyKeyConflictException
 from app.models import (
     Product,
     ProductBatch,
@@ -233,7 +235,27 @@ class StockRepository:
         self,
         receipt: StockOperationReceipt,
     ) -> StockOperationReceipt:
-        self.db.add(receipt)
-        self.db.flush()
+        """Insert the durable idempotency record, racing safely.
+
+        ``operation_key`` is globally unique with no parent row to lock
+        (unlike PO/transfer receipts, scoped by their parent id). Two
+        concurrent requests that reuse the same key for *different* products
+        lock different rows in `lock_inventory` and so are not serialised
+        against each other there — both can pass the caller's synchronous
+        "no existing receipt" check and race to this INSERT. The nested
+        transaction (SAVEPOINT) means a lost race raises and rolls back only
+        this insert, not the whole session, so we can convert the unique
+        violation into the same clean 409 the synchronous mismatch path
+        raises; the caller's outer UnitOfWork then rolls back the rest of
+        the operation too (no partial stock apply either way).
+        """
+        try:
+            with self.db.begin_nested():
+                self.db.add(receipt)
+                self.db.flush()
+        except IntegrityError as exc:
+            if "uq_stock_operation_receipt_key" in str(exc.orig).lower():
+                raise IdempotencyKeyConflictException() from exc
+            raise
 
         return receipt

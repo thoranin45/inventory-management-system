@@ -66,6 +66,38 @@ def test_stock_in_same_key_different_payload_conflicts(client, admin_headers, db
     assert float(fresh["stock_qty"]) == 5.0  # the conflicting call applied nothing
 
 
+def test_stock_in_same_key_different_product_conflicts(client, admin_headers, db_session):
+    """Reusing a key for an unrelated product is still "a different payload":
+    the fingerprint includes product_id, so this hits the same clean 409 as
+    changing the quantity does — sequentially, this never reaches the DB
+    unique constraint at all (the synchronous receipt check catches it first).
+    The genuinely concurrent version of this, which does exercise the unique
+    constraint, is `test_stock_in_same_idempotency_key_different_products_conflicts_safely`
+    in test_inventory_concurrency.py.
+    """
+    first = _make_product(client, admin_headers, track_batch=False)
+    second = _make_product(client, admin_headers, track_batch=False)
+    key = _key()
+
+    ok = client.post("/api/v1/stock/in", headers={**admin_headers, "Idempotency-Key": key},
+                     json={"product_id": first["id"], "quantity": "4.000"})
+    assert ok.status_code == 200
+
+    conflict = client.post("/api/v1/stock/in", headers={**admin_headers, "Idempotency-Key": key},
+                           json={"product_id": second["id"], "quantity": "4.000"})
+    assert conflict.status_code == 409
+    assert "different payload" in conflict.text
+    assert conflict.json()["request_id"]
+
+    db_session.expire_all()
+    assert db_session.query(InventoryMovement).filter_by(
+        product_id=second["id"], movement_type="STOCK_IN").count() == 0  # the conflicting call applied nothing
+    fresh_first = client.get(f"/api/v1/products/{first['id']}", headers=admin_headers).json()["data"]
+    fresh_second = client.get(f"/api/v1/products/{second['id']}", headers=admin_headers).json()["data"]
+    assert float(fresh_first["stock_qty"]) == 4.0
+    assert float(fresh_second["stock_qty"]) == 0.0
+
+
 def test_stock_in_without_key_is_unchanged_and_records_no_receipt(client, admin_headers, db_session):
     product = _make_product(client, admin_headers, track_batch=False)
     body = {"product_id": product["id"], "quantity": "4.000"}
