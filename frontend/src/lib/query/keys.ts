@@ -62,4 +62,12 @@ export const queryKeys = {
     list: (params: Record<string, unknown>) => ["inventory-transfers", "list", params] as const,
     detail: (id: number | string) => ["inventory-transfers", "detail", String(id)] as const,
   },
+  stockAdjustmentRequests: {
+    all: ["stock-adjustment-requests"] as const,
+    list: (params: Record<string, unknown>) => ["stock-adjustment-requests", "list", params] as const,
+    detail: (id: number | string) => ["stock-adjustment-requests", "detail", String(id)] as const,
+  },
+  warehouses: {
+    all: ["warehouses"] as const,
+  },
 };

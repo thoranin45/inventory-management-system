@@ -12,10 +12,12 @@ describe("permissions (backend roles are lowercase)", () => {
     expect(isAdmin("warehouse")).toBe(false);
     expect(isAdmin(null)).toBe(false);
   });
-  it("product CRUD is admin-only; stock:adjust allows warehouse", () => {
+  it("product CRUD is admin-only; adjustment-request create allows warehouse, approve is admin-only", () => {
     expect(canShowAction("warehouse", "product:create")).toBe(false);
     expect(canShowAction("admin", "product:update")).toBe(true);
-    expect(canShowAction("warehouse", "stock:adjust")).toBe(true);
+    expect(canShowAction("warehouse", "stock-adjustment-request:create")).toBe(true);
+    expect(canShowAction("warehouse", "stock-adjustment-request:approve")).toBe(false);
+    expect(canShowAction("admin", "stock-adjustment-request:approve")).toBe(true);
   });
 });
 

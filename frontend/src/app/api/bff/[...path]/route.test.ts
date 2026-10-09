@@ -29,12 +29,36 @@ describe("BFF allow-list", () => {
   });
 
   it("rejects an unlisted stock path", () => {
+    // Phase 14B retired /stock/adjust at the backend (always 409); the BFF
+    // never allowed it either, before or after — this stays false.
     expect(isAllowed("POST", "stock/adjust")).toBe(false);
-    expect(isAllowed("GET", "warehouses")).toBe(false);
   });
 
   it("rejects a path that only starts with an allowed segment", () => {
     expect(isAllowed("POST", "stock/out-fifo/extra")).toBe(false);
     expect(isAllowed("POST", "stock/out-fifo-legacy")).toBe(false);
+  });
+
+  it("allows GET warehouses (Phase 14B directory)", () => {
+    expect(isAllowed("GET", "warehouses")).toBe(true);
+  });
+
+  it("allows the Stock Adjustment Request create/list/detail/cancel routes", () => {
+    expect(isAllowed("POST", "stock-adjustment-requests")).toBe(true);
+    expect(isAllowed("GET", "stock-adjustment-requests")).toBe(true);
+    expect(isAllowed("GET", "stock-adjustment-requests/42")).toBe(true);
+    expect(isAllowed("POST", "stock-adjustment-requests/42/cancel")).toBe(true);
+  });
+
+  it("allows approve/reject (admin-gated at the backend, not here)", () => {
+    expect(isAllowed("POST", "stock-adjustment-requests/42/approve")).toBe(true);
+    expect(isAllowed("POST", "stock-adjustment-requests/42/reject")).toBe(true);
+  });
+
+  it("rejects method/path confusion on the new routes", () => {
+    expect(isAllowed("DELETE", "stock-adjustment-requests/42")).toBe(false);
+    expect(isAllowed("GET", "stock-adjustment-requests/42/approve")).toBe(false);
+    expect(isAllowed("POST", "stock-adjustment-requests/abc/approve")).toBe(false);
+    expect(isAllowed("POST", "stock-adjustment-requests/42/approve/extra")).toBe(false);
   });
 });
