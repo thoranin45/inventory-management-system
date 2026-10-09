@@ -549,231 +549,50 @@ def test_stock_out_batch_stock_not_enough(
     ) == Decimal("10.000")
 
 
-def test_stock_adjust_success(
-    client: TestClient,
-    admin_headers: dict[str, str],
-) -> None:
-    product = _create_product(
-        client=client,
-        admin_headers=admin_headers,
-        initial_stock=0,
-    )
-
-    stock_in_response = client.post(
-        "/api/v1/stock/in",
-        headers=admin_headers,
-        json={
-            "product_id": product["id"],
-            "quantity": "5.000",
-            "remark": "Prepare stock for adjustment",
-        },
-    )
-
-    assert stock_in_response.status_code == 200
-
-    response = client.post(
-        "/api/v1/stock/adjust",
-        headers=admin_headers,
-        json={
-            "product_id": product["id"],
-            "new_quantity": "12.000",
-            "remark": "Pytest adjustment",
-        },
-    )
-
-    assert response.status_code == 200
-
-    body = response.json()
-
-    assert Decimal(
-        str(body["data"]["previous_stock"])
-    ) == Decimal("5.000")
-
-    assert Decimal(
-        str(body["data"]["current_stock"])
-    ) == Decimal("12.000")
-
-    assert Decimal(
-        str(body["data"]["difference"])
-    ) == Decimal("7.000")
-
-
-def test_stock_adjust_with_active_batch_fails(
-    client: TestClient,
-    admin_headers: dict[str, str],
-) -> None:
-    product = _create_product(
-        client=client,
-        admin_headers=admin_headers,
-    )
-
-    _create_batch(
-        client=client,
-        admin_headers=admin_headers,
-        product_id=product["id"],
-        quantity=10,
-        expiry_days=180,
-    )
-
-    response = client.post(
-        "/api/v1/stock/adjust",
-        headers=admin_headers,
-        json={
-            "product_id": product["id"],
-            "new_quantity": 50,
-            "remark": "Blocked adjustment",
-        },
-    )
-
-    assert response.status_code == 409
-
-    body = response.json()
-
-    assert body["success"] is False
-    # _create_batch() flips the product to track_batch=True before creating
-    # the batch (server invariant on POST /batches — see test_batch.py), so
-    # by the time this adjustment runs the product is track_batch=True *and*
-    # carries active batch stock. The track_batch check is the more specific
-    # guard and fires first (Phase 13); batch_stock_total > 0 is the residual
-    # safety net for a product that predates that flag or was edited
-    # directly in the database — see
-    # test_stock_adjust_rejects_product_with_active_batch_stock_still_works
-    # below for that case on its own.
-    assert body["message"] == (
-        "Batch-tracked products cannot be adjusted directly — "
-        "receive via POST /batches or issue via /stock/out-fefo "
-        "/ /stock/out-fifo instead"
-    )
-
-    product_after = _get_product(
-        client=client,
-        admin_headers=admin_headers,
-        product_id=product["id"],
-    )
-
-    assert _decimal(
-        product_after["stock_qty"]
-    ) == Decimal("10.000")
-
-
 # --------------------------------------------------------------------------- #
-# Phase 13 — /stock/adjust rejects batch-tracked products outright, even with
-# zero current batch stock (the gap test_stock_adjust_with_active_batch_fails
-# above never covered: it only exercises batch_stock_total > 0).
+# Phase 14B — POST /stock/adjust is retired in favour of the Stock
+# Adjustment Request & Approval workflow (tests/test_stock_adjustment_requests.py).
+# It stays authenticated but never mutates, for any payload shape that would
+# previously have succeeded (plain adjustment) or failed for a business
+# reason (batch-tracked product) -- both now collapse to the same
+# unconditional 409, proving the retirement has no payload-dependent escape
+# hatch. The regression coverage these tests used to provide (balance
+# update math, batch-tracked guard, decimal precision, movement/audit
+# correctness) now lives on the approve step instead -- see
+# test_stock_adjustment_requests.py.
 # --------------------------------------------------------------------------- #
-def test_stock_adjust_rejects_batch_tracked_product_with_zero_batch_stock(
+def test_stock_adjust_is_retired(
     client: TestClient,
     admin_headers: dict[str, str],
     db_session,
 ) -> None:
-    """A freshly created batch-tracked product has zero batch stock, so the
-    old `batch_stock_total > 0` guard alone would let this through — the
-    product's stock_qty is 0, so the positive adjustment would otherwise land
-    straight on the unbatched (batch_id=None) balance. Must be rejected
-    purely on track_batch, with absolutely nothing written."""
-    product = _make_product(client, admin_headers, track_batch=True, track_expiry=True)
+    plain_product = _create_product(client=client, admin_headers=admin_headers, initial_stock=5)
+    batch_product = _make_product(client, admin_headers, track_batch=True, track_expiry=True)
 
-    before_balances = db_session.query(StockBalance).filter_by(product_id=product["id"]).count()
-    before_transactions = db_session.query(StockTransaction).filter_by(product_id=product["id"]).count()
-    before_movements = db_session.query(InventoryMovement).filter_by(product_id=product["id"]).count()
+    for product, new_quantity in ((plain_product, "12.000"), (batch_product, "50.000")):
+        before_balances = db_session.query(StockBalance).filter_by(product_id=product["id"]).count()
+        before_transactions = db_session.query(StockTransaction).filter_by(product_id=product["id"]).count()
+        before_movements = db_session.query(InventoryMovement).filter_by(product_id=product["id"]).count()
 
-    response = client.post(
-        "/api/v1/stock/adjust",
-        headers=admin_headers,
-        json={"product_id": product["id"], "new_quantity": "50.000", "remark": "should be blocked"},
-    )
+        response = client.post(
+            "/api/v1/stock/adjust",
+            headers=admin_headers,
+            json={"product_id": product["id"], "new_quantity": new_quantity, "remark": "retired endpoint"},
+        )
 
-    assert response.status_code == 409
-    body = response.json()
-    assert body["success"] is False
-    assert body["message"] == (
-        "Batch-tracked products cannot be adjusted directly — "
-        "receive via POST /batches or issue via /stock/out-fefo "
-        "/ /stock/out-fifo instead"
-    )
-    assert body["request_id"]
+        assert response.status_code == 409
+        body = response.json()
+        assert body["success"] is False
+        assert body["message"] == (
+            "Direct stock adjustment is retired; submit a stock "
+            "adjustment request instead (POST /stock-adjustment-requests)"
+        )
+        assert body["request_id"]
 
-    product_after = _get_product(client=client, admin_headers=admin_headers, product_id=product["id"])
-    assert _decimal(product_after["stock_qty"]) == Decimal("0.000")
-
-    db_session.expire_all()
-    # Nothing at all was written by the rejected request.
-    assert db_session.query(StockBalance).filter_by(
-        product_id=product["id"]).count() == before_balances
-    assert db_session.query(StockTransaction).filter_by(
-        product_id=product["id"]).count() == before_transactions
-    assert db_session.query(InventoryMovement).filter_by(
-        product_id=product["id"]).count() == before_movements
-
-
-def test_stock_adjust_non_batch_product_retains_existing_behavior(
-    client: TestClient,
-    admin_headers: dict[str, str],
-) -> None:
-    """Regression guard: the new track_batch check must not catch a
-    non-batch product — /stock/adjust keeps working exactly as before."""
-    product = _make_product(client, admin_headers, track_batch=False)
-
-    stock_in = client.post(
-        "/api/v1/stock/in",
-        headers=admin_headers,
-        json={"product_id": product["id"], "quantity": "5.000", "remark": "opening"},
-    )
-    assert stock_in.status_code == 200
-
-    response = client.post(
-        "/api/v1/stock/adjust",
-        headers=admin_headers,
-        json={"product_id": product["id"], "new_quantity": "20.000", "remark": "still allowed"},
-    )
-
-    assert response.status_code == 200
-    body = response.json()["data"]
-    assert _decimal(body["previous_stock"]) == Decimal("5.000")
-    assert _decimal(body["current_stock"]) == Decimal("20.000")
-    assert _decimal(body["difference"]) == Decimal("15.000")
-
-
-def test_stock_adjust_rejects_product_with_active_batch_stock_still_works(
-    client: TestClient,
-    admin_headers: dict[str, str],
-    db_session,
-) -> None:
-    """The pre-existing `batch_stock_total > 0` guard — now a residual safety
-    net behind the track_batch check — must still catch a product carrying
-    active batch stock even when it is (or is no longer) flagged
-    track_batch. product_service.py already blocks flipping track_batch off
-    through the API while a product has stock/inventory evidence, so this
-    state can't be reached through normal use; it simulates pre-existing
-    inconsistent data (e.g. predating that guard) directly at the DB layer —
-    exactly what the comment in stock_adjust_service says this check is for.
-    """
-    product = _create_product(client=client, admin_headers=admin_headers)
-    _create_batch(
-        client=client, admin_headers=admin_headers,
-        product_id=product["id"], quantity=10, expiry_days=180,
-    )
-
-    row = db_session.query(Product).filter_by(id=product["id"]).one()
-    row.track_batch = False
-    db_session.commit()
-
-    response = client.post(
-        "/api/v1/stock/adjust",
-        headers=admin_headers,
-        json={"product_id": product["id"], "new_quantity": 50, "remark": "still blocked"},
-    )
-
-    assert response.status_code == 409
-    body = response.json()
-    assert body["success"] is False
-    assert body["message"] == (
-        "Cannot directly adjust a product "
-        "that has active batch stock"
-    )
-
-    product_after = _get_product(client=client, admin_headers=admin_headers, product_id=product["id"])
-    assert _decimal(product_after["stock_qty"]) == Decimal("10.000")  # unchanged
+        db_session.expire_all()
+        assert db_session.query(StockBalance).filter_by(product_id=product["id"]).count() == before_balances
+        assert db_session.query(StockTransaction).filter_by(product_id=product["id"]).count() == before_transactions
+        assert db_session.query(InventoryMovement).filter_by(product_id=product["id"]).count() == before_movements
 
 
 def test_stock_history_sorted_latest_first(
@@ -1048,58 +867,6 @@ def test_fefo_updates_batch_balances(
         str(later_balance.on_hand_qty)
     ) == Decimal("7.000")
 
-def test_stock_adjust_updates_balance(
-    client: TestClient,
-    admin_headers: dict[str, str],
-    db_session: Session,
-) -> None:
-    product = _create_product(
-        client=client,
-        admin_headers=admin_headers,
-        initial_stock=0,
-    )
-
-    stock_in_response = client.post(
-        "/api/v1/stock/in",
-        headers=admin_headers,
-        json={
-            "product_id": product["id"],
-            "quantity": "5.000",
-            "remark": "Prepare adjust",
-        },
-    )
-
-    assert stock_in_response.status_code == 200
-
-    response = client.post(
-        "/api/v1/stock/adjust",
-        headers=admin_headers,
-        json={
-            "product_id": product["id"],
-            "new_quantity": "12.500",
-            "remark": "Adjust balance test",
-        },
-    )
-
-    assert response.status_code == 200
-
-    db_session.expire_all()
-
-    balance = (
-        db_session.query(StockBalance)
-        .filter(
-            StockBalance.product_id == product["id"],
-            StockBalance.batch_id.is_(None),
-        )
-        .first()
-    )
-
-    assert balance is not None
-
-    assert Decimal(
-        str(balance.on_hand_qty)
-    ) == Decimal("12.500")
-
 def test_fifo_creates_inventory_movements_per_batch(
     client: TestClient,
     admin_headers: dict[str, str],
@@ -1311,136 +1078,6 @@ def test_fefo_creates_inventory_movements_per_batch(
         item.reference_id is not None
         for item in movements
     )
-
-def test_stock_adjust_creates_positive_movement(
-    client: TestClient,
-    admin_headers: dict[str, str],
-    db_session: Session,
-) -> None:
-    product = _create_product(
-        client=client,
-        admin_headers=admin_headers,
-        initial_stock=0,
-    )
-
-    stock_in_response = client.post(
-        "/api/v1/stock/in",
-        headers=admin_headers,
-        json={
-            "product_id": product["id"],
-            "quantity": "10.000",
-            "remark": "Prepare adjust stock",
-        },
-    )
-
-    assert stock_in_response.status_code == 200
-
-    response = client.post(
-        "/api/v1/stock/adjust",
-        headers=admin_headers,
-        json={
-            "product_id": product["id"],
-            "new_quantity": "15.000",
-            "remark": "Positive adjustment",
-        },
-    )
-
-    assert response.status_code == 200
-
-    db_session.expire_all()
-
-    movement = (
-        db_session.query(InventoryMovement)
-        .filter(
-            InventoryMovement.product_id
-            == product["id"],
-            InventoryMovement.movement_type
-            == "STOCK_ADJUST",
-        )
-        .order_by(
-            InventoryMovement.id.desc()
-        )
-        .first()
-    )
-
-    assert movement is not None
-
-    assert Decimal(
-        str(movement.quantity)
-    ) == Decimal("5.000")
-
-    assert Decimal(
-        str(movement.balance_before)
-    ) == Decimal("10.000")
-
-    assert Decimal(
-        str(movement.balance_after)
-    ) == Decimal("15.000")
-
-def test_stock_adjust_creates_negative_movement(
-    client: TestClient,
-    admin_headers: dict[str, str],
-    db_session: Session,
-) -> None:
-    product = _create_product(
-        client=client,
-        admin_headers=admin_headers,
-        initial_stock=0,
-    )
-
-    stock_in_response = client.post(
-        "/api/v1/stock/in",
-        headers=admin_headers,
-        json={
-            "product_id": product["id"],
-            "quantity": "15.000",
-            "remark": "Prepare adjust stock",
-        },
-    )
-
-    assert stock_in_response.status_code == 200
-
-    response = client.post(
-        "/api/v1/stock/adjust",
-        headers=admin_headers,
-        json={
-            "product_id": product["id"],
-            "new_quantity": "8.000",
-            "remark": "Negative adjustment",
-        },
-    )
-
-    assert response.status_code == 200
-
-    db_session.expire_all()
-
-    movement = (
-        db_session.query(InventoryMovement)
-        .filter(
-            InventoryMovement.product_id
-            == product["id"],
-            InventoryMovement.movement_type
-            == "STOCK_ADJUST",
-        )
-        .order_by(
-            InventoryMovement.id.desc()
-        )
-        .first()
-    )
-
-    assert movement is not None
-
-    assert Decimal(
-        str(movement.quantity)
-    ) == Decimal("-7.000")
-
-    assert Decimal(
-        str(movement.balance_before)
-    ) == Decimal("15.000")
-
-    assert Decimal(
-        str(movement.balance_after)
-    ) == Decimal("8.000")
 
 def test_stock_in_inventory_consistency(
     client: TestClient,
@@ -1849,126 +1486,6 @@ def test_fefo_inventory_consistency(
     assert Decimal(
         str(second_movement.quantity)
     ) == Decimal("-3.000")
-
-def test_stock_adjust_inventory_consistency(
-    client: TestClient,
-    admin_headers: dict[str, str],
-    db_session: Session,
-) -> None:
-    product = _create_product(
-        client=client,
-        admin_headers=admin_headers,
-        initial_stock=0,
-    )
-
-    stock_in_response = client.post(
-        "/api/v1/stock/in",
-        headers=admin_headers,
-        json={
-            "product_id": product["id"],
-            "quantity": "20.000",
-            "remark": "Prepare adjust consistency",
-        },
-    )
-
-    assert stock_in_response.status_code == 200
-
-    adjust_response = client.post(
-        "/api/v1/stock/adjust",
-        headers=admin_headers,
-        json={
-            "product_id": product["id"],
-            "new_quantity": "12.500",
-            "remark": "Adjust consistency test",
-        },
-    )
-
-    assert adjust_response.status_code == 200
-
-    db_session.expire_all()
-
-    product_row = (
-        db_session.query(Product)
-        .filter(
-            Product.id == product["id"]
-        )
-        .first()
-    )
-
-    balance = (
-        db_session.query(StockBalance)
-        .filter(
-            StockBalance.product_id
-            == product["id"],
-            StockBalance.batch_id.is_(None),
-        )
-        .first()
-    )
-
-    transaction = (
-        db_session.query(StockTransaction)
-        .filter(
-            StockTransaction.product_id
-            == product["id"],
-            StockTransaction.transaction_type
-            == "ADJUST",
-        )
-        .order_by(
-            StockTransaction.id.desc()
-        )
-        .first()
-    )
-
-    movement = (
-        db_session.query(InventoryMovement)
-        .filter(
-            InventoryMovement.product_id
-            == product["id"],
-            InventoryMovement.movement_type
-            == "STOCK_ADJUST",
-        )
-        .order_by(
-            InventoryMovement.id.desc()
-        )
-        .first()
-    )
-
-    assert product_row is not None
-    assert balance is not None
-    assert transaction is not None
-    assert movement is not None
-
-    assert Decimal(
-        str(product_row.stock_qty)
-    ) == Decimal("12.500")
-
-    assert Decimal(
-        str(balance.on_hand_qty)
-    ) == Decimal("12.500")
-
-    assert Decimal(
-        str(transaction.quantity)
-    ) == Decimal("-7.500")
-
-    assert Decimal(
-        str(movement.quantity)
-    ) == Decimal("-7.500")
-
-    assert Decimal(
-        str(movement.balance_before)
-    ) == Decimal("20.000")
-
-    assert Decimal(
-        str(movement.balance_after)
-    ) == Decimal("12.500")
-
-    assert movement.reference_type == (
-        "STOCK_TRANSACTION"
-    )
-
-    assert movement.reference_id == (
-        transaction.id
-    )
 
 # --------------------------------------------------------------------------- #
 # Phase 12B.0 — tracking invariants + audit trail for direct stock in

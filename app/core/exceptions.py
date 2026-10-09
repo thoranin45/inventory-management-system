@@ -498,3 +498,92 @@ class SalesOrderAlreadyCompletedException(
             message="Sales order already completed",
             status_code=status.HTTP_409_CONFLICT,
         )
+
+
+class StockAdjustRetiredException(AppException):
+    """Phase 14B: direct /stock/adjust is retired in favour of the Stock
+    Adjustment Request & Approval workflow -- never mutates, for any role.
+
+    Mirrors how InventoryTransfer's /complete route was retired: the route
+    stays, stays authenticated, and unconditionally 409s pointing callers
+    at the replacement flow, rather than being deleted outright.
+    """
+
+    def __init__(self):
+        super().__init__(
+            message=(
+                "Direct stock adjustment is retired; submit a stock "
+                "adjustment request instead (POST /stock-adjustment-requests)"
+            ),
+            status_code=status.HTTP_409_CONFLICT,
+        )
+
+
+class AdjustmentRequestNotFoundException(AppException):
+    def __init__(self):
+        super().__init__(
+            message="Stock adjustment request not found",
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+
+
+class AdjustmentRequestForbiddenException(AppException):
+    """Non-owner, non-admin access to another user's request."""
+
+    def __init__(self):
+        super().__init__(
+            message="You do not have access to this stock adjustment request",
+            status_code=status.HTTP_403_FORBIDDEN,
+        )
+
+
+class AdjustmentRequestNotPendingException(AppException):
+    """Approve/reject/cancel attempted on a request that already left
+    PENDING -- whether decided by someone else or by a different,
+    unrelated retry key. Names the actual current status so the caller
+    never has to guess."""
+
+    def __init__(self, current_status: str):
+        super().__init__(
+            message=f"This request was already decided: {current_status}.",
+            status_code=status.HTTP_409_CONFLICT,
+        )
+
+
+class SelfApprovalNotAllowedException(AppException):
+    def __init__(self):
+        super().__init__(
+            message="You cannot approve a request you submitted yourself",
+            status_code=status.HTTP_403_FORBIDDEN,
+        )
+
+
+class StaleQuantityConflictException(AppException):
+    """The live balance no longer matches what the requester observed --
+    someone else changed it after the request was created. Names the
+    actual current value so the admin can decide with fresh information,
+    never a silent rebase of the original request."""
+
+    def __init__(self, actual_quantity):
+        super().__init__(
+            message=(
+                f"Someone already changed this balance to {actual_quantity}. "
+                "Review and retry."
+            ),
+            status_code=status.HTTP_409_CONFLICT,
+        )
+
+
+class AdjustmentRequestBatchNotSupportedException(AppException):
+    """Phase 14B is product-level only -- batch_id must be null. Phase 14D
+    adds batch-level requests; this guard is not a backend limitation to
+    "fix" here, it's the deliberate phase boundary."""
+
+    def __init__(self):
+        super().__init__(
+            message=(
+                "Batch-level adjustment requests are not supported in this "
+                "phase (Phase 14D)"
+            ),
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        )

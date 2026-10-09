@@ -10,7 +10,7 @@ from tests.database_support import migration_config
 from tests.test_migrations import migration_engine, upgrade  # noqa: F401
 
 PHASE8 = "e71a00000001"
-HEAD = "e91a00000001"
+HEAD = "ea1a00000002"  # Phase 14B: ea1a00000001 (MAIN/DEFAULT) + ea1a00000002 (adjustment requests)
 
 
 def _columns(conn, table):

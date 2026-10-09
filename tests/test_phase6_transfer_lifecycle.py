@@ -315,6 +315,11 @@ def test_stock_out_cannot_source_transit(client, admin_headers, transit_ids, pat
 
 
 def test_adjustment_cannot_target_transit(client, admin_headers, transit_ids):
+    # Phase 14B retired /stock/adjust unconditionally, so this no longer
+    # exercises the transit guard specifically -- every payload 409s here
+    # regardless of storage. The real transit-exclusion coverage for the
+    # Stock Adjustment Request & Approval workflow lives in
+    # test_stock_adjustment_requests.py::test_create_cannot_target_transit.
     product = _create_product(client, admin_headers)
     response = client.post(
         "/api/v1/stock/adjust", headers=admin_headers,
