@@ -1,9 +1,10 @@
 """Phase 4 lifecycle and barcode progress through audited inventory setup."""
-from datetime import date, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import uuid4
 
 import pytest
+from app.core.batch_eligibility import business_today, business_timezone
 from app.models import SalesOrder, SalesOrderBatchAllocation, StockBalance, InventoryMovement, StockTransaction, ProductBatch
 from tests import test_sales_order as sales
 from tests.test_stock import _create_product
@@ -223,11 +224,11 @@ def test_batch_ambiguity_and_expiry(client, admin_headers, db_session):
     assert action(client, admin_headers, order_id, "complete-picking", payload).status_code == 200
     sales._scan_fulfillment_to_full(client, admin_headers, order_id, packing=True)
     assert action(client, admin_headers, order_id, "complete-packing", payload).status_code == 200
-    db_session.get(ProductBatch, batches[0]["id"]).expiry_date = date.today() - timedelta(days=1)
+    db_session.get(ProductBatch, batches[0]["id"]).expiry_date = business_today() - timedelta(days=1)
     db_session.commit()
     assert action(client, admin_headers, order_id, "ship").status_code == 409
     assert detail(client, admin_headers, order_id)["status"] == "READY_TO_SHIP"
-    db_session.get(ProductBatch, batches[0]["id"]).expiry_date = date.today()
+    db_session.get(ProductBatch, batches[0]["id"]).expiry_date = business_today()
     db_session.commit()
     assert action(client, admin_headers, order_id, "ship").status_code == 200
 
@@ -252,11 +253,11 @@ def test_confirmation_expiry_and_no_other_location_borrowing(client, admin_heade
     batch = sales._create_batch(client, admin_headers, product["id"], quantity=1, expiry_days=1)
     customer = sales._create_customer(client, admin_headers)
     order_id = sales._create_sales_order(client, admin_headers, customer["id"], product["id"], quantity=1, unit_price=1)["sales_order_id"]
-    db_session.get(ProductBatch, batch["id"]).expiry_date = date.today() - timedelta(days=1)
+    db_session.get(ProductBatch, batch["id"]).expiry_date = business_today() - timedelta(days=1)
     db_session.commit()
     assert action(client, admin_headers, order_id, "confirm").status_code == 409
     assert detail(client, admin_headers, order_id)["status"] == "DRAFT"
-    db_session.get(ProductBatch, batch["id"]).expiry_date = date.today()
+    db_session.get(ProductBatch, batch["id"]).expiry_date = business_today()
     db_session.commit()
     assert action(client, admin_headers, order_id, "confirm").status_code == 200
     other = _create_product(client, admin_headers)
@@ -267,6 +268,64 @@ def test_confirmation_expiry_and_no_other_location_borrowing(client, admin_heade
     assert action(client, admin_headers, second["sales_order_id"], "confirm").status_code == 409
     db_session.expire_all()
     assert db_session.query(StockBalance).filter_by(product_id=other["id"]).one().reserved_qty == 0
+
+
+def test_confirm_uses_business_today_not_runner_utc_clock(client, admin_headers, monkeypatch):
+    """Phase 14A CI fix — regression guard for the test_batch_ambiguity_and_expiry /
+    test_confirmation_expiry_and_no_other_location_borrowing / test_sales_same_lot_across_products
+    CI failures.
+
+    Those tests stamped ``expiry_date`` from the *runner's* system clock
+    (``date.today()``) instead of the application's ``business_today()``
+    (Asia/Bangkok, see ``app.core.batch_eligibility``). The two calendars
+    diverge for the UTC window 17:00-23:59:59 (Bangkok midnight is 17:00
+    UTC) -- a GitHub Actions run landing in that window saw an
+    "expires today" batch treated as already expired, since the test's
+    "today" was the UTC date while the app's "today" was already the next
+    Bangkok day.
+
+    Freezes ``batch_eligibility``'s clock at 20:00 UTC -- inside that
+    divergence window, deterministically, with no dependency on when this
+    test actually runs -- and proves the business layer keys off the
+    Bangkok business date, not the raw UTC/system date a naive
+    ``date.today()`` would give.
+    """
+    utc_instant = datetime(2026, 3, 10, 20, 0, tzinfo=timezone.utc)
+    utc_date = utc_instant.date()
+    bangkok_date = utc_instant.astimezone(business_timezone()).date()
+    assert bangkok_date == utc_date + timedelta(days=1)  # sanity: instant is inside the divergence window
+
+    import app.core.batch_eligibility as be
+
+    class _FrozenDatetime:
+        @staticmethod
+        def now(tz=None):
+            return utc_instant.astimezone(tz) if tz is not None else utc_instant
+
+    monkeypatch.setattr(be, "datetime", _FrozenDatetime)
+
+    customer = sales._create_customer(client, admin_headers)
+
+    # A batch stamped with the runner's UTC date (what the buggy tests used
+    # to send) is, per Bangkok business time, already a day stale -> expired.
+    stale = sales._create_product(client, admin_headers)
+    response = client.post("/api/v1/batches", headers=admin_headers, json={
+        "product_id": stale["id"], "lot_no": "UTC-" + uuid4().hex[:10],
+        "quantity": "1.000", "mfg_date": (utc_date - timedelta(days=1)).isoformat(),
+        "expiry_date": utc_date.isoformat()})
+    assert response.status_code == 201, response.text
+    stale_order = sales._create_sales_order(client, admin_headers, customer["id"], stale["id"], quantity=1, unit_price=1)
+    assert action(client, admin_headers, stale_order["sales_order_id"], "confirm").status_code == 409
+
+    # A batch stamped with the actual business (Bangkok) date is current.
+    current = sales._create_product(client, admin_headers)
+    response = client.post("/api/v1/batches", headers=admin_headers, json={
+        "product_id": current["id"], "lot_no": "BKK-" + uuid4().hex[:10],
+        "quantity": "1.000", "mfg_date": (bangkok_date - timedelta(days=1)).isoformat(),
+        "expiry_date": bangkok_date.isoformat()})
+    assert response.status_code == 201, response.text
+    current_order = sales._create_sales_order(client, admin_headers, customer["id"], current["id"], quantity=1, unit_price=1)
+    assert action(client, admin_headers, current_order["sales_order_id"], "confirm").status_code == 200
 
 
 @pytest.mark.parametrize("batch", [False, True])
@@ -386,7 +445,7 @@ def test_sales_same_lot_across_products(client, admin_headers):
     batches = []
     for p in products:
         response = client.post("/api/v1/batches", headers=admin_headers, json={"product_id": p["id"], "lot_no": lot,
-            "quantity": "1.125", "mfg_date": (date.today() - timedelta(days=1)).isoformat(), "expiry_date": date.today().isoformat()})
+            "quantity": "1.125", "mfg_date": (business_today() - timedelta(days=1)).isoformat(), "expiry_date": business_today().isoformat()})
         assert response.status_code == 201, response.text
         batches.append(response.json()["data"]["batch"]["id"])
     response = client.post("/api/v1/sales-orders/", headers=admin_headers, json={"customer_id": customer["id"], "items": [
