@@ -57,6 +57,13 @@ def _create_batch(
 ) -> dict:
     manufacturing_date = date.today()
 
+    # Batch inbound requires a batch-tracked product (server invariant).
+    client.put(
+        f"/api/v1/products/{product_id}",
+        headers=admin_headers,
+        json={"track_batch": True, "track_expiry": True},
+    )
+
     response = client.post(
         "/api/v1/batches",
         headers=admin_headers,

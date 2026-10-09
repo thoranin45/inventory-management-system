@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { Camera, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { ScanStatus } from "./scan-status";
@@ -31,6 +32,8 @@ export function ScanPanel({
   sound,
   disabled,
   hint,
+  onCameraOpen,
+  targeting,
 }: {
   scanState: ScanState;
   message: string;
@@ -39,6 +42,11 @@ export function ScanPanel({
   sound?: { enabled: boolean; setEnabled: (v: boolean) => void };
   disabled?: boolean;
   hint?: React.ReactNode;
+  /** when provided, a camera button appears next to Enter (additive; the
+   *  camera decoder feeds the SAME onScan path as hardware / manual). */
+  onCameraOpen?: () => void;
+  /** a line was tapped for [Scan +1] — the next scan is attributed to it */
+  targeting?: { label: string; onClear: () => void };
 }) {
   const soundId = React.useId();
   return (
@@ -49,6 +57,21 @@ export function ScanPanel({
       )}
     >
       <ScanStatus state={scanState} />
+
+      {targeting ? (
+        <div className="flex items-center justify-between gap-2 rounded-[var(--r-sm)] border border-[var(--accent)] bg-[var(--accent-subtle)] px-3 py-2 text-[12px] font-medium text-[var(--accent)]">
+          <span>{targeting.label} — waiting for the item…</span>
+          <button
+            type="button"
+            aria-label="Cancel targeted scan"
+            onClick={targeting.onClear}
+            className="grid h-6 w-6 flex-none place-items-center rounded-[var(--r-sm)] hover:bg-[color-mix(in_srgb,var(--accent)_15%,transparent)]"
+          >
+            <X aria-hidden className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      ) : null}
+
       <p className="wc-scan-msg min-h-[2.6em] text-[12.5px] text-[var(--muted)]">{message}</p>
 
       <div className="flex gap-2">
@@ -64,6 +87,19 @@ export function ScanPanel({
         <Button type="button" variant="secondary" onClick={scanner.submit} disabled={disabled}>
           Enter
         </Button>
+        {onCameraOpen ? (
+          <Button
+            type="button"
+            variant="secondary"
+            size="icon"
+            aria-label="Scan with camera"
+            title="Scan with the device camera"
+            onClick={onCameraOpen}
+            disabled={disabled}
+          >
+            <Camera aria-hidden className="h-4 w-4" />
+          </Button>
+        ) : null}
       </div>
 
       <div className="wc-scan-focuslock flex items-center gap-[7px] text-[11px] text-[var(--faint)]">

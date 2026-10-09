@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 
 from app.core.dependencies import (
     DatabaseSession,
@@ -37,13 +37,6 @@ router = APIRouter(dependencies=[Depends(require_warehouse)],
         StockOperationResponse
     ],
 )
-
-@router.post(
-    "/in",
-    response_model=ApiResponse[
-        StockOperationResponse
-    ],
-)
 def stock_in(
     data: StockIn,
     db: DatabaseSession,
@@ -52,6 +45,12 @@ def stock_in(
     movement_repo: InventoryMovementRepositoryDependency,
     current_user: User = Depends(
         require_warehouse
+    ),
+    operation_key: str | None = Header(
+        default=None,
+        alias="Idempotency-Key",
+        max_length=128,
+        pattern=r"^[A-Za-z0-9._:-]+$",
     ),
 ) -> ApiResponse[StockOperationResponse]:
 
@@ -62,6 +61,7 @@ def stock_in(
         movement_repo=movement_repo,
         data=data,
         created_by_user_id=current_user.id,
+        operation_key=operation_key,
     )
 
     return ApiResponse(

@@ -103,6 +103,16 @@ def _create_batch(
     quantity: int,
     expiry_days: int,
 ) -> dict:
+    # Batch inbound now requires a batch-tracked product (server invariant).
+    # Products from _create_product() start non-batch with no history, so this
+    # is a safe no-op flip; ignore the result so a genuine /batches failure is
+    # what surfaces.
+    client.put(
+        f"/api/v1/products/{product_id}",
+        headers=admin_headers,
+        json={"track_batch": True, "track_expiry": True},
+    )
+
     payload = _batch_payload(
         product_id=product_id,
         quantity=quantity,
@@ -1829,3 +1839,136 @@ def test_stock_adjust_inventory_consistency(
     assert movement.reference_id == (
         transaction.id
     )
+
+# --------------------------------------------------------------------------- #
+# Phase 12B.0 — tracking invariants + audit trail for direct stock in
+# --------------------------------------------------------------------------- #
+def _make_product(client, admin_headers, *, track_batch=False, track_expiry=False):
+    unique = uuid4().hex[:10].upper()
+    body = {
+        "sku": f"P12B-{unique}",
+        "barcode": f"889{unique}",
+        "product_name": f"P12B {unique}",
+        "price": 10,
+        "stock_qty": 0,
+        "category_id": None,
+        "track_batch": track_batch,
+        "track_expiry": track_expiry,
+    }
+    r = client.post("/api/v1/products", headers=admin_headers, json=body)
+    assert r.status_code in {200, 201}
+    return r.json()["data"]
+
+
+def test_stock_in_rejects_batch_tracked_product(warehouse_client, admin_headers):
+    product = _make_product(warehouse_client, admin_headers, track_batch=True, track_expiry=True)
+    r = warehouse_client.post(
+        "/api/v1/stock/in",
+        headers=admin_headers,
+        json={"product_id": product["id"], "quantity": "5.000"},
+    )
+    assert r.status_code == 409
+    assert "request_id" in r.json()
+
+
+def test_batches_rejects_non_batch_product(warehouse_client, admin_headers):
+    product = _make_product(warehouse_client, admin_headers, track_batch=False)
+    r = warehouse_client.post(
+        "/api/v1/batches",
+        headers=admin_headers,
+        json={
+            "product_id": product["id"],
+            "lot_no": f"L-{uuid4().hex[:8]}",
+            "quantity": "5.000",
+        },
+    )
+    assert r.status_code == 409
+    assert "request_id" in r.json()
+
+
+def test_batches_lot_only_allows_missing_dates(warehouse_client, admin_headers, db_session):
+    product = _make_product(warehouse_client, admin_headers, track_batch=True, track_expiry=False)
+    lot = f"L-{uuid4().hex[:8]}"
+    r = warehouse_client.post(
+        "/api/v1/batches",
+        headers=admin_headers,
+        json={"product_id": product["id"], "lot_no": lot, "quantity": "7.000"},
+    )
+    assert r.status_code == 201, r.text
+    batch = r.json()["data"]["batch"]
+    assert batch["mfg_date"] is None and batch["expiry_date"] is None
+    row = db_session.query(ProductBatch).filter_by(id=batch["id"]).one()
+    assert row.mfg_date is None and row.expiry_date is None
+
+
+def test_batches_lot_only_rejects_one_date_without_the_other(warehouse_client, admin_headers):
+    product = _make_product(warehouse_client, admin_headers, track_batch=True, track_expiry=False)
+    r = warehouse_client.post(
+        "/api/v1/batches",
+        headers=admin_headers,
+        json={
+            "product_id": product["id"],
+            "lot_no": f"L-{uuid4().hex[:8]}",
+            "quantity": "1.000",
+            "mfg_date": date.today().isoformat(),
+        },
+    )
+    assert r.status_code == 400
+
+
+def test_batches_expiry_tracked_requires_both_dates(warehouse_client, admin_headers):
+    product = _make_product(warehouse_client, admin_headers, track_batch=True, track_expiry=True)
+    r = warehouse_client.post(
+        "/api/v1/batches",
+        headers=admin_headers,
+        json={
+            "product_id": product["id"],
+            "lot_no": f"L-{uuid4().hex[:8]}",
+            "quantity": "1.000",
+        },
+    )
+    assert r.status_code == 422
+
+
+def test_batches_expired_inbound_still_accepted(warehouse_client, admin_headers):
+    product = _make_product(warehouse_client, admin_headers, track_batch=True, track_expiry=True)
+    r = warehouse_client.post(
+        "/api/v1/batches",
+        headers=admin_headers,
+        json={
+            "product_id": product["id"],
+            "lot_no": f"L-{uuid4().hex[:8]}",
+            "quantity": "1.000",
+            "mfg_date": (date.today() - timedelta(days=400)).isoformat(),
+            "expiry_date": (date.today() - timedelta(days=10)).isoformat(),
+        },
+    )
+    assert r.status_code == 201
+
+
+def test_direct_stock_in_writes_audit_log(warehouse_client, admin_headers, db_session):
+    from app.models import AuditLog
+
+    product = _make_product(warehouse_client, admin_headers, track_batch=False)
+    before = db_session.query(AuditLog).filter_by(action="STOCK_IN").count()
+    r = warehouse_client.post(
+        "/api/v1/stock/in",
+        headers=admin_headers,
+        json={"product_id": product["id"], "quantity": "3.000", "remark": "audit check"},
+    )
+    assert r.status_code == 200
+    assert db_session.query(AuditLog).filter_by(action="STOCK_IN").count() == before + 1
+
+
+def test_batch_in_writes_audit_log(warehouse_client, admin_headers, db_session):
+    from app.models import AuditLog
+
+    product = _make_product(warehouse_client, admin_headers, track_batch=True, track_expiry=False)
+    before = db_session.query(AuditLog).filter_by(action="BATCH_IN").count()
+    r = warehouse_client.post(
+        "/api/v1/batches",
+        headers=admin_headers,
+        json={"product_id": product["id"], "lot_no": f"L-{uuid4().hex[:8]}", "quantity": "2.000"},
+    )
+    assert r.status_code == 201
+    assert db_session.query(AuditLog).filter_by(action="BATCH_IN").count() == before + 1

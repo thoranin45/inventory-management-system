@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 import { StockView } from "@/components/stock/stock-view";
 import { LoadingState } from "@/components/ui/states";
 
-export const metadata: Metadata = { title: "Stock · Warehouse Console" };
+export const metadata: Metadata = { title: "Stock" };
 
 export default function StockPage() {
   return (

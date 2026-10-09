@@ -9,6 +9,7 @@ from app.models import (
     Product,
     ProductBatch,
     StockBalance,
+    StockOperationReceipt,
     StockTransaction,
 )
 
@@ -214,3 +215,25 @@ class StockRepository:
             )
             .all()
         )
+
+    # ------------------------------------------------------------------ #
+    # Phase 12C.0: parent-less stock-intake idempotency
+    # ------------------------------------------------------------------ #
+    def get_operation_receipt(
+        self,
+        operation_key: str,
+    ) -> StockOperationReceipt | None:
+        return (
+            self.db.query(StockOperationReceipt)
+            .filter(StockOperationReceipt.operation_key == operation_key)
+            .first()
+        )
+
+    def create_operation_receipt(
+        self,
+        receipt: StockOperationReceipt,
+    ) -> StockOperationReceipt:
+        self.db.add(receipt)
+        self.db.flush()
+
+        return receipt

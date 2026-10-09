@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 
 import { TransferReceivingConsole } from "@/components/transfers/transfer-receiving-console";
 
-export const metadata: Metadata = { title: "Transfer receiving · Warehouse Console" };
+export const metadata: Metadata = { title: "Transfer receiving" };
 
 export default async function TransferReceivingPage(props: PageProps<"/transfers/[id]/receive">) {
   const { id } = await props.params;

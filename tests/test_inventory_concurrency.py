@@ -223,6 +223,10 @@ def test_simultaneous_batch_creation(concurrent_inventory, same_product):
     s = concurrent_inventory
     first = _create_product(s.client, s.headers)
     second = first if same_product else _create_product(s.client, s.headers)
+    for p in {first["id"], second["id"]}:
+        # Batch inbound requires a batch-tracked product (server invariant).
+        s.client.put(f"/api/v1/products/{p}", headers=s.headers,
+                     json={"track_batch": True, "track_expiry": True})
     requests = [("POST", "/api/v1/batches", batch_payload(p["id"], "0.125")) for p in [first, second]]
     responses = overlap(s, requests, "products", sorted({first["id"], second["id"]}))
     assert sorted(r.status_code for r in responses) == ([201, 409] if same_product else [201, 201])
@@ -371,7 +375,8 @@ def test_fractional_repeated_returns(concurrent_inventory, track_batch):
     assert response.status_code == 409
 
 
-@pytest.mark.parametrize("race", ["confirm", "confirm-cancel", "ship", "complete-picking", "complete-packing", "scan-pick", "scan-pack"])
+@pytest.mark.parametrize("race", ["confirm", "confirm-cancel", "ship", "complete-picking", "complete-packing",
+                                  "scan-pick", "scan-pack", "undo-pick", "undo-pack"])
 def test_fulfillment_overlap(concurrent_inventory, race):
     from tests.test_sales_order_fulfillment import advance
     s = concurrent_inventory
@@ -380,14 +385,25 @@ def test_fulfillment_overlap(concurrent_inventory, race):
     order = sales._create_sales_order(s.client, s.headers, customer["id"], product["id"], quantity="1.000", unit_price=1)
     order_id = order["sales_order_id"]
     start = {"confirm": "DRAFT", "confirm-cancel": "DRAFT", "ship": "READY_TO_SHIP",
-             "complete-picking": "PICKING", "complete-packing": "PACKING", "scan-pick": "PICKING", "scan-pack": "PACKING"}[race]
+             "complete-picking": "PICKING", "complete-packing": "PACKING", "scan-pick": "PICKING", "scan-pack": "PACKING",
+             "undo-pick": "PICKING", "undo-pack": "PACKING"}[race]
     advance(s.client, s.headers, order_id, start)
+    # Completion is scan-authoritative (Phase 12C Amendment 4): the counters
+    # must already be full before the racing complete-* calls, or both 409.
+    if race in ("complete-picking", "undo-pick"):
+        sales._scan_fulfillment_to_full(s.client, s.headers, order_id, packing=False)
+    elif race in ("complete-packing", "undo-pack"):
+        sales._scan_fulfillment_to_full(s.client, s.headers, order_id, packing=True)
     endpoint = "confirm" if race == "confirm-cancel" else race
     payload = None
     if race.startswith("complete-"):
         payload = sales._fulfillment_payload(s.client, s.headers, order_id)
     if race.startswith("scan-"):
         payload = {"barcode": product["barcode"]}
+    if race.startswith("undo-"):
+        allocation_id = s.client.get(f"/api/v1/sales-orders/{order_id}", headers=s.headers).json()[
+            "data"]["items"][0]["fulfillment_allocations"][0]["id"]
+        payload = {"allocation_id": allocation_id, "quantity": "1.000"}
     request = ("POST", f"/api/v1/sales-orders/{order_id}/{endpoint}", payload)
     second = ("PUT", f"/api/v1/sales-orders/{order_id}/cancel", None) if race == "confirm-cancel" else request
     responses = overlap(s, [request, second], "sales_orders", [order_id])
@@ -409,10 +425,39 @@ def test_fulfillment_overlap(concurrent_inventory, race):
                 assert allocation.picked_quantity == Decimal(1)
             if race == "scan-pack":
                 assert allocation.packed_quantity == Decimal(1)
+            if race == "undo-pick":
+                assert allocation.picked_quantity == Decimal(0)  # exactly one undo applied, never negative
+            if race == "undo-pack":
+                assert allocation.packed_quantity == Decimal(0)
         assert db.query(InventoryMovement).filter_by(movement_type="SALES_SHIPMENT").count() == int(shipped)
         assert db.query(StockTransaction).filter_by(transaction_type="SALE_SHIPMENT").count() == int(shipped)
         if race == "confirm-cancel":
             assert order.status == "CANCELLED"
+
+
+def test_stock_in_same_idempotency_key_applies_once(concurrent_inventory):
+    """Two overlapping /stock/in requests with the same Idempotency-Key: stock moves once.
+
+    Both workers serialise on the per-product advisory lock; the loser replays
+    the committed receipt instead of applying a second movement.
+    """
+    from app.models import StockOperationReceipt
+
+    s = concurrent_inventory
+    product = _create_product(s.client, s.headers)
+    key = "idem-race-" + uuid4().hex
+    request = ("POST", "/api/v1/stock/in", {"product_id": product["id"], "quantity": "6.000"}, key)
+    responses = overlap(s, [request, request], "products", [product["id"]])
+
+    assert [r.status_code for r in responses] == [200, 200]
+    assert responses[0].json()["data"] == responses[1].json()["data"]  # one applied, one replayed
+
+    with s.sessions() as db:
+        assert db.get(Product, product["id"]).stock_qty == Decimal("6.000")
+        assert db.query(StockOperationReceipt).filter_by(operation_key=key).count() == 1
+        assert db.query(InventoryMovement).filter_by(
+            product_id=product["id"], movement_type="STOCK_IN").count() == 1
+        assert db.query(StockTransaction).filter_by(product_id=product["id"]).count() == 1
 
 
 def _receipt_race_order(s, products, quantity="1.000"):

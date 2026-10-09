@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 import { CategoriesView } from "@/components/master-data/categories-view";
 import { LoadingState } from "@/components/ui/states";
 
-export const metadata: Metadata = { title: "Categories · Warehouse Console" };
+export const metadata: Metadata = { title: "Categories" };
 
 export default function CategoriesPage() {
   return (

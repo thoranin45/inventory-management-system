@@ -1567,3 +1567,25 @@ class InventoryTransferReceipt(Base):
     received_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     received_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     response_snapshot = Column(JSONB, nullable=False)
+
+
+class StockOperationReceipt(Base):
+    """Durable idempotency record for parent-less stock intake operations.
+
+    ``POST /stock/in`` and ``POST /batches`` have no parent entity (unlike PO /
+    transfer receipts), so replay protection is keyed by the client-supplied
+    ``Idempotency-Key`` alone. Same key + same payload fingerprint replays the
+    stored response; same key + different fingerprint is a 409.
+    """
+
+    __tablename__ = "stock_operation_receipts"
+    __table_args__ = (
+        UniqueConstraint("operation_key", name="uq_stock_operation_receipt_key"),
+    )
+    id = Column(Integer, primary_key=True)
+    operation_type = Column(String(32), nullable=False)  # STOCK_IN | BATCH_IN
+    operation_key = Column(String(128), nullable=False)
+    request_fingerprint = Column(String(64), nullable=False)
+    response_snapshot = Column(JSONB, nullable=False)
+    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

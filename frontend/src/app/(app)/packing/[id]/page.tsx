@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 
 import { FulfillmentConsole } from "@/components/work/fulfillment-console";
 
-export const metadata: Metadata = { title: "Pack console · Warehouse Console" };
+export const metadata: Metadata = { title: "Pack console" };
 
 export default async function PackConsolePage(props: PageProps<"/packing/[id]">) {
   const { id } = await props.params;

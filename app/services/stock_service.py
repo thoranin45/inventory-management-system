@@ -1,10 +1,14 @@
+import hashlib
+import json
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
 from app.core import batch_eligibility
 from app.core.exceptions import (
+    AppException,
     BatchStockAdjustmentException,
+    BatchTrackedStockInException,
     InsufficientBatchStockException,
     InsufficientStockException,
     ProductNotFoundException,
@@ -16,6 +20,7 @@ from app.models import (
     User,
     InventoryMovement,
     ProductBatch,
+    StockOperationReceipt,
     StockTransaction,
 )
 from app.repositories.inventory_movement_repository import (
@@ -35,6 +40,28 @@ from app.schemas.stock_schema import (
 )
 
 
+def _stock_in_fingerprint(data: StockIn) -> str:
+    """Canonical hash of every stock-affecting field of a /stock/in request.
+
+    Two requests with the same Idempotency-Key must carry byte-identical
+    business intent or the second is rejected. Storage defaults hash as a
+    stable token, never a lookup of mutable master data (mirrors PO receipts).
+    """
+    payload = {
+        "version": 1,
+        "operation": "STOCK_IN",
+        "product_id": data.product_id,
+        "quantity": format(data.quantity, ".3f"),
+        "storage": "MAIN/DEFAULT"
+        if data.warehouse_id is None and data.location_id is None
+        else [data.warehouse_id, data.location_id],
+        "remark": data.remark or None,
+    }
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+
+
 def stock_in_service(
     db: Session,
     stock_repo: StockRepository,
@@ -42,10 +69,30 @@ def stock_in_service(
     movement_repo: InventoryMovementRepository,
     data: StockIn,
     created_by_user_id: int | None,
+    operation_key: str | None = None,
 ) -> StockOperationResponse:
+
+    fingerprint = _stock_in_fingerprint(data)
 
     with UnitOfWork(db):
         balance_repo.lock_inventory([data.product_id])
+
+        # Idempotency replay/mismatch check runs *after* the per-product
+        # advisory lock so a concurrent retry of the same key serialises here
+        # and replays the stored response instead of applying stock twice.
+        if operation_key is not None:
+            existing = stock_repo.get_operation_receipt(operation_key)
+            if existing is not None:
+                if (
+                    existing.operation_type != "STOCK_IN"
+                    or existing.request_fingerprint != fingerprint
+                ):
+                    raise AppException(
+                        message="Idempotency-Key already used with a different payload",
+                        status_code=409,
+                    )
+                return StockOperationResponse.model_validate(existing.response_snapshot)
+
         warehouse, location = balance_repo.resolve_storage(data.warehouse_id, data.location_id)
         product = (
             stock_repo
@@ -56,6 +103,13 @@ def stock_in_service(
 
         if product is None:
             raise ProductNotFoundException()
+
+        # Server-side tracking invariant: a batch-tracked product must be
+        # received with a lot number (POST /batches). Direct /stock/in would
+        # add un-lotted stock to the batch_id=NULL balance and permanently
+        # split its inventory. Frontend routing is not the only guard.
+        if product.track_batch:
+            raise BatchTrackedStockInException()
 
         previous_stock = balance_repo.product_quantity(product.id)
 
@@ -115,15 +169,42 @@ def stock_in_service(
             movement
         )
 
+        actor = db.get(User, created_by_user_id) if created_by_user_id is not None else None
+        db.add(AuditLog(
+            username=actor.username if actor else "system",
+            action="STOCK_IN",
+            table_name="stock_transactions",
+            record_id=transaction.id,
+            description=(
+                f"Product {product.id}; +{data.quantity} into "
+                f"{warehouse.warehouse_code}/{location.location_code}; "
+                f"actor_id={created_by_user_id}"
+            ),
+        ))
+
         balance_repo.sync_aggregates(product.id, f"user_id={created_by_user_id}")
 
-    return StockOperationResponse(
-        product_id=product.id,
-        product_name=product.product_name,
-        previous_stock=previous_stock,
-        current_stock=product.stock_qty,
-        difference=data.quantity,
-    )
+        result = StockOperationResponse(
+            product_id=product.id,
+            product_name=product.product_name,
+            previous_stock=previous_stock,
+            current_stock=product.stock_qty,
+            difference=data.quantity,
+        )
+
+        # Persist the durable replay record inside the same transaction as the
+        # stock movement it describes, so a retry of this key can only ever
+        # replay a committed result.
+        if operation_key is not None:
+            stock_repo.create_operation_receipt(StockOperationReceipt(
+                operation_type="STOCK_IN",
+                operation_key=operation_key,
+                request_fingerprint=fingerprint,
+                response_snapshot=result.model_dump(mode="json"),
+                created_by_user_id=created_by_user_id,
+            ))
+
+    return result
 
 
 def stock_out_fifo_service(

@@ -13,6 +13,7 @@ vi.mock("@tanstack/react-query", () => ({ useQueries: () => [] }));
 const scanMutate = vi.fn();
 const startMutate = vi.fn();
 const completeMutate = vi.fn();
+const undoMutate = vi.fn();
 let detail: unknown;
 
 const COFFEE_2_ALLOC = {
@@ -87,6 +88,8 @@ vi.mock("@/lib/query/sales", () => ({
   useScanPack: () => ({ mutate: vi.fn(), isPending: false }),
   useCompletePicking: () => ({ mutate: completeMutate, isPending: false }),
   useCompletePacking: () => ({ mutate: vi.fn(), isPending: false }),
+  useUndoPick: () => ({ mutate: undoMutate, isPending: false }),
+  useUndoPack: () => ({ mutate: vi.fn(), isPending: false }),
   usePackingSlipData: () => ({ isLoading: true }),
   useShippingLabelData: () => ({ isLoading: true }),
 }));
@@ -98,6 +101,7 @@ beforeEach(() => {
   scanMutate.mockReset();
   startMutate.mockReset();
   completeMutate.mockReset();
+  undoMutate.mockReset();
   detail = makeDetail("PICKING");
 });
 
@@ -232,13 +236,13 @@ describe("FulfillmentConsole — complete gating", () => {
     await scan(user, "885000000009"); // sugar done
     expect(screen.getByRole("button", { name: /complete picking/i })).toBeDisabled();
 
-    // coffee is ambiguous — drive it via the line's "+1" (bypasses the scanner
-    // input, same backend path). First pick → alloc 71 (1.000).
-    await user.click(screen.getByRole("button", { name: /scan one Arabica/i }));
+    // coffee is ambiguous — a scan opens the allocation picker (no guessing).
+    // First pick → alloc 71 (1.000).
+    await scan(user, "885000000001");
     let dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByText("LOT-B").closest("button")!);
     // second pick → alloc 7 (3.000)
-    await user.click(screen.getByRole("button", { name: /scan one Arabica/i }));
+    await scan(user, "885000000001");
     dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByText("LOT-A").closest("button")!);
 
@@ -265,5 +269,63 @@ describe("FulfillmentConsole — wrong lifecycle state", () => {
     render(<FulfillmentConsole orderId={7} mode="pick" />);
     expect(screen.getByText(/not in picking/i)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /open packing console/i })).toBeInTheDocument();
+  });
+});
+
+describe("FulfillmentConsole — Phase 12C Scan +1 / Undo", () => {
+  it("[Scan +1] targets a line without any backend call", async () => {
+    const user = userEvent.setup();
+    render(<FulfillmentConsole orderId={7} mode="pick" />);
+
+    await user.click(screen.getByRole("button", { name: /scan one Refined Sugar/i }));
+    expect(scanMutate).not.toHaveBeenCalled();
+    // the scan panel now shows it is waiting for that item
+    expect(screen.getByText(/Scan Refined Sugar Sack 25kg/i)).toBeInTheDocument();
+  });
+
+  it("a scan while a single-allocation line is targeted goes to that allocation", async () => {
+    const user = userEvent.setup();
+    render(<FulfillmentConsole orderId={7} mode="pick" />);
+    scanMutate.mockImplementation((_a, opts) =>
+      opts.onSuccess({
+        sales_order_id: 7, so_number: "SO-000007", status: "PICKING",
+        allocation_id: 8, quantity: "2.000", picked_quantity: "1.000", packed_quantity: "0.000",
+      }),
+    );
+
+    await user.click(screen.getByRole("button", { name: /scan one Refined Sugar/i }));
+    await scan(user, "885000000009");
+
+    expect(scanMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 7, barcode: "885000000009", allocation_id: 8 }),
+      expect.any(Object),
+    );
+  });
+
+  it("[Undo] on a line with progress calls the undo mutation for its allocation", async () => {
+    const user = userEvent.setup();
+    // seed some progress on the sugar allocation via a scan
+    scanMutate.mockImplementation((_a, opts) =>
+      opts.onSuccess({
+        sales_order_id: 7, so_number: "SO-000007", status: "PICKING",
+        allocation_id: 8, quantity: "2.000", picked_quantity: "2.000", packed_quantity: "0.000",
+      }),
+    );
+    render(<FulfillmentConsole orderId={7} mode="pick" />);
+    await scan(user, "885000000009");
+
+    undoMutate.mockImplementation((_a, opts) =>
+      opts.onSuccess({
+        sales_order_id: 7, so_number: "SO-000007", status: "PICKING",
+        allocation_id: 8, quantity: "2.000", picked_quantity: "1.000", packed_quantity: "0.000",
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: /undo one Refined Sugar/i }));
+
+    expect(undoMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 7, allocation_id: 8, quantity: "1" }),
+      expect.any(Object),
+    );
+    expect(await screen.findByText(/Picked undone · now/i)).toBeInTheDocument();
   });
 });

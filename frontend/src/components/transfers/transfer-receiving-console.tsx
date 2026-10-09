@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { ChevronRight, ScanLine, TriangleAlert } from "lucide-react";
+import { Camera, ChevronRight, ScanLine, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { QuantityDisplay } from "@/components/ui/quantity-display";
 import { ProgressRing } from "@/components/work/progress-ring";
+import { CameraBarcodeScanner } from "@/components/work/camera-barcode-scanner";
 import { useScanner } from "@/components/work/use-scanner";
 import { isApiError } from "@/lib/api/errors";
 import { compareDecimals, subtractDecimals, sumDecimals } from "@/lib/decimal";
@@ -41,33 +42,41 @@ export function TransferReceivingConsole({ transferId }: { transferId: number })
   const [sessionReceipts, setSessionReceipts] = React.useState<TransferReceiptResponse[]>([]);
   const [mismatch, setMismatch] = React.useState(false);
   const [highlightItemId, setHighlightItemId] = React.useState<number | null>(null);
+  const [cameraOpen, setCameraOpen] = React.useState(false);
 
-  const scanner = useScanner({
-    onScan: async (code) => {
-      try {
-        const res = await resolveBarcode(code, "stock_in");
-        const matches = (detail?.items ?? []).filter((i) => i.product_id === res.product.id);
-        if (matches.length === 0) {
-          toast.error(`${res.product.product_name} is not on this transfer.`);
-          return;
-        }
-        const open = matches.find(
-          (i) => compareDecimals(subtractDecimals(i.dispatched_quantity ?? "0", i.received_quantity ?? "0", 3), "0") > 0,
-        );
-        if (!open) {
-          toast.info(`${res.product.product_name} is already fully received.`);
-          return;
-        }
-        if (matches.length > 1) toast.info(`${res.product.product_name} has ${matches.length} lines — jumped to the first with stock in transit.`);
-        setHighlightItemId(open.id);
-        const el = document.getElementById(`trl-${open.id}-qty`);
-        el?.scrollIntoView({ block: "center", behavior: "smooth" });
-        (el as HTMLInputElement | null)?.focus();
-      } catch (e) {
-        toast.error(isApiError(e) && e.status === 404 ? `Unknown barcode ${code}.` : "Could not resolve that barcode.");
+  const detailRef = React.useRef(detail);
+  React.useEffect(() => {
+    detailRef.current = detail;
+  }, [detail]);
+
+  /* barcode assist — read-only line identification, never a receive mutation.
+     Shared verbatim by the hardware/manual scanner AND the camera. */
+  const handleAssistScan = React.useCallback(async (code: string) => {
+    try {
+      const res = await resolveBarcode(code, "stock_in");
+      const matches = (detailRef.current?.items ?? []).filter((i) => i.product_id === res.product.id);
+      if (matches.length === 0) {
+        toast.error(`${res.product.product_name} is not on this transfer.`);
+        return;
       }
-    },
-  });
+      const open = matches.find(
+        (i) => compareDecimals(subtractDecimals(i.dispatched_quantity ?? "0", i.received_quantity ?? "0", 3), "0") > 0,
+      );
+      if (!open) {
+        toast.info(`${res.product.product_name} is already fully received.`);
+        return;
+      }
+      if (matches.length > 1) toast.info(`${res.product.product_name} has ${matches.length} lines — jumped to the first with stock in transit.`);
+      setHighlightItemId(open.id);
+      const el = document.getElementById(`trl-${open.id}-qty`);
+      el?.scrollIntoView({ block: "center", behavior: "smooth" });
+      (el as HTMLInputElement | null)?.focus();
+    } catch (e) {
+      toast.error(isApiError(e) && e.status === 404 ? `Unknown barcode ${code}.` : "Could not resolve that barcode.");
+    }
+  }, []);
+
+  const scanner = useScanner({ onScan: handleAssistScan });
 
   if (detailQ.isLoading) return <LoadingState label="Loading receiving console…" />;
   if (detailQ.isError) return <ErrorState error={detailQ.error} onRetry={() => void detailQ.refetch()} />;
@@ -199,6 +208,19 @@ export function TransferReceivingConsole({ transferId }: { transferId: number })
               aria-label="Barcode assist"
               className="min-h-11 w-full min-w-0 bg-transparent text-[13px] outline-none"
             />
+            <Button
+              type="button"
+              variant="secondary"
+              size="icon"
+              aria-label="Scan with camera"
+              title="Scan with the device camera"
+              onClick={() => {
+                if (typeof document !== "undefined") (document.activeElement as HTMLElement | null)?.blur();
+                setCameraOpen(true);
+              }}
+            >
+              <Camera aria-hidden className="h-4 w-4" />
+            </Button>
           </div>
 
           {detail.items.map((it) => {
@@ -343,6 +365,19 @@ export function TransferReceivingConsole({ transferId }: { transferId: number })
           {receive.isPending ? "Submitting…" : "Receive"}
         </Button>
       </div>
+
+      <CameraBarcodeScanner
+        open={cameraOpen}
+        onOpenChange={(v) => {
+          setCameraOpen(v);
+          if (!v) scanner.focus();
+        }}
+        title="Scan a barcode"
+        onDecode={(value) => {
+          setCameraOpen(false);
+          void handleAssistScan(value);
+        }}
+      />
     </div>
   );
 }

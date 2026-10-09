@@ -179,13 +179,19 @@ def fulfillment_transition_service(db, sales_order_repo, balance_repo, sales_ord
                 if set(submitted) != {a.id for a in allocations}:
                     _raise_error("Allocation membership must exactly match this order")
                 field = "picked_quantity" if action == "complete-picking" else "packed_quantity"
+                stage = "picked" if field == "picked_quantity" else "packed"
                 for a in allocations:
                     if submitted[a.id] != a.quantity:
                         _raise_error(f"Incomplete or excessive allocation quantity: {a.id}")
-                    if field == "packed_quantity" and a.picked_quantity != a.quantity:
-                        _raise_error(f"Allocation is not fully picked: {a.id}")
-                    setattr(a, field, submitted[a.id])
-                stage = "picked" if field == "picked_quantity" else "packed"
+                    # Completion integrity: the scanned counter is the sole
+                    # authority. Complete only transitions state; it never
+                    # fills quantities, so a handcrafted payload can never
+                    # bypass scan-pick / scan-pack.
+                    if getattr(a, field) != a.quantity:
+                        _raise_error(
+                            f"Allocation {a.id} is not fully {stage}: "
+                            f"{getattr(a, field)} of {a.quantity}"
+                        )
                 setattr(order, stage + "_at", datetime.now(timezone.utc))
                 setattr(order, stage + "_by_user_id", current_user.id)
         order.status = after
@@ -205,12 +211,22 @@ def scan_fulfillment_service(db, sales_order_repo, balance_repo, sales_order_id,
             _raise_error("PRODUCT_NOT_IN_ORDER")
         balance_repo.lock_inventory([i.product_id for i in items])
         allocations = _allocations(sales_order_repo, order, items)
-        matches = [a for a in allocations if a.product_id == product.id]
         if data.allocation_id is not None:
-            matches = [a for a in matches if a.id == data.allocation_id]
-        if len(matches) != 1:
-            _raise_error("ALLOCATION_IDENTIFICATION_REQUIRED")
-        a = matches[0]
+            # Targeted scan: the line is the authority on which product is
+            # expected. A scan whose decoded product is not this line's
+            # product is a clean, operator-safe rejection — never a vague
+            # "identify the allocation" error.
+            target = next((a for a in allocations if a.id == data.allocation_id), None)
+            if target is None:
+                _raise_error("ALLOCATION_NOT_IN_ORDER", 404)
+            if target.product_id != product.id:
+                _raise_error("SCANNED_PRODUCT_MISMATCHES_LINE")
+            a = target
+        else:
+            matches = [a for a in allocations if a.product_id == product.id]
+            if len(matches) != 1:
+                _raise_error("ALLOCATION_IDENTIFICATION_REQUIRED")
+            a = matches[0]
         _source(db, a)
         field = "packed_quantity" if packing else "picked_quantity"
         limit = a.picked_quantity if packing else a.quantity
@@ -220,6 +236,40 @@ def scan_fulfillment_service(db, sales_order_repo, balance_repo, sales_order_id,
         setattr(a, field, current + data.quantity)
         _audit(db, order, current_user, "SCAN_PACK" if packing else "SCAN_PICK",
                detail=f"Allocation {a.id}; increment {data.quantity}; {field}={getattr(a, field)}")
+    return {**_result(order), "allocation_id": a.id, "quantity": a.quantity,
+            "picked_quantity": a.picked_quantity, "packed_quantity": a.packed_quantity}
+
+
+def undo_fulfillment_service(db, sales_order_repo, balance_repo, sales_order_id, current_user, data, packing=False):
+    """Reverse pick/pack scan progress by a chosen quantity (default 1).
+
+    Counter-only, exactly like scan_fulfillment_service: no stock balance
+    movement, no InventoryMovement. The order row lock (SELECT FOR UPDATE)
+    serialises this against scans and other undos for the same order, so no
+    allocation-level or inventory-balance lock is taken.
+    """
+    with UnitOfWork(db):
+        order = _get_required_sales_order_for_update(sales_order_repo, sales_order_id)
+        _require_state(order, "PACKING" if packing else "PICKING")
+        items = sales_order_repo.get_order_items(order.id)
+        balance_repo.lock_inventory([i.product_id for i in items])
+        allocations = _allocations(sales_order_repo, order, items)
+        a = next((x for x in allocations if x.id == data.allocation_id), None)
+        if a is None:
+            _raise_error("ALLOCATION_NOT_IN_ORDER", 404)
+        field = "packed_quantity" if packing else "picked_quantity"
+        current = getattr(a, field)
+        if current is None:
+            _raise_error("ALLOCATION_NOT_FULFILLABLE")
+        new_value = current - data.quantity
+        if new_value < 0:
+            _raise_error("UNDO_BELOW_ZERO")
+        # Never let picked drop under packed (DB CHECK also enforces picked >= packed).
+        if not packing and a.packed_quantity is not None and new_value < a.packed_quantity:
+            _raise_error("UNDO_BELOW_PACKED")
+        setattr(a, field, new_value)
+        _audit(db, order, current_user, "PACK_UNDO" if packing else "PICK_UNDO",
+               detail=f"Allocation {a.id}; decrement {data.quantity}; {field}={new_value}")
     return {**_result(order), "allocation_id": a.id, "quantity": a.quantity,
             "picked_quantity": a.picked_quantity, "packed_quantity": a.packed_quantity}
 

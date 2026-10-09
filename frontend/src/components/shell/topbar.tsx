@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { Bell, Menu, Search, Warehouse } from "lucide-react";
+import { Bell, Menu, Search } from "lucide-react";
 
 import { useCommandPalette } from "@/components/command-palette";
 import { useSession } from "@/components/session-provider";
 import { cn } from "@/lib/utils";
+import { BrandMark } from "./brand-mark";
 import { ThemeToggle } from "./theme-toggle";
 
 export function Topbar({ onOpenNav }: { onOpenNav: () => void }) {
@@ -31,14 +32,9 @@ export function Topbar({ onOpenNav }: { onOpenNav: () => void }) {
         <Menu aria-hidden className="h-[18px] w-[18px]" />
       </button>
 
-      <Link
-        href="/dashboard"
-        className="flex items-center gap-[9px] text-[14px] font-semibold tracking-[-0.01em]"
-      >
-        <span className="grid h-[26px] w-[26px] flex-none place-items-center rounded-[var(--r-sm)] bg-[var(--primary)] text-[var(--primary-fg)]">
-          <Warehouse aria-hidden className="h-[15px] w-[15px]" />
-        </span>
-        <span>Warehouse Console</span>
+      <Link href="/dashboard" aria-label="AKKRATHARA — dashboard" className="flex items-center">
+        {/* mark always; wordmark from tablet up */}
+        <BrandMark variant="full" className="max-[767.98px]:[&>span:last-child]:hidden" />
       </Link>
 
       {/* Desktop-only topbar search (>= 1200px). Below that it moves into the sidebar. */}

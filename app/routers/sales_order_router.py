@@ -28,7 +28,7 @@ from app.core.pagination import ListParams, list_params
 from app.core.quantity import quantity_text
 from app.models import User
 from app.schemas.sales_order_schema import (
-    SalesOrderCreate, CompleteFulfillment, FulfillmentScan,
+    SalesOrderCreate, CompleteFulfillment, FulfillmentScan, FulfillmentUndo,
 )
 from app.schemas.sales_return_schema import (
     SalesReturnCreate,
@@ -41,6 +41,7 @@ from app.services.sales_order_service import (
     return_sales_order_items_service,
     ship_sales_order_service,
     confirm_sales_order_service, fulfillment_transition_service, scan_fulfillment_service,
+    undo_fulfillment_service,
 )
 
 
@@ -464,6 +465,24 @@ def scan_pack(sales_order_id: int, data: FulfillmentScan, db: DatabaseSession,
               balance_repo: StockBalanceRepositoryDependency,
               current_user: User = Depends(require_warehouse)):
     return success_response("Packing Progress", scan_fulfillment_service(
+        db, sales_order_repo, balance_repo, sales_order_id, current_user, data, packing=True))
+
+
+@router.post("/{sales_order_id}/undo-pick")
+def undo_pick(sales_order_id: int, data: FulfillmentUndo, db: DatabaseSession,
+              sales_order_repo: SalesOrderRepositoryDependency,
+              balance_repo: StockBalanceRepositoryDependency,
+              current_user: User = Depends(require_warehouse)):
+    return success_response("Pick Undone", undo_fulfillment_service(
+        db, sales_order_repo, balance_repo, sales_order_id, current_user, data))
+
+
+@router.post("/{sales_order_id}/undo-pack")
+def undo_pack(sales_order_id: int, data: FulfillmentUndo, db: DatabaseSession,
+              sales_order_repo: SalesOrderRepositoryDependency,
+              balance_repo: StockBalanceRepositoryDependency,
+              current_user: User = Depends(require_warehouse)):
+    return success_response("Pack Undone", undo_fulfillment_service(
         db, sales_order_repo, balance_repo, sales_order_id, current_user, data, packing=True))
 
 

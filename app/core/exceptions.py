@@ -172,7 +172,61 @@ class BatchStockAdjustmentException(AppException):
                 "that has active batch stock"
             ),
             status_code=status.HTTP_409_CONFLICT,
-        )   
+        )
+
+
+class BatchTrackedStockInException(AppException):
+    """Direct /stock/in on a batch-tracked product — the caller must receive it
+    with a lot number via /batches instead."""
+
+    def __init__(self):
+        super().__init__(
+            message=(
+                "Batch-tracked products must be received with a lot "
+                "number via POST /batches, not direct stock in"
+            ),
+            status_code=status.HTTP_409_CONFLICT,
+        )
+
+
+class NonBatchProductBatchException(AppException):
+    """A batch was requested for a product that is not batch-tracked."""
+
+    def __init__(self):
+        super().__init__(
+            message=(
+                "This product is not batch-tracked — add stock directly via "
+                "POST /stock/in, not as a batch"
+            ),
+            status_code=status.HTTP_409_CONFLICT,
+        )
+
+
+class MissingBatchDatesException(AppException):
+    """Expiry-tracked product received without both manufacturing and expiry
+    dates."""
+
+    def __init__(self):
+        super().__init__(
+            message=(
+                "Expiry-tracked product requires manufacturing and expiry "
+                "dates"
+            ),
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        )
+
+
+class PartialBatchDatesException(AppException):
+    """Only one of manufacturing / expiry date supplied for a batch."""
+
+    def __init__(self):
+        super().__init__(
+            message=(
+                "Supply both manufacturing and expiry dates, or neither"
+            ),
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
 
 class PurchaseOrderNotFoundException(AppException):
     def __init__(self):

@@ -3,14 +3,20 @@
 import * as React from "react";
 
 /**
- * Optional, user-controlled scan feedback. Two very short WebAudio tones —
- * a bright blip for success, a lower buzz for a rejected scan. Off by default;
- * the choice is remembered per-browser. Never long or loud.
+ * Optional, user-controlled scan feedback. Three very short WebAudio tones,
+ * played only *after* validation — never on a raw camera decode:
+ *   ok   — a bright blip: the scan matched the expected product / line
+ *   bad  — a lower buzz: wrong product, unknown barcode, over-scan, rejected
+ *   done — a two-note rise: a backend write is confirmed (stock saved,
+ *          picking/packing complete)
+ * Off by default; the choice is remembered per-browser. Never long or loud,
+ * and always paired with an on-screen icon + text.
  *
  * The preference is an external store (localStorage) read via
  * useSyncExternalStore — SSR-safe (server snapshot is `false`) and free of the
  * setState-in-effect pattern.
  */
+export type BeepKind = "ok" | "bad" | "done";
 const STORAGE_KEY = "wc.scan.sound";
 const listeners = new Set<() => void>();
 
@@ -41,7 +47,7 @@ export function useBeep() {
   const setEnabled = React.useCallback((v: boolean) => writePref(v), []);
 
   const tone = React.useCallback(
-    (ok: boolean) => {
+    (kind: BeepKind) => {
       if (!enabled || typeof window === "undefined") return;
       if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
       try {
@@ -50,16 +56,28 @@ export function useBeep() {
           (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
         if (!AC) return;
         const ac = (ctxRef.current ??= new AC());
-        const osc = ac.createOscillator();
-        const gain = ac.createGain();
-        osc.type = "sine";
-        osc.frequency.value = ok ? 880 : 220;
-        gain.gain.value = 0.04; // quiet
-        osc.connect(gain).connect(ac.destination);
         const now = ac.currentTime;
-        osc.start(now);
-        gain.gain.exponentialRampToValueAtTime(0.0001, now + (ok ? 0.09 : 0.16));
-        osc.stop(now + (ok ? 0.1 : 0.18));
+
+        // one short sine blip at f, starting at offset t, lasting d seconds
+        const blip = (f: number, t: number, d: number) => {
+          const osc = ac.createOscillator();
+          const gain = ac.createGain();
+          osc.type = "sine";
+          osc.frequency.value = f;
+          gain.gain.value = 0.04; // quiet
+          osc.connect(gain).connect(ac.destination);
+          osc.start(now + t);
+          gain.gain.exponentialRampToValueAtTime(0.0001, now + t + d);
+          osc.stop(now + t + d + 0.02);
+        };
+
+        if (kind === "ok") blip(880, 0, 0.09);
+        else if (kind === "bad") blip(220, 0, 0.16);
+        else {
+          // "done" — a distinct two-note rise, still under a quarter second
+          blip(660, 0, 0.08);
+          blip(990, 0.09, 0.12);
+        }
       } catch {
         /* audio unavailable — silent */
       }
@@ -67,5 +85,12 @@ export function useBeep() {
     [enabled],
   );
 
-  return { enabled, setEnabled, beepOk: () => tone(true), beepBad: () => tone(false) };
+  return {
+    enabled,
+    setEnabled,
+    tone,
+    beepOk: () => tone("ok"),
+    beepBad: () => tone("bad"),
+    beepDone: () => tone("done"),
+  };
 }
