@@ -85,6 +85,12 @@ def stock_out_fifo(
     current_user: User = Depends(
         require_warehouse
     ),
+    operation_key: str | None = Header(
+        default=None,
+        alias="Idempotency-Key",
+        max_length=128,
+        pattern=r"^[A-Za-z0-9._:-]+$",
+    ),
 ) -> ApiResponse[StockOperationResponse]:
 
     result = stock_out_fifo_service(
@@ -94,6 +100,7 @@ def stock_out_fifo(
         movement_repo=movement_repo,
         data=data,
         created_by_user_id=current_user.id,
+        operation_key=operation_key,
     )
 
     return ApiResponse(
@@ -120,6 +127,12 @@ def stock_out_fefo(
     current_user: User = Depends(
         require_warehouse
     ),
+    operation_key: str | None = Header(
+        default=None,
+        alias="Idempotency-Key",
+        max_length=128,
+        pattern=r"^[A-Za-z0-9._:-]+$",
+    ),
 ) -> ApiResponse[StockOperationResponse]:
 
     result = stock_out_fefo_service(
@@ -129,6 +142,7 @@ def stock_out_fefo(
         movement_repo=movement_repo,
         data=data,
         created_by_user_id=current_user.id,
+        operation_key=operation_key,
     )
 
     return ApiResponse(

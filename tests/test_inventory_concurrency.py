@@ -17,7 +17,7 @@ from app.core.security import create_access_token
 from app.database import get_db
 from app.main import app
 from app.models import (
-    User, Warehouse, WarehouseLocation, Product, ProductBatch, StockBalance,
+    AuditLog, User, Warehouse, WarehouseLocation, Product, ProductBatch, StockBalance,
     StockOperationReceipt, StockTransaction, InventoryMovement, PurchaseOrderItem,
     SalesOrder, SalesOrderBatchAllocation,
 )
@@ -511,6 +511,92 @@ def test_stock_in_same_idempotency_key_different_products_conflicts_safely(concu
         assert db.get(Product, loser_id).stock_qty == Decimal("0.000")  # rolled back whole, not half-applied
         assert db.query(InventoryMovement).filter_by(movement_type="STOCK_IN").count() == 1
         assert db.query(StockTransaction).count() == 1
+
+
+@pytest.mark.parametrize("endpoint,movement_type", [("out-fifo", "STOCK_OUT_FIFO"), ("out-fefo", "STOCK_OUT_FEFO")])
+def test_stock_out_same_idempotency_key_applies_once(concurrent_inventory, endpoint, movement_type):
+    """Phase 14A — two overlapping /stock/out-fifo (or -fefo) requests with
+    the same Idempotency-Key, same product: stock deducts once.
+
+    Both workers serialise on the per-product advisory lock (lock_inventory);
+    the loser replays the committed receipt instead of deducting a second
+    time. Mirrors test_stock_in_same_idempotency_key_applies_once.
+    """
+    s = concurrent_inventory
+    product = _create_product(s.client, s.headers)
+    _create_batch(s.client, s.headers, product["id"], quantity="10.000", expiry_days=180)
+    key = "idem-out-race-" + uuid4().hex
+    request = ("POST", f"/api/v1/stock/{endpoint}", {"product_id": product["id"], "quantity": "6.000"}, key)
+    responses = overlap(s, [request, request], "products", [product["id"]])
+
+    assert [r.status_code for r in responses] == [200, 200]
+    assert responses[0].json()["data"] == responses[1].json()["data"]  # one applied, one replayed
+
+    with s.sessions() as db:
+        assert db.get(Product, product["id"]).stock_qty == Decimal("4.000")  # 10 - 6, deducted exactly once
+        assert db.query(StockOperationReceipt).filter_by(operation_key=key).count() == 1
+        assert db.query(InventoryMovement).filter_by(
+            product_id=product["id"], movement_type=movement_type).count() == 1
+        # product_id alone would also count the IN_BATCH transaction the
+        # _create_batch() setup call wrote — scope to this operation's own type.
+        out_transaction_type = "OUT_FIFO" if endpoint == "out-fifo" else "OUT_FEFO"
+        assert db.query(StockTransaction).filter_by(
+            product_id=product["id"], transaction_type=out_transaction_type).count() == 1
+        assert db.query(AuditLog).filter_by(action=movement_type).count() == 1
+
+
+def test_stock_out_fifo_same_idempotency_key_different_products_conflicts_safely(concurrent_inventory):
+    """Phase 14A — same Idempotency-Key, two DIFFERENT products, genuinely
+    concurrent, on /stock/out-fifo. Mirrors
+    test_stock_in_same_idempotency_key_different_products_conflicts_safely:
+    the per-product lock does not serialise two different products against
+    each other, so a barrier on the INSERT itself forces the exact
+    cross-product receipt-key collision every run. The loser must get a
+    clean 409 (never a bare 500) and roll back its deduction entirely.
+    """
+    s = concurrent_inventory
+    first = _create_product(s.client, s.headers)
+    second = _create_product(s.client, s.headers)
+    _create_batch(s.client, s.headers, first["id"], quantity="10.000", expiry_days=180)
+    _create_batch(s.client, s.headers, second["id"], quantity="10.000", expiry_days=180)
+    key = "idem-out-cross-product-" + uuid4().hex
+
+    barrier = Barrier(2, timeout=6)
+
+    def before_insert(connection, cursor, statement, parameters, context, executemany):
+        if "INSERT INTO stock_operation_receipts" in statement:
+            barrier.wait()
+
+    event.listen(s.engine, "before_cursor_execute", before_insert)
+    try:
+        request_a = ("POST", "/api/v1/stock/out-fifo", {"product_id": first["id"], "quantity": "4.000"}, key)
+        request_b = ("POST", "/api/v1/stock/out-fifo", {"product_id": second["id"], "quantity": "9.000"}, key)
+        responses = overlap(s, [request_a, request_b], "products", sorted({first["id"], second["id"]}))
+    finally:
+        event.remove(s.engine, "before_cursor_execute", before_insert)
+
+    assert sorted(r.status_code for r in responses) == [200, 409]
+    loser = next(r for r in responses if r.status_code == 409)
+    assert "different payload" in loser.text
+    assert loser.json()["request_id"]
+
+    winner_is_first = responses[0].status_code == 200
+    winner_id, winner_qty = (first["id"], Decimal("6.000")) if winner_is_first else (second["id"], Decimal("1.000"))
+    loser_id = second["id"] if winner_is_first else first["id"]
+
+    with s.sessions() as db:
+        assert db.query(StockOperationReceipt).filter_by(operation_key=key).count() == 1
+        assert db.get(Product, winner_id).stock_qty == winner_qty  # 10 - (4 or 9), deducted exactly once
+        assert db.get(Product, loser_id).stock_qty == Decimal("10.000")  # rolled back whole, not half-applied
+        assert db.query(InventoryMovement).filter_by(movement_type="STOCK_OUT_FIFO").count() == 1
+        assert db.query(StockTransaction).filter_by(transaction_type="OUT_FIFO").count() == 1
+        # The loser's own AuditLog insert (written before the final receipt
+        # insert that actually loses the race) must roll back along with
+        # everything else in its transaction — not just the stock mutation.
+        audit_rows = db.query(AuditLog).filter_by(action="STOCK_OUT_FIFO").all()
+        assert len(audit_rows) == 1
+        assert f"Product {winner_id};" in audit_rows[0].description
+        assert f"Product {loser_id};" not in audit_rows[0].description
 
 
 def _receipt_race_order(s, products, quantity="1.000"):

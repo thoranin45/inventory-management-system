@@ -205,6 +205,32 @@ def stock_in_service(
     return result
 
 
+def _stock_out_fingerprint(data: StockOut, operation: str) -> str:
+    """Canonical hash of every stock-affecting field of a /stock/out-fifo or
+    /stock/out-fefo request.
+
+    `operation` ("STOCK_OUT_FIFO" / "STOCK_OUT_FEFO") is folded into the hash
+    itself, not just stored as a separate operation_type column check — a key
+    cannot be replayed across the two strategies even if every other field
+    happens to match. FIFO/FEFO select batches algorithmically, so (unlike a
+    batch receipt) no lot/batch_id belongs in the fingerprint — the caller
+    never names one.
+    """
+    payload = {
+        "version": 1,
+        "operation": operation,
+        "product_id": data.product_id,
+        "quantity": format(data.quantity, ".3f"),
+        "storage": "MAIN/DEFAULT"
+        if data.warehouse_id is None and data.location_id is None
+        else [data.warehouse_id, data.location_id],
+        "remark": data.remark or None,
+    }
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+
+
 def stock_out_fifo_service(
     db: Session,
     stock_repo: StockRepository,
@@ -212,10 +238,27 @@ def stock_out_fifo_service(
     movement_repo: InventoryMovementRepository,
     data: StockOut,
     created_by_user_id: int | None,
+    operation_key: str | None = None,
 ) -> StockOperationResponse:
+
+    fingerprint = _stock_out_fingerprint(data, "STOCK_OUT_FIFO")
 
     with UnitOfWork(db):
         balance_repo.lock_inventory([data.product_id])
+
+        # Idempotency replay/mismatch check runs *after* the per-product
+        # advisory lock so a concurrent retry of the same key serialises here
+        # and replays the stored response instead of deducting stock twice.
+        if operation_key is not None:
+            existing = stock_repo.get_operation_receipt(operation_key)
+            if existing is not None:
+                if (
+                    existing.operation_type != "STOCK_OUT_FIFO"
+                    or existing.request_fingerprint != fingerprint
+                ):
+                    raise IdempotencyKeyConflictException()
+                return StockOperationResponse.model_validate(existing.response_snapshot)
+
         warehouse, location = balance_repo.resolve_storage(data.warehouse_id, data.location_id)
         product = (
             stock_repo
@@ -342,15 +385,42 @@ def stock_out_fifo_service(
         if remaining_quantity > 0:
             raise InsufficientStockException()
 
+        actor = db.get(User, created_by_user_id) if created_by_user_id is not None else None
+        db.add(AuditLog(
+            username=actor.username if actor else "system",
+            action="STOCK_OUT_FIFO",
+            table_name="stock_transactions",
+            record_id=transaction.id,
+            description=(
+                f"Product {product.id}; -{data.quantity} from "
+                f"{warehouse.warehouse_code}/{location.location_code}; "
+                f"actor_id={created_by_user_id}"
+            ),
+        ))
+
         balance_repo.sync_aggregates(product.id, f"user_id={created_by_user_id}")
 
-    return StockOperationResponse(
-        product_id=product.id,
-        product_name=product.product_name,
-        previous_stock=previous_stock,
-        current_stock=product.stock_qty,
-        difference=-data.quantity,
-    )
+        result = StockOperationResponse(
+            product_id=product.id,
+            product_name=product.product_name,
+            previous_stock=previous_stock,
+            current_stock=product.stock_qty,
+            difference=-data.quantity,
+        )
+
+        # Persist the durable replay record inside the same transaction as the
+        # stock movements and audit entry it describes, so a retry of this key
+        # can only ever replay a committed result.
+        if operation_key is not None:
+            stock_repo.create_operation_receipt(StockOperationReceipt(
+                operation_type="STOCK_OUT_FIFO",
+                operation_key=operation_key,
+                request_fingerprint=fingerprint,
+                response_snapshot=result.model_dump(mode="json"),
+                created_by_user_id=created_by_user_id,
+            ))
+
+    return result
 
 
 def stock_out_fefo_service(
@@ -360,10 +430,27 @@ def stock_out_fefo_service(
     movement_repo: InventoryMovementRepository,
     data: StockOut,
     created_by_user_id: int | None,
+    operation_key: str | None = None,
 ) -> StockOperationResponse:
+
+    fingerprint = _stock_out_fingerprint(data, "STOCK_OUT_FEFO")
 
     with UnitOfWork(db):
         balance_repo.lock_inventory([data.product_id])
+
+        # Idempotency replay/mismatch check runs *after* the per-product
+        # advisory lock so a concurrent retry of the same key serialises here
+        # and replays the stored response instead of deducting stock twice.
+        if operation_key is not None:
+            existing = stock_repo.get_operation_receipt(operation_key)
+            if existing is not None:
+                if (
+                    existing.operation_type != "STOCK_OUT_FEFO"
+                    or existing.request_fingerprint != fingerprint
+                ):
+                    raise IdempotencyKeyConflictException()
+                return StockOperationResponse.model_validate(existing.response_snapshot)
+
         warehouse, location = balance_repo.resolve_storage(data.warehouse_id, data.location_id)
         product = (
             stock_repo
@@ -490,15 +577,42 @@ def stock_out_fefo_service(
         if remaining_quantity > 0:
             raise InsufficientStockException()
 
+        actor = db.get(User, created_by_user_id) if created_by_user_id is not None else None
+        db.add(AuditLog(
+            username=actor.username if actor else "system",
+            action="STOCK_OUT_FEFO",
+            table_name="stock_transactions",
+            record_id=transaction.id,
+            description=(
+                f"Product {product.id}; -{data.quantity} from "
+                f"{warehouse.warehouse_code}/{location.location_code}; "
+                f"actor_id={created_by_user_id}"
+            ),
+        ))
+
         balance_repo.sync_aggregates(product.id, f"user_id={created_by_user_id}")
 
-    return StockOperationResponse(
-        product_id=product.id,
-        product_name=product.product_name,
-        previous_stock=previous_stock,
-        current_stock=product.stock_qty,
-        difference=-data.quantity,
-    )
+        result = StockOperationResponse(
+            product_id=product.id,
+            product_name=product.product_name,
+            previous_stock=previous_stock,
+            current_stock=product.stock_qty,
+            difference=-data.quantity,
+        )
+
+        # Persist the durable replay record inside the same transaction as the
+        # stock movements and audit entry it describes, so a retry of this key
+        # can only ever replay a committed result.
+        if operation_key is not None:
+            stock_repo.create_operation_receipt(StockOperationReceipt(
+                operation_type="STOCK_OUT_FEFO",
+                operation_key=operation_key,
+                request_fingerprint=fingerprint,
+                response_snapshot=result.model_dump(mode="json"),
+                created_by_user_id=created_by_user_id,
+            ))
+
+    return result
 
 
 def stock_adjust_service(

@@ -2102,3 +2102,38 @@ def test_batch_in_writes_audit_log(warehouse_client, admin_headers, db_session):
     )
     assert r.status_code == 201
     assert db_session.query(AuditLog).filter_by(action="BATCH_IN").count() == before + 1
+
+
+def test_stock_out_fifo_writes_audit_log(warehouse_client, admin_headers, db_session):
+    """Phase 14A parity fix: Stock Out previously wrote InventoryMovement +
+    StockTransaction but no top-level AuditLog entry, unlike Stock In / Batch
+    In / Adjust."""
+    from app.models import AuditLog
+
+    product = _create_product(client=warehouse_client, admin_headers=admin_headers)
+    _create_batch(client=warehouse_client, admin_headers=admin_headers,
+                   product_id=product["id"], quantity=10, expiry_days=180)
+    before = db_session.query(AuditLog).filter_by(action="STOCK_OUT_FIFO").count()
+    r = warehouse_client.post(
+        "/api/v1/stock/out-fifo",
+        headers=admin_headers,
+        json={"product_id": product["id"], "quantity": "3.000", "remark": "audit check"},
+    )
+    assert r.status_code == 200, r.text
+    assert db_session.query(AuditLog).filter_by(action="STOCK_OUT_FIFO").count() == before + 1
+
+
+def test_stock_out_fefo_writes_audit_log(warehouse_client, admin_headers, db_session):
+    from app.models import AuditLog
+
+    product = _create_product(client=warehouse_client, admin_headers=admin_headers)
+    _create_batch(client=warehouse_client, admin_headers=admin_headers,
+                   product_id=product["id"], quantity=10, expiry_days=180)
+    before = db_session.query(AuditLog).filter_by(action="STOCK_OUT_FEFO").count()
+    r = warehouse_client.post(
+        "/api/v1/stock/out-fefo",
+        headers=admin_headers,
+        json={"product_id": product["id"], "quantity": "2.000", "remark": "audit check"},
+    )
+    assert r.status_code == 200, r.text
+    assert db_session.query(AuditLog).filter_by(action="STOCK_OUT_FEFO").count() == before + 1
