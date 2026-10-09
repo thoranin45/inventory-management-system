@@ -175,6 +175,32 @@ class BatchStockAdjustmentException(AppException):
         )
 
 
+class BatchTrackedAdjustmentException(AppException):
+    """Direct /stock/adjust on a batch-tracked product, regardless of its
+    current batch stock total.
+
+    A batch-tracked product with zero batch stock would otherwise pass the
+    ``batch_stock_total > 0`` check and let a positive adjustment land
+    straight on the unbatched (batch_id=None) balance — stock with no lot or
+    expiry, for a product whose tracking mode says every unit must have both.
+    Unlike /stock/in and /batches, there is no working endpoint to adjust a
+    specific batch's balance directly (``PATCH /stock-balances/{id}`` is
+    intentionally disabled — it unconditionally returns 409), so the message
+    points to the batch-aware workflows that exist instead: receive more via
+    POST /batches, issue via /stock/out-fefo or /stock/out-fifo.
+    """
+
+    def __init__(self):
+        super().__init__(
+            message=(
+                "Batch-tracked products cannot be adjusted directly — "
+                "receive via POST /batches or issue via /stock/out-fefo "
+                "/ /stock/out-fifo instead"
+            ),
+            status_code=status.HTTP_409_CONFLICT,
+        )
+
+
 class BatchTrackedStockInException(AppException):
     """Direct /stock/in on a batch-tracked product — the caller must receive it
     with a lot number via /batches instead."""

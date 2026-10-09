@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.core import batch_eligibility
 from app.core.exceptions import (
     BatchStockAdjustmentException,
+    BatchTrackedAdjustmentException,
     BatchTrackedStockInException,
     IdempotencyKeyConflictException,
     InsufficientBatchStockException,
@@ -522,6 +523,20 @@ def stock_adjust_service(
         if product is None:
             raise ProductNotFoundException()
 
+        # Server-side tracking invariant: a batch-tracked product is never
+        # adjusted directly, even with zero current batch stock — otherwise a
+        # positive adjustment would land on the unbatched (batch_id=None)
+        # balance with no lot/expiry, for a product whose tracking mode
+        # requires both. Mirrors the track_batch guard on /stock/in and
+        # /batches; frontend routing is not the only guard.
+        if product.track_batch:
+            raise BatchTrackedAdjustmentException()
+
+        # Kept as a safety net for pre-existing data: product_service.py
+        # already blocks flipping track_batch off while a product carries
+        # stock/inventory evidence, so this should be unreachable for data
+        # created under that guard — but it still catches anything that
+        # predates it or was written directly to the database.
         batch_stock_total = stock_repo.get_batch_stock_total(data.product_id)
 
         if batch_stock_total > 0:
