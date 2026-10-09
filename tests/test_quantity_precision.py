@@ -141,6 +141,10 @@ def test_dashboard_repository_keeps_fractional_sums(client, admin_headers, db_se
 def test_batch_lot_scope_preserves_case_and_duplicate_rejection(client, admin_headers):
     first = _create_product(client, admin_headers)
     second = _create_product(client, admin_headers)
+    for product in (first, second):
+        # Batch inbound requires a batch-tracked product (server invariant).
+        client.put(f"/api/v1/products/{product['id']}", headers=admin_headers,
+                   json={"track_batch": True, "track_expiry": True})
     lot = "SCOPE-" + uuid4().hex
     payload = {"quantity": "0.001", "lot_no": lot,
                "mfg_date": date.today().isoformat(),

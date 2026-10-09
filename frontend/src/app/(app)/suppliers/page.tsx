@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 import { SuppliersView } from "@/components/master-data/suppliers-view";
 import { LoadingState } from "@/components/ui/states";
 
-export const metadata: Metadata = { title: "Suppliers · Warehouse Console" };
+export const metadata: Metadata = { title: "Suppliers" };
 
 export default function SuppliersPage() {
   return (

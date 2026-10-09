@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 import { WorkQueue } from "@/components/work/work-queue";
 import { LoadingState } from "@/components/ui/states";
 
-export const metadata: Metadata = { title: "Packing · Warehouse Console" };
+export const metadata: Metadata = { title: "Packing" };
 
 export default function PackingPage() {
   return (

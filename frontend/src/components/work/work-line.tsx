@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Minus, Plus } from "lucide-react";
+import { ScanLine, Undo2 } from "lucide-react";
 
 import { ExpiryBadge } from "@/components/ui/expiry-badge";
 import { QuantityDisplay } from "@/components/ui/quantity-display";
@@ -18,10 +18,11 @@ export interface WorkLineExpiry {
  * One order line in a picking / packing console. Quantities are decimal
  * strings; completeness is an exact BigInt comparison, never a float.
  *
- * `−` is intentionally inert: the backend has no decrement/arbitrary-quantity
- * mutation for fulfillment progress — it is set by scanning only. It is shown
- * disabled (with an explanation) to keep the approved layout, per the brief.
- * `+` performs a single backend-confirmed unit scan.
+ * Phase 12C:
+ *   [Scan +1] does NOT mutate — it targets this line so the next physical scan
+ *   (hardware wedge, camera or typed) is attributed to it. One scan is still
+ *   one backend round-trip; the backend response is the authority.
+ *   [Undo] is a real backend `undo-pick` / `undo-pack` of one unit.
  */
 export const WorkLine = React.memo(function WorkLine({
   anchorId,
@@ -32,8 +33,12 @@ export const WorkLine = React.memo(function WorkLine({
   done,
   required,
   verb,
-  onPlusOne,
-  plusDisabledReason,
+  onTargetScan,
+  targetDisabledReason,
+  targeted,
+  onUndo,
+  undoDisabledReason,
+  lastActivity,
   busy,
   flash,
 }: {
@@ -44,22 +49,35 @@ export const WorkLine = React.memo(function WorkLine({
   expiry?: WorkLineExpiry | null;
   done: DecimalString;
   required: DecimalString;
-  /** "picked" | "packed" — used only for the − tooltip copy */
+  /** "picked" | "packed" — used in copy */
   verb: string;
-  onPlusOne?: () => void;
-  plusDisabledReason?: string;
+  /** target this line for the next scan (no mutation) */
+  onTargetScan?: () => void;
+  targetDisabledReason?: string;
+  targeted?: boolean;
+  /** reverse one unit of confirmed progress on this line */
+  onUndo?: () => void;
+  undoDisabledReason?: string;
+  /** short local activity note, e.g. "↶ Pick undone · -1" */
+  lastActivity?: React.ReactNode;
   busy?: boolean;
   flash?: "hit" | "miss" | null;
 }) {
   const full = compareDecimals(done, required) >= 0;
-  const plusDisabled = full || busy || !onPlusOne || !!plusDisabledReason;
+  const none = compareDecimals(done, "0") <= 0;
+  const targetDisabled = full || busy || !onTargetScan || !!targetDisabledReason;
+  const undoDisabled = none || busy || !onUndo || !!undoDisabledReason;
 
   return (
     <div
       id={anchorId}
       className={cn(
         "wc-work-line grid grid-cols-[1fr_auto] items-center gap-x-[14px] gap-y-2 rounded-[var(--r-md)] border bg-[var(--surface)] p-[13px_15px] max-[540px]:grid-cols-1",
-        full ? "border-[color-mix(in_srgb,var(--success)_40%,transparent)]" : "border-[var(--border)]",
+        full
+          ? "border-[color-mix(in_srgb,var(--success)_40%,transparent)]"
+          : targeted
+            ? "border-[var(--accent)] ring-1 ring-[var(--accent)]"
+            : "border-[var(--border)]",
         flash === "hit" && "wc-line-hit",
         flash === "miss" && "wc-line-miss",
       )}
@@ -73,6 +91,14 @@ export const WorkLine = React.memo(function WorkLine({
             <ExpiryBadge days={expiry.days} isoDate={expiry.iso} />
           ) : null}
         </div>
+        {targeted && !full ? (
+          <div className="mt-[5px] text-[11px] font-medium text-[var(--accent)]">
+            Waiting for a scan of this item…
+          </div>
+        ) : null}
+        {lastActivity ? (
+          <div className="mt-[5px] text-[11px] text-[var(--muted)]">{lastActivity}</div>
+        ) : null}
       </div>
 
       <div
@@ -83,12 +109,13 @@ export const WorkLine = React.memo(function WorkLine({
       >
         <button
           type="button"
-          aria-label={`decrease ${name}`}
-          disabled
-          title={`${verb} quantity is set by scanning and can't be decreased here`}
-          className="grid h-8 w-8 flex-none place-items-center rounded-[var(--r-sm)] border border-[var(--border-strong)] text-[var(--muted)] opacity-40"
+          aria-label={`undo one ${name}`}
+          onClick={onUndo}
+          disabled={undoDisabled}
+          title={undoDisabledReason || (none ? `Nothing ${verb.toLowerCase()} to undo` : `Undo one ${verb.toLowerCase()} unit`)}
+          className="grid h-8 w-8 flex-none place-items-center rounded-[var(--r-sm)] border border-[var(--border-strong)] hover:border-[var(--danger)] hover:bg-[var(--danger-subtle)] disabled:opacity-40 disabled:hover:border-[var(--border-strong)] disabled:hover:bg-transparent"
         >
-          <Minus aria-hidden className="h-[14px] w-[14px]" />
+          <Undo2 aria-hidden className="h-[14px] w-[14px]" />
         </button>
         <span className="mx-1 min-w-[64px] text-center text-[15px] font-semibold">
           <QuantityDisplay value={done} />
@@ -100,12 +127,19 @@ export const WorkLine = React.memo(function WorkLine({
         <button
           type="button"
           aria-label={`scan one ${name}`}
-          onClick={onPlusOne}
-          disabled={plusDisabled}
-          title={plusDisabledReason || (full ? "Line complete" : "Count one unit (backend-confirmed)")}
-          className="grid h-8 w-8 flex-none place-items-center rounded-[var(--r-sm)] border border-[var(--border-strong)] hover:border-[var(--accent)] hover:bg-[var(--accent-subtle)] disabled:opacity-40 disabled:hover:border-[var(--border-strong)] disabled:hover:bg-transparent"
+          onClick={onTargetScan}
+          disabled={targetDisabled}
+          title={targetDisabledReason || (full ? "Line complete" : "Target this line for the next scan")}
+          className={cn(
+            "inline-flex h-8 flex-none items-center gap-1 rounded-[var(--r-sm)] border px-2 text-[12px] font-medium",
+            targeted && !full
+              ? "border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)]"
+              : "border-[var(--border-strong)] hover:border-[var(--accent)] hover:bg-[var(--accent-subtle)]",
+            "disabled:opacity-40 disabled:hover:border-[var(--border-strong)] disabled:hover:bg-transparent",
+          )}
         >
-          <Plus aria-hidden className="h-[14px] w-[14px]" />
+          <ScanLine aria-hidden className="h-[14px] w-[14px]" />
+          Scan +1
         </button>
       </div>
     </div>

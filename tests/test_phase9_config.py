@@ -79,6 +79,29 @@ def test_production_accepts_strong_config():
         "https://app.example.com",
         "https://admin.example.com",
     ]
+    # access_token_expire_minutes is env-overridable (see Settings docstring)
+    # and deliberately NOT asserted here: this test's ACCESS_TOKEN_EXPIRE_MINUTES
+    # is whatever the real process environment happens to have (CI sets 1440
+    # for its own token-lifetime testing purposes). The field's own default
+    # is verified in isolation below.
+
+
+def test_access_token_expire_minutes_defaults_to_720_when_unset(monkeypatch):
+    """720 minutes (12h) is the Settings field default (see docs/api-conventions.md).
+
+    Config isn't loaded from a .env file in these tests (`_env_file=None`),
+    but pydantic-settings still falls back to the real OS environment for any
+    field not passed explicitly — so this must clear the real
+    ACCESS_TOKEN_EXPIRE_MINUTES var to test the default itself, rather than
+    whatever the ambient process environment happens to contain (CI sets 1440
+    deliberately; a developer's shell may set anything, or nothing).
+    """
+    monkeypatch.delenv("ACCESS_TOKEN_EXPIRE_MINUTES", raising=False)
+    s = _settings(
+        env="production",
+        secret_key=_STRONG_SECRET,
+        cors_origins="https://app.example.com",
+    )
     assert s.access_token_expire_minutes == 720
 
 

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Header, status
 
 from app.core.dependencies import (
     BatchRepositoryDependency,
@@ -42,6 +42,12 @@ def create_batch(
     movement_repo: InventoryMovementRepositoryDependency,
     balance_repo: StockBalanceRepositoryDependency,
     current_user: User = Depends(require_warehouse),
+    operation_key: str | None = Header(
+        default=None,
+        alias="Idempotency-Key",
+        max_length=128,
+        pattern=r"^[A-Za-z0-9._:-]+$",
+    ),
 ) -> ApiResponse[BatchCreateResponse]:
     result = create_batch_service(
         db=db,
@@ -51,6 +57,7 @@ def create_batch(
         movement_repo=movement_repo,
         data=data,
         created_by_user_id=current_user.id,
+        operation_key=operation_key,
     )
 
     return ApiResponse(

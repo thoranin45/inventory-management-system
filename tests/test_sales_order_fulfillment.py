@@ -37,10 +37,12 @@ def advance(client, headers, order_id, state):
     assert action(client, headers, order_id, "start-picking").status_code == 200
     if state == "PICKING":
         return
+    sales._scan_fulfillment_to_full(client, headers, order_id, packing=False)
     payload = sales._fulfillment_payload(client, headers, order_id)
     assert action(client, headers, order_id, "complete-picking", payload).status_code == 200
     if state == "PACKING":
         return
+    sales._scan_fulfillment_to_full(client, headers, order_id, packing=True)
     assert action(client, headers, order_id, "complete-packing", payload).status_code == 200
     if state == "READY_TO_SHIP":
         return
@@ -146,6 +148,65 @@ def test_completion_membership(client, admin_headers, fulfillment, packing):
     assert action(client, admin_headers, order_id, endpoint, {"allocations": []}).status_code == 422
 
 
+# --------------------------------------------------------------------------- #
+# Phase 12C Amendment 4 — completion integrity (scan-authoritative transition)
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("packing", [False, True])
+def test_completion_rejects_unscanned_progress(client, admin_headers, warehouse_headers, db_session, fulfillment, packing):
+    """complete-* only transitions state; a full payload never force-fills counters."""
+    product, order_id = fulfillment
+    state = "PACKING" if packing else "PICKING"
+    advance(client, admin_headers, order_id, state)  # scans the *prior* stage only
+    endpoint = "complete-packing" if packing else "complete-picking"
+    counter = "packed_quantity" if packing else "picked_quantity"
+    payload = sales._fulfillment_payload(client, admin_headers, order_id)
+
+    response = action(client, warehouse_headers, order_id, endpoint, payload)
+    assert response.status_code == 409, response.text
+    assert "not fully" in response.text
+    assert response.json()["request_id"]
+
+    db_session.expire_all()
+    allocation = db_session.query(SalesOrderBatchAllocation).filter_by(sales_order_id=order_id).one()
+    assert getattr(allocation, counter) == Decimal("0")  # never force-filled
+    assert detail(client, admin_headers, order_id)["status"] == state
+
+
+@pytest.mark.parametrize("packing", [False, True])
+def test_completion_rejects_partial_scan(client, admin_headers, warehouse_headers, db_session, fulfillment, packing):
+    product, order_id = fulfillment
+    state = "PACKING" if packing else "PICKING"
+    advance(client, admin_headers, order_id, state)
+    endpoint = "complete-packing" if packing else "complete-picking"
+    scan_endpoint = "scan-pack" if packing else "scan-pick"
+    counter = "packed_quantity" if packing else "picked_quantity"
+
+    assert action(client, warehouse_headers, order_id, scan_endpoint,
+                  {"barcode": product["barcode"], "quantity": "0.125"}).status_code == 200
+    payload = sales._fulfillment_payload(client, admin_headers, order_id)
+    assert action(client, warehouse_headers, order_id, endpoint, payload).status_code == 409
+
+    db_session.expire_all()
+    allocation = db_session.query(SalesOrderBatchAllocation).filter_by(sales_order_id=order_id).one()
+    assert getattr(allocation, counter) == Decimal("0.125")  # unchanged by the failed completion
+    assert detail(client, admin_headers, order_id)["status"] == state
+
+
+def test_handcrafted_completion_payload_cannot_bypass_scanning(client, admin_headers, warehouse_headers, db_session, fulfillment):
+    product, order_id = fulfillment
+    advance(client, admin_headers, order_id, "PICKING")
+    allocation = db_session.query(SalesOrderBatchAllocation).filter_by(sales_order_id=order_id).one()
+    forged = {"allocations": [{"allocation_id": allocation.id, "quantity": format(allocation.quantity, "f")}]}
+
+    assert action(client, warehouse_headers, order_id, "complete-picking", forged).status_code == 409
+
+    db_session.expire_all()
+    allocation = db_session.query(SalesOrderBatchAllocation).filter_by(sales_order_id=order_id).one()
+    assert allocation.picked_quantity == Decimal("0")
+    assert allocation.packed_quantity == Decimal("0")
+    assert detail(client, admin_headers, order_id)["status"] == "PICKING"
+
+
 def test_batch_ambiguity_and_expiry(client, admin_headers, db_session):
     product = sales._create_product(client, admin_headers)
     customer = sales._create_customer(client, admin_headers)
@@ -154,10 +215,13 @@ def test_batch_ambiguity_and_expiry(client, admin_headers, db_session):
     order_id = order["sales_order_id"]
     advance(client, admin_headers, order_id, "PICKING")
     assert "ALLOCATION_IDENTIFICATION_REQUIRED" in action(client, admin_headers, order_id, "scan-pick", {"barcode": product["barcode"]}).text
-    allocation = detail(client, admin_headers, order_id)["items"][0]["fulfillment_allocations"][0]
-    assert action(client, admin_headers, order_id, "scan-pick", {"barcode": product["barcode"], "allocation_id": allocation["id"]}).status_code == 200
+    allocations = detail(client, admin_headers, order_id)["items"][0]["fulfillment_allocations"]
+    for allocation in allocations:
+        assert action(client, admin_headers, order_id, "scan-pick",
+                      {"barcode": product["barcode"], "allocation_id": allocation["id"]}).status_code == 200
     payload = sales._fulfillment_payload(client, admin_headers, order_id)
     assert action(client, admin_headers, order_id, "complete-picking", payload).status_code == 200
+    sales._scan_fulfillment_to_full(client, admin_headers, order_id, packing=True)
     assert action(client, admin_headers, order_id, "complete-packing", payload).status_code == 200
     db_session.get(ProductBatch, batches[0]["id"]).expiry_date = date.today() - timedelta(days=1)
     db_session.commit()

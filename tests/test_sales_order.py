@@ -1150,10 +1150,38 @@ def _fulfillment_payload(client, headers, order_id):
                             for i in response.json()["data"]["items"] for a in i["fulfillment_allocations"]]}
 
 
+def _scan_fulfillment_to_full(client, headers, order_id, *, packing=False):
+    """Drive every allocation counter to its required quantity via real scans.
+
+    Completion is now scan-authoritative (Phase 12C Amendment 4): complete-picking
+    / complete-packing only transition state, they never fill quantities. Test
+    helpers must therefore scan each allocation to full before completing.
+    """
+    endpoint = "scan-pack" if packing else "scan-pick"
+    counter = "packed_quantity" if packing else "picked_quantity"
+    detail = client.get(f"/api/v1/sales-orders/{order_id}", headers=headers).json()["data"]
+    for item in detail["items"]:
+        product = client.get(f"/api/v1/products/{item['product_id']}", headers=headers).json()["data"]
+        for allocation in item["fulfillment_allocations"]:
+            remaining = _decimal(allocation["quantity"]) - _decimal(allocation[counter] or 0)
+            if remaining <= 0:
+                continue
+            response = client.post(
+                f"/api/v1/sales-orders/{order_id}/{endpoint}",
+                headers=headers,
+                json={"barcode": product["barcode"], "allocation_id": allocation["id"],
+                      "quantity": format(remaining, "f")},
+            )
+            assert response.status_code == 200, response.text
+
+
 def _ready_sales_order(client, headers, order_id):
     response = client.post(f"/api/v1/sales-orders/{order_id}/start-picking", headers=headers)
     assert response.status_code == 200, response.text
+    _scan_fulfillment_to_full(client, headers, order_id, packing=False)
     payload = _fulfillment_payload(client, headers, order_id)
-    for action in ("complete-picking", "complete-packing"):
-        response = client.post(f"/api/v1/sales-orders/{order_id}/{action}", headers=headers, json=payload)
-        assert response.status_code == 200, response.text
+    response = client.post(f"/api/v1/sales-orders/{order_id}/complete-picking", headers=headers, json=payload)
+    assert response.status_code == 200, response.text
+    _scan_fulfillment_to_full(client, headers, order_id, packing=True)
+    response = client.post(f"/api/v1/sales-orders/{order_id}/complete-packing", headers=headers, json=payload)
+    assert response.status_code == 200, response.text

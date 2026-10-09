@@ -103,6 +103,16 @@ def _create_batch(
     quantity: int,
     expiry_days: int,
 ) -> dict:
+    # Batch inbound now requires a batch-tracked product (server invariant).
+    # Products from _create_product() start non-batch with no history, so this
+    # is a safe no-op flip; ignore the result so a genuine /batches failure is
+    # what surfaces.
+    client.put(
+        f"/api/v1/products/{product_id}",
+        headers=admin_headers,
+        json={"track_batch": True, "track_expiry": True},
+    )
+
     payload = _batch_payload(
         product_id=product_id,
         quantity=quantity,
@@ -620,9 +630,19 @@ def test_stock_adjust_with_active_batch_fails(
     body = response.json()
 
     assert body["success"] is False
+    # _create_batch() flips the product to track_batch=True before creating
+    # the batch (server invariant on POST /batches — see test_batch.py), so
+    # by the time this adjustment runs the product is track_batch=True *and*
+    # carries active batch stock. The track_batch check is the more specific
+    # guard and fires first (Phase 13); batch_stock_total > 0 is the residual
+    # safety net for a product that predates that flag or was edited
+    # directly in the database — see
+    # test_stock_adjust_rejects_product_with_active_batch_stock_still_works
+    # below for that case on its own.
     assert body["message"] == (
-        "Cannot directly adjust a product "
-        "that has active batch stock"
+        "Batch-tracked products cannot be adjusted directly — "
+        "receive via POST /batches or issue via /stock/out-fefo "
+        "/ /stock/out-fifo instead"
     )
 
     product_after = _get_product(
@@ -634,6 +654,126 @@ def test_stock_adjust_with_active_batch_fails(
     assert _decimal(
         product_after["stock_qty"]
     ) == Decimal("10.000")
+
+
+# --------------------------------------------------------------------------- #
+# Phase 13 — /stock/adjust rejects batch-tracked products outright, even with
+# zero current batch stock (the gap test_stock_adjust_with_active_batch_fails
+# above never covered: it only exercises batch_stock_total > 0).
+# --------------------------------------------------------------------------- #
+def test_stock_adjust_rejects_batch_tracked_product_with_zero_batch_stock(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    db_session,
+) -> None:
+    """A freshly created batch-tracked product has zero batch stock, so the
+    old `batch_stock_total > 0` guard alone would let this through — the
+    product's stock_qty is 0, so the positive adjustment would otherwise land
+    straight on the unbatched (batch_id=None) balance. Must be rejected
+    purely on track_batch, with absolutely nothing written."""
+    product = _make_product(client, admin_headers, track_batch=True, track_expiry=True)
+
+    before_balances = db_session.query(StockBalance).filter_by(product_id=product["id"]).count()
+    before_transactions = db_session.query(StockTransaction).filter_by(product_id=product["id"]).count()
+    before_movements = db_session.query(InventoryMovement).filter_by(product_id=product["id"]).count()
+
+    response = client.post(
+        "/api/v1/stock/adjust",
+        headers=admin_headers,
+        json={"product_id": product["id"], "new_quantity": "50.000", "remark": "should be blocked"},
+    )
+
+    assert response.status_code == 409
+    body = response.json()
+    assert body["success"] is False
+    assert body["message"] == (
+        "Batch-tracked products cannot be adjusted directly — "
+        "receive via POST /batches or issue via /stock/out-fefo "
+        "/ /stock/out-fifo instead"
+    )
+    assert body["request_id"]
+
+    product_after = _get_product(client=client, admin_headers=admin_headers, product_id=product["id"])
+    assert _decimal(product_after["stock_qty"]) == Decimal("0.000")
+
+    db_session.expire_all()
+    # Nothing at all was written by the rejected request.
+    assert db_session.query(StockBalance).filter_by(
+        product_id=product["id"]).count() == before_balances
+    assert db_session.query(StockTransaction).filter_by(
+        product_id=product["id"]).count() == before_transactions
+    assert db_session.query(InventoryMovement).filter_by(
+        product_id=product["id"]).count() == before_movements
+
+
+def test_stock_adjust_non_batch_product_retains_existing_behavior(
+    client: TestClient,
+    admin_headers: dict[str, str],
+) -> None:
+    """Regression guard: the new track_batch check must not catch a
+    non-batch product — /stock/adjust keeps working exactly as before."""
+    product = _make_product(client, admin_headers, track_batch=False)
+
+    stock_in = client.post(
+        "/api/v1/stock/in",
+        headers=admin_headers,
+        json={"product_id": product["id"], "quantity": "5.000", "remark": "opening"},
+    )
+    assert stock_in.status_code == 200
+
+    response = client.post(
+        "/api/v1/stock/adjust",
+        headers=admin_headers,
+        json={"product_id": product["id"], "new_quantity": "20.000", "remark": "still allowed"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()["data"]
+    assert _decimal(body["previous_stock"]) == Decimal("5.000")
+    assert _decimal(body["current_stock"]) == Decimal("20.000")
+    assert _decimal(body["difference"]) == Decimal("15.000")
+
+
+def test_stock_adjust_rejects_product_with_active_batch_stock_still_works(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    db_session,
+) -> None:
+    """The pre-existing `batch_stock_total > 0` guard — now a residual safety
+    net behind the track_batch check — must still catch a product carrying
+    active batch stock even when it is (or is no longer) flagged
+    track_batch. product_service.py already blocks flipping track_batch off
+    through the API while a product has stock/inventory evidence, so this
+    state can't be reached through normal use; it simulates pre-existing
+    inconsistent data (e.g. predating that guard) directly at the DB layer —
+    exactly what the comment in stock_adjust_service says this check is for.
+    """
+    product = _create_product(client=client, admin_headers=admin_headers)
+    _create_batch(
+        client=client, admin_headers=admin_headers,
+        product_id=product["id"], quantity=10, expiry_days=180,
+    )
+
+    row = db_session.query(Product).filter_by(id=product["id"]).one()
+    row.track_batch = False
+    db_session.commit()
+
+    response = client.post(
+        "/api/v1/stock/adjust",
+        headers=admin_headers,
+        json={"product_id": product["id"], "new_quantity": 50, "remark": "still blocked"},
+    )
+
+    assert response.status_code == 409
+    body = response.json()
+    assert body["success"] is False
+    assert body["message"] == (
+        "Cannot directly adjust a product "
+        "that has active batch stock"
+    )
+
+    product_after = _get_product(client=client, admin_headers=admin_headers, product_id=product["id"])
+    assert _decimal(product_after["stock_qty"]) == Decimal("10.000")  # unchanged
 
 
 def test_stock_history_sorted_latest_first(
@@ -1829,3 +1969,136 @@ def test_stock_adjust_inventory_consistency(
     assert movement.reference_id == (
         transaction.id
     )
+
+# --------------------------------------------------------------------------- #
+# Phase 12B.0 — tracking invariants + audit trail for direct stock in
+# --------------------------------------------------------------------------- #
+def _make_product(client, admin_headers, *, track_batch=False, track_expiry=False):
+    unique = uuid4().hex[:10].upper()
+    body = {
+        "sku": f"P12B-{unique}",
+        "barcode": f"889{unique}",
+        "product_name": f"P12B {unique}",
+        "price": 10,
+        "stock_qty": 0,
+        "category_id": None,
+        "track_batch": track_batch,
+        "track_expiry": track_expiry,
+    }
+    r = client.post("/api/v1/products", headers=admin_headers, json=body)
+    assert r.status_code in {200, 201}
+    return r.json()["data"]
+
+
+def test_stock_in_rejects_batch_tracked_product(warehouse_client, admin_headers):
+    product = _make_product(warehouse_client, admin_headers, track_batch=True, track_expiry=True)
+    r = warehouse_client.post(
+        "/api/v1/stock/in",
+        headers=admin_headers,
+        json={"product_id": product["id"], "quantity": "5.000"},
+    )
+    assert r.status_code == 409
+    assert "request_id" in r.json()
+
+
+def test_batches_rejects_non_batch_product(warehouse_client, admin_headers):
+    product = _make_product(warehouse_client, admin_headers, track_batch=False)
+    r = warehouse_client.post(
+        "/api/v1/batches",
+        headers=admin_headers,
+        json={
+            "product_id": product["id"],
+            "lot_no": f"L-{uuid4().hex[:8]}",
+            "quantity": "5.000",
+        },
+    )
+    assert r.status_code == 409
+    assert "request_id" in r.json()
+
+
+def test_batches_lot_only_allows_missing_dates(warehouse_client, admin_headers, db_session):
+    product = _make_product(warehouse_client, admin_headers, track_batch=True, track_expiry=False)
+    lot = f"L-{uuid4().hex[:8]}"
+    r = warehouse_client.post(
+        "/api/v1/batches",
+        headers=admin_headers,
+        json={"product_id": product["id"], "lot_no": lot, "quantity": "7.000"},
+    )
+    assert r.status_code == 201, r.text
+    batch = r.json()["data"]["batch"]
+    assert batch["mfg_date"] is None and batch["expiry_date"] is None
+    row = db_session.query(ProductBatch).filter_by(id=batch["id"]).one()
+    assert row.mfg_date is None and row.expiry_date is None
+
+
+def test_batches_lot_only_rejects_one_date_without_the_other(warehouse_client, admin_headers):
+    product = _make_product(warehouse_client, admin_headers, track_batch=True, track_expiry=False)
+    r = warehouse_client.post(
+        "/api/v1/batches",
+        headers=admin_headers,
+        json={
+            "product_id": product["id"],
+            "lot_no": f"L-{uuid4().hex[:8]}",
+            "quantity": "1.000",
+            "mfg_date": date.today().isoformat(),
+        },
+    )
+    assert r.status_code == 400
+
+
+def test_batches_expiry_tracked_requires_both_dates(warehouse_client, admin_headers):
+    product = _make_product(warehouse_client, admin_headers, track_batch=True, track_expiry=True)
+    r = warehouse_client.post(
+        "/api/v1/batches",
+        headers=admin_headers,
+        json={
+            "product_id": product["id"],
+            "lot_no": f"L-{uuid4().hex[:8]}",
+            "quantity": "1.000",
+        },
+    )
+    assert r.status_code == 422
+
+
+def test_batches_expired_inbound_still_accepted(warehouse_client, admin_headers):
+    product = _make_product(warehouse_client, admin_headers, track_batch=True, track_expiry=True)
+    r = warehouse_client.post(
+        "/api/v1/batches",
+        headers=admin_headers,
+        json={
+            "product_id": product["id"],
+            "lot_no": f"L-{uuid4().hex[:8]}",
+            "quantity": "1.000",
+            "mfg_date": (date.today() - timedelta(days=400)).isoformat(),
+            "expiry_date": (date.today() - timedelta(days=10)).isoformat(),
+        },
+    )
+    assert r.status_code == 201
+
+
+def test_direct_stock_in_writes_audit_log(warehouse_client, admin_headers, db_session):
+    from app.models import AuditLog
+
+    product = _make_product(warehouse_client, admin_headers, track_batch=False)
+    before = db_session.query(AuditLog).filter_by(action="STOCK_IN").count()
+    r = warehouse_client.post(
+        "/api/v1/stock/in",
+        headers=admin_headers,
+        json={"product_id": product["id"], "quantity": "3.000", "remark": "audit check"},
+    )
+    assert r.status_code == 200
+    assert db_session.query(AuditLog).filter_by(action="STOCK_IN").count() == before + 1
+
+
+def test_batch_in_writes_audit_log(warehouse_client, admin_headers, db_session):
+    from app.models import AuditLog
+
+    product = _make_product(warehouse_client, admin_headers, track_batch=True, track_expiry=False)
+    before = db_session.query(AuditLog).filter_by(action="BATCH_IN").count()
+    r = warehouse_client.post(
+        "/api/v1/batches",
+        headers=admin_headers,
+        json={"product_id": product["id"], "lot_no": f"L-{uuid4().hex[:8]}", "quantity": "2.000"},
+    )
+    assert r.status_code == 201
+    assert db_session.query(AuditLog).filter_by(action="BATCH_IN").count() == before + 1

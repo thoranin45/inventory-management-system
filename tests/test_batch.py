@@ -23,6 +23,9 @@ def _product_payload() -> dict:
         "price": 150.00,
         "stock_qty": 0,
         "category_id": None,
+        # Batch inbound requires a batch-tracked product (server invariant).
+        "track_batch": True,
+        "track_expiry": True,
     }
 
 

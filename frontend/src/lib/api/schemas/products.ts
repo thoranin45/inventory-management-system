@@ -33,6 +33,15 @@ export const productRowSchema = z.object({
   track_batch: z.boolean(),
   track_expiry: z.boolean(),
   as_of_date: z.string(),
+  // Phase 12D — Stock page list enrichment (display-only rollup; see backend
+  // StockBalanceRepository.lot_and_location_summary_by_product). Optional so
+  // older cached/mocked payloads without them still validate.
+  lot_count: z.number().nullish(),
+  nearest_lot_no: z.string().nullish(),
+  nearest_expiry_date: z.string().nullish(),
+  location_count: z.number().nullish(),
+  primary_warehouse_code: z.string().nullish(),
+  primary_location_code: z.string().nullish(),
 });
 export type ProductRow = z.infer<typeof productRowSchema>;
 

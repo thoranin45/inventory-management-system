@@ -71,3 +71,14 @@ class FulfillmentScan(BaseModel):
     barcode: str = Field(min_length=1, max_length=100)
     quantity: Decimal = Field(default=Decimal("1"), gt=0, max_digits=18, decimal_places=3, allow_inf_nan=False)
     allocation_id: int | None = Field(default=None, gt=0)
+
+
+class FulfillmentUndo(BaseModel):
+    """Reverse one unit (or a chosen quantity) of pick/pack scan progress.
+
+    Counter-only: pick/pack progress never touches stock balances, so undo
+    never does either. Quantity scale matches the scan endpoints.
+    """
+
+    allocation_id: int = Field(gt=0)
+    quantity: Decimal = Field(default=Decimal("1"), gt=0, max_digits=18, decimal_places=3, allow_inf_nan=False)

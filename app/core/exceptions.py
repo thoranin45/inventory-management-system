@@ -172,7 +172,111 @@ class BatchStockAdjustmentException(AppException):
                 "that has active batch stock"
             ),
             status_code=status.HTTP_409_CONFLICT,
-        )   
+        )
+
+
+class BatchTrackedAdjustmentException(AppException):
+    """Direct /stock/adjust on a batch-tracked product, regardless of its
+    current batch stock total.
+
+    A batch-tracked product with zero batch stock would otherwise pass the
+    ``batch_stock_total > 0`` check and let a positive adjustment land
+    straight on the unbatched (batch_id=None) balance — stock with no lot or
+    expiry, for a product whose tracking mode says every unit must have both.
+    Unlike /stock/in and /batches, there is no working endpoint to adjust a
+    specific batch's balance directly (``PATCH /stock-balances/{id}`` is
+    intentionally disabled — it unconditionally returns 409), so the message
+    points to the batch-aware workflows that exist instead: receive more via
+    POST /batches, issue via /stock/out-fefo or /stock/out-fifo.
+    """
+
+    def __init__(self):
+        super().__init__(
+            message=(
+                "Batch-tracked products cannot be adjusted directly — "
+                "receive via POST /batches or issue via /stock/out-fefo "
+                "/ /stock/out-fifo instead"
+            ),
+            status_code=status.HTTP_409_CONFLICT,
+        )
+
+
+class BatchTrackedStockInException(AppException):
+    """Direct /stock/in on a batch-tracked product — the caller must receive it
+    with a lot number via /batches instead."""
+
+    def __init__(self):
+        super().__init__(
+            message=(
+                "Batch-tracked products must be received with a lot "
+                "number via POST /batches, not direct stock in"
+            ),
+            status_code=status.HTTP_409_CONFLICT,
+        )
+
+
+class NonBatchProductBatchException(AppException):
+    """A batch was requested for a product that is not batch-tracked."""
+
+    def __init__(self):
+        super().__init__(
+            message=(
+                "This product is not batch-tracked — add stock directly via "
+                "POST /stock/in, not as a batch"
+            ),
+            status_code=status.HTTP_409_CONFLICT,
+        )
+
+
+class MissingBatchDatesException(AppException):
+    """Expiry-tracked product received without both manufacturing and expiry
+    dates."""
+
+    def __init__(self):
+        super().__init__(
+            message=(
+                "Expiry-tracked product requires manufacturing and expiry "
+                "dates"
+            ),
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        )
+
+
+class PartialBatchDatesException(AppException):
+    """Only one of manufacturing / expiry date supplied for a batch."""
+
+    def __init__(self):
+        super().__init__(
+            message=(
+                "Supply both manufacturing and expiry dates, or neither"
+            ),
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+
+class IdempotencyKeyConflictException(AppException):
+    """An ``Idempotency-Key`` was reused for a request that isn't a byte-identical
+    replay of the one it was first used for.
+
+    Raised two ways, both meaning the same thing to the client:
+      1. Synchronously, when the stored receipt's fingerprint doesn't match
+         the current request (same key, different body).
+      2. From a lost race: ``stock_operation_receipts.operation_key`` is
+         globally unique with no parent row to lock, so two concurrent
+         requests reusing the same key for *different* products aren't
+         serialised by the per-product inventory lock and can both pass the
+         synchronous check. The loser's INSERT hits the unique constraint;
+         the repository converts that into this same exception instead of a
+         generic integrity error, and the caller's transaction rolls back
+         whole (no partial stock apply either way).
+    """
+
+    def __init__(self):
+        super().__init__(
+            message="Idempotency-Key already used with a different payload",
+            status_code=status.HTTP_409_CONFLICT,
+        )
+
 
 class PurchaseOrderNotFoundException(AppException):
     def __init__(self):

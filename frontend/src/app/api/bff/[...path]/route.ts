@@ -27,6 +27,13 @@ const ALLOW: { method: string; pattern: RegExp }[] = [
   { method: "GET", pattern: /^stock-balances\/in-transit$/ },
   { method: "GET", pattern: /^stock-balances\/product\/\d+$/ },
 
+  // Phase 12 — Stock In. Backend is warehouse+admin and enforces the
+  // tracking invariant (batch product -> 409 on /stock/in; non-batch -> 409
+  // on /batches). Phase 12C.0: both honour an optional Idempotency-Key
+  // (forwarded below) so the Save-once Stock-In session cannot double-apply.
+  { method: "POST", pattern: /^stock\/in$/ },
+  { method: "POST", pattern: /^batches$/ },
+
   // Phase 3 — Sales Orders. Backend enforces role (create/confirm = admin,
   // list/detail/cancel = warehouse+); the BFF only scopes which routes exist.
   { method: "GET", pattern: /^sales-orders$/ },
@@ -42,6 +49,9 @@ const ALLOW: { method: string; pattern: RegExp }[] = [
   { method: "POST", pattern: /^sales-orders\/\d+\/complete-picking$/ },
   { method: "POST", pattern: /^sales-orders\/\d+\/scan-pack$/ },
   { method: "POST", pattern: /^sales-orders\/\d+\/complete-packing$/ },
+  // Phase 12C.5 — Pick/Pack Undo (warehouse+admin; counter-only, no stock move).
+  { method: "POST", pattern: /^sales-orders\/\d+\/undo-pick$/ },
+  { method: "POST", pattern: /^sales-orders\/\d+\/undo-pack$/ },
   { method: "GET", pattern: /^sales-orders\/\d+\/packing-slip-data$/ },
   { method: "GET", pattern: /^sales-orders\/\d+\/shipping-label-data$/ },
   { method: "GET", pattern: /^scan\/resolve$/ },

@@ -9,8 +9,8 @@ Update ``EXPECTED_ALEMBIC_HEAD`` in the same change that adds a migration.
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
-# Phase 9: users.is_active
-EXPECTED_ALEMBIC_HEAD = "e81a00000001"
+# Phase 12C.0: stock_operation_receipts (stock-in / batch idempotency)
+EXPECTED_ALEMBIC_HEAD = "e91a00000001"
 
 
 def current_db_revision(connection: Connection) -> str | None:

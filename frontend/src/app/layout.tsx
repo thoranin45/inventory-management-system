@@ -12,8 +12,8 @@ const sarabun = Sarabun({
 });
 
 export const metadata: Metadata = {
-  title: "Warehouse Console",
-  description: "Operational inventory console — Industrial Premium.",
+  title: { default: "AKKRATHARA", template: "%s | AKKRATHARA" },
+  description: "AKKRATHARA — operational inventory console.",
 };
 
 export const viewport: Viewport = {

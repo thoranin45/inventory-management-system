@@ -32,8 +32,6 @@ def _create_product(
             "price": price,
             "stock_qty": 0,
             "category_id": None,
-            "track_batch": True,
-            "track_expiry": True,
         },
     )
 
@@ -41,6 +39,7 @@ def _create_product(
 
     product = response.json()["data"]
     if stock_qty:
+        # Non-batch opening receipt (batch tests use _create_batch instead).
         stock = client.post("/api/v1/stock/in", headers=admin_headers, json={
             "product_id": product["id"], "quantity": stock_qty, "remark": "Test opening receipt",
         })
@@ -85,6 +84,13 @@ def _create_batch(
     expiry_days: int,
 ) -> dict:
     manufacturing_date = date.today()
+
+    # Batch inbound requires a batch-tracked product (server invariant).
+    client.put(
+        f"/api/v1/products/{product_id}",
+        headers=admin_headers,
+        json={"track_batch": True, "track_expiry": True},
+    )
 
     response = client.post(
         "/api/v1/batches",
@@ -221,9 +227,9 @@ def test_sales_summary_report(
         before_data["total_orders"] + 1
     )
 
-    assert after_data["total_sales_amount"] == (
-        before_data["total_sales_amount"] + 300
-    )
+    # `total_sales_amount` is a running float total across every order in the
+    # suite; compare the delta with tolerance, not an exact float ==.
+    assert round(after_data["total_sales_amount"] - before_data["total_sales_amount"], 2) == 300
 
 
 def test_stock_movement_report(

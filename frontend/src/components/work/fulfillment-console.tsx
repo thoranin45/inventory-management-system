@@ -24,6 +24,8 @@ import {
   useScanPack,
   useScanPick,
   useStartPicking,
+  useUndoPack,
+  useUndoPick,
   type ProductLite,
 } from "@/lib/query/sales";
 import {
@@ -38,6 +40,7 @@ import {
 } from "./scan-machine";
 import { useScanner } from "./use-scanner";
 import { useBeep } from "./use-beep";
+import { CameraBarcodeScanner } from "./camera-barcode-scanner";
 import { WorkConsoleLayout } from "./work-console-layout";
 import { ScanPanel } from "./scan-panel";
 import { WorkLine } from "./work-line";
@@ -154,11 +157,14 @@ export function FulfillmentConsole({ orderId, mode }: { orderId: number; mode: M
 
   const [local, setLocal] = React.useState<LocalProgress>({});
   const [flash, setFlash] = React.useState<Record<number, "hit" | "miss">>({});
+  const [lineActivity, setLineActivity] = React.useState<Record<number, string>>({});
+  const [targetItemId, setTargetItemId] = React.useState<number | null>(null);
   const refocusRef = React.useRef<() => void>(() => {});
   const [scan, dispatch] = React.useReducer(scanReducer, initialScanContext);
   const [kbActive, setKbActive] = React.useState(false);
   const [ambig, setAmbig] = React.useState<{ code: string; productName: string; candidates: AmbiguityCandidate[] } | null>(null);
   const [previewOpen, setPreviewOpen] = React.useState(false);
+  const [cameraOpen, setCameraOpen] = React.useState(false);
 
   const { enabled: soundOn, setEnabled: setSoundOn, beepOk, beepBad } = useBeep();
 
@@ -167,8 +173,11 @@ export function FulfillmentConsole({ orderId, mode }: { orderId: number; mode: M
   const scanPackMut = useScanPack();
   const completePickMut = useCompletePicking();
   const completePackMut = useCompletePacking();
+  const undoPickMut = useUndoPick();
+  const undoPackMut = useUndoPack();
   const scanMut = mode === "pick" ? scanPickMut : scanPackMut;
   const completeMut = mode === "pick" ? completePickMut : completePackMut;
+  const undoMut = mode === "pick" ? undoPickMut : undoPackMut;
 
   const flashLine = React.useCallback((allocId: number, kind: "hit" | "miss") => {
     setFlash((f) => ({ ...f, [allocId]: kind }));
@@ -241,6 +250,15 @@ export function FulfillmentConsole({ orderId, mode }: { orderId: number; mode: M
             }));
             flashLine(data.allocation_id, "hit");
             beepOk();
+            setTargetItemId(null);
+            {
+              const itId = detail.items.find((it) =>
+                it.fulfillment_allocations.some((a) => a.id === data.allocation_id),
+              )?.id;
+              if (itId != null) {
+                setLineActivity((m) => ({ ...m, [itId]: `✓ ${cfg.verb} +${data[cfg.doneField]} / ${data.quantity}` }));
+              }
+            }
             const merged = allocationsWithLocal(detail, {
               ...local,
               [data.allocation_id]: {
@@ -291,10 +309,73 @@ export function FulfillmentConsole({ orderId, mode }: { orderId: number; mode: M
     [detail, orderId, local, lookup, cfg, flashLine, beepOk, beepBad, openAmbiguity, productByBarcode, scanMut],
   );
 
-  const scanner = useScanner({ onScan: runScan, disabled: !detail });
+  const runUndo = React.useCallback(
+    (allocationId: number, itemId: number) => {
+      if (!detail || undoMut.isPending) return;
+      undoMut.mutate(
+        { id: orderId, allocation_id: allocationId, quantity: "1" },
+        {
+          onSuccess: (data) => {
+            setLocal((p) => ({
+              ...p,
+              [data.allocation_id]: {
+                picked_quantity: data.picked_quantity,
+                packed_quantity: data.packed_quantity,
+              },
+            }));
+            beepOk();
+            setLineActivity((m) => ({
+              ...m,
+              [itemId]: `↶ ${cfg.verb} undone · now ${data[cfg.doneField]} / ${data.quantity}`,
+            }));
+            dispatch({
+              type: "MATCH",
+              message: `${cfg.verb} undone — allocation ${data.allocation_id} now ${data[cfg.doneField]} / ${data.quantity}.`,
+            });
+          },
+          onError: (err) => {
+            beepBad();
+            const msg = isApiError(err) ? err.userMessage : "Undo failed.";
+            const rid = isApiError(err) ? err.requestId : undefined;
+            setLineActivity((m) => ({ ...m, [itemId]: rid ? `Undo failed · Request ${rid}` : `Undo failed · ${msg}` }));
+            toast.error(`Undo ${cfg.verb.toLowerCase()} failed`, {
+              description: rid ? `${msg} · Request ${rid}` : msg,
+            });
+          },
+          onSettled: () => refocusRef.current(),
+        },
+      );
+    },
+    [detail, orderId, undoMut, cfg.verb, cfg.doneField, beepOk, beepBad],
+  );
+
+  // Global hardware-wedge / typed / camera scans go through here. When a line
+  // is targeted (operator tapped [Scan +1]) the scan is attributed to that
+  // line's single allocation; otherwise the backend resolves it. Either way
+  // it is one scan → one backend round-trip → authoritative response.
+  const handleScannerInput = React.useCallback(
+    (code: string) => {
+      if (targetItemId != null && detail) {
+        const it = detail.items.find((x) => x.id === targetItemId);
+        const single =
+          it && it.fulfillment_allocations.length === 1 ? it.fulfillment_allocations[0].id : undefined;
+        runScan(code, single);
+        return;
+      }
+      runScan(code);
+    },
+    [targetItemId, detail, runScan],
+  );
+
+  const scanner = useScanner({ onScan: handleScannerInput, disabled: !detail });
   React.useEffect(() => {
     refocusRef.current = scanner.focus;
   }, [scanner.focus]);
+
+  const targetName =
+    targetItemId != null
+      ? lookup[detail?.items.find((i) => i.id === targetItemId)?.product_id ?? -1]?.product_name ?? "item"
+      : null;
 
   const chooseAllocation = (allocationId: number) => {
     const code = ambig?.code;
@@ -404,6 +485,14 @@ export function FulfillmentConsole({ orderId, mode }: { orderId: number; mode: M
     const bi = singleBatch != null ? batchInfo[singleBatch] : undefined;
     const anyExpired = itemAllocs.some((a) => a.batch_id != null && batchInfo[a.batch_id]?.is_expired);
     const flashKey = itemAllocs[0]?.id;
+    const singleAlloc =
+      it.fulfillment_allocations.length === 1 ? it.fulfillment_allocations[0].id : undefined;
+    // Undo needs one specific allocation. For a single-allocation line that's
+    // unambiguous; a multi-allocation line undoes the first with progress.
+    const undoAlloc =
+      singleAlloc ??
+      itemAllocs.find((a) => compareDecimals(a[cfg.doneField], "0") > 0)?.id ??
+      itemAllocs[0]?.id;
     return (
       <WorkLine
         key={it.id}
@@ -421,17 +510,15 @@ export function FulfillmentConsole({ orderId, mode }: { orderId: number; mode: M
         done={done}
         required={it.quantity}
         verb={cfg.verb}
-        onPlusOne={() => {
-          const barcode = p?.barcode;
-          if (!barcode) {
-            toast.error("No barcode on file for this product — scan it instead.");
-            return;
-          }
-          const single = it.fulfillment_allocations.length === 1 ? it.fulfillment_allocations[0].id : undefined;
-          runScan(barcode, single, { quantity: "1" });
+        targeted={targetItemId === it.id}
+        onTargetScan={() => {
+          setTargetItemId((cur) => (cur === it.id ? null : it.id));
+          refocusRef.current();
         }}
-        plusDisabledReason={p?.barcode ? undefined : "No barcode on file — use the scanner"}
-        busy={scanMut.isPending}
+        onUndo={undoAlloc != null ? () => runUndo(undoAlloc, it.id) : undefined}
+        undoDisabledReason={undoMut.isPending ? "Undo in progress…" : undefined}
+        lastActivity={lineActivity[it.id] ?? null}
+        busy={scanMut.isPending || undoMut.isPending}
         flash={flashKey != null ? flash[flashKey] ?? null : null}
       />
     );
@@ -444,8 +531,18 @@ export function FulfillmentConsole({ orderId, mode }: { orderId: number; mode: M
         message={scan.message}
         scanner={scanner}
         onFocusChange={setKbActive}
+        onCameraOpen={() => {
+          if (typeof document !== "undefined") (document.activeElement as HTMLElement | null)?.blur();
+          setKbActive(false);
+          setCameraOpen(true);
+        }}
         sound={{ enabled: soundOn, setEnabled: setSoundOn }}
         disabled={scanMut.isPending && scan.state === "SCANNING"}
+        targeting={
+          targetName
+            ? { label: `Scan ${targetName}`, onClear: () => setTargetItemId(null) }
+            : undefined
+        }
         hint={
           <>
             Scan every line to its required quantity. Wrong item, unknown barcode and over-scan are
@@ -534,6 +631,19 @@ export function FulfillmentConsole({ orderId, mode }: { orderId: number; mode: M
           }}
         />
       ) : null}
+
+      <CameraBarcodeScanner
+        open={cameraOpen}
+        onOpenChange={(v) => {
+          setCameraOpen(v);
+          if (!v) scanner.focus();
+        }}
+        title={`Scan — ${cfg.label.toLowerCase()}`}
+        onDecode={(value) => {
+          setCameraOpen(false);
+          handleScannerInput(value);
+        }}
+      />
 
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
         <DialogContent title="Print data" description="Read-only data from the backend.">

@@ -79,9 +79,10 @@ def get_products(
     balance_repo: StockBalanceRepositoryDependency,
     current_user: CurrentUser,
     params: ListParams = Depends(list_params),
+    category_id: int | None = Query(default=None, gt=0),
 ) -> dict:
     return get_products_service(
-        product_repo=product_repo, balance_repo=balance_repo, params=params
+        product_repo=product_repo, balance_repo=balance_repo, params=params, category_id=category_id,
     )
 
 

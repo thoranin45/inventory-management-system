@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 import { CustomersView } from "@/components/master-data/customers-view";
 import { LoadingState } from "@/components/ui/states";
 
-export const metadata: Metadata = { title: "Customers · Warehouse Console" };
+export const metadata: Metadata = { title: "Customers" };
 
 export default function CustomersPage() {
   return (

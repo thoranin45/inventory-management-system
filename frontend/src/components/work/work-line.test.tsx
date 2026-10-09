@@ -18,24 +18,45 @@ describe("WorkLine", () => {
     expect(screen.getByText("4.00")).toBeInTheDocument();
   });
 
-  it("the − control is inert and explains why (no backend decrement)", () => {
-    render(<WorkLine {...base} done="1.000" required="4.000" />);
-    const minus = screen.getByRole("button", { name: /decrease/i });
-    expect(minus).toBeDisabled();
-    expect(minus).toHaveAttribute("title", expect.stringMatching(/can't be decreased/i));
-  });
-
-  it("the + control runs one backend-confirmed scan and is disabled once the line is full", async () => {
+  it("[Scan +1] targets the line (no mutation) and is disabled once full", async () => {
     const user = userEvent.setup();
-    const onPlusOne = vi.fn();
+    const onTargetScan = vi.fn();
     const { rerender } = render(
-      <WorkLine {...base} done="3.000" required="4.000" onPlusOne={onPlusOne} />,
+      <WorkLine {...base} done="3.000" required="4.000" onTargetScan={onTargetScan} />,
     );
     await user.click(screen.getByRole("button", { name: /scan one/i }));
-    expect(onPlusOne).toHaveBeenCalledTimes(1);
+    expect(onTargetScan).toHaveBeenCalledTimes(1);
 
-    rerender(<WorkLine {...base} done="4.000" required="4.000" onPlusOne={onPlusOne} />);
+    rerender(<WorkLine {...base} done="4.000" required="4.000" onTargetScan={onTargetScan} />);
     expect(screen.getByRole("button", { name: /scan one/i })).toBeDisabled();
+  });
+
+  it("[Undo] calls back and is disabled when the line has no progress", async () => {
+    const user = userEvent.setup();
+    const onUndo = vi.fn();
+    const { rerender } = render(
+      <WorkLine {...base} done="0.000" required="4.000" onUndo={onUndo} />,
+    );
+    expect(screen.getByRole("button", { name: /undo one/i })).toBeDisabled();
+
+    rerender(<WorkLine {...base} done="2.000" required="4.000" onUndo={onUndo} />);
+    await user.click(screen.getByRole("button", { name: /undo one/i }));
+    expect(onUndo).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a waiting banner while targeted and renders last-activity text", () => {
+    render(
+      <WorkLine
+        {...base}
+        done="1.000"
+        required="4.000"
+        targeted
+        onTargetScan={vi.fn()}
+        lastActivity="↶ Picked undone · now 1.000 / 4.000"
+      />,
+    );
+    expect(screen.getByText(/waiting for a scan of this item/i)).toBeInTheDocument();
+    expect(screen.getByText(/Picked undone/)).toBeInTheDocument();
   });
 
   it("is memoised — identical props do not re-render (scroll-stable)", () => {
@@ -47,7 +68,6 @@ describe("WorkLine", () => {
     const MemoProbe = Probe;
     const { rerender } = render(<MemoProbe {...base} done="1.000" required="4.000" />);
     rerender(<MemoProbe {...base} done="1.000" required="4.000" />);
-    // WorkLine itself is React.memo; this asserts stable-prop renders are cheap
     expect(renderSpy).toHaveBeenCalledTimes(2); // wrapper re-runs, WorkLine short-circuits
   });
 });

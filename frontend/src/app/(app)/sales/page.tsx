@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 import { SalesView } from "@/components/sales/sales-view";
 import { LoadingState } from "@/components/ui/states";
 
-export const metadata: Metadata = { title: "Sales · Warehouse Console" };
+export const metadata: Metadata = { title: "Sales" };
 
 export default function SalesPage() {
   return (

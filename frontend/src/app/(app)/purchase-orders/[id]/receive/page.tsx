@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 
 import { ReceivingConsole } from "@/components/purchase-orders/receiving-console";
 
-export const metadata: Metadata = { title: "Receiving · Warehouse Console" };
+export const metadata: Metadata = { title: "Receiving" };
 
 export default async function ReceivingPage(props: PageProps<"/purchase-orders/[id]/receive">) {
   const { id } = await props.params;

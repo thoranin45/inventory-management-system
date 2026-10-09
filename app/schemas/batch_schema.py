@@ -15,8 +15,12 @@ class BatchCreate(BaseModel):
         max_length=100,
     )
 
-    mfg_date: date
-    expiry_date: date
+    # Optional: required only for expiry-tracked products. The service applies
+    # the tracking-mode rules (see create_batch_service):
+    #   track_expiry=True  -> both dates required
+    #   track_expiry=False -> both dates optional, but all-or-nothing
+    mfg_date: date | None = None
+    expiry_date: date | None = None
     quantity: Decimal = Field(..., gt=0, max_digits=18, decimal_places=3)
 
 

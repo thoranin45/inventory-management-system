@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { ChevronRight, ScanLine, TriangleAlert } from "lucide-react";
+import { Camera, ChevronRight, ScanLine, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { QuantityDisplay } from "@/components/ui/quantity-display";
 import { ProgressRing } from "@/components/work/progress-ring";
+import { CameraBarcodeScanner } from "@/components/work/camera-barcode-scanner";
 import { useScanner } from "@/components/work/use-scanner";
 import { isApiError } from "@/lib/api/errors";
 import { compareDecimals, sumDecimals } from "@/lib/decimal";
@@ -39,30 +40,37 @@ export function ReceivingConsole({ poId }: { poId: number }) {
   const [sessionReceipts, setSessionReceipts] = React.useState<PurchaseOrderReceiveResult[]>([]);
   const [mismatch, setMismatch] = React.useState(false);
   const [highlightPid, setHighlightPid] = React.useState<number | null>(null);
+  const [cameraOpen, setCameraOpen] = React.useState(false);
 
-  /* barcode assist — read-only product resolver, never a receive mutation */
-  const scanner = useScanner({
-    onScan: async (code) => {
-      try {
-        const res = await resolveBarcode(code, "stock_in");
-        const item = detail?.items.find((i) => i.product_id === res.product.id);
-        if (!item) {
-          toast.error(`${res.product.product_name} is not on this purchase order.`);
-          return;
-        }
-        if (compareDecimals(item.remaining_quantity, "0") <= 0) {
-          toast.info(`${res.product.product_name} is already fully received.`);
-          return;
-        }
-        setHighlightPid(item.product_id);
-        const el = document.getElementById(`rl-${item.product_id}-qty`);
-        el?.scrollIntoView({ block: "center", behavior: "smooth" });
-        (el as HTMLInputElement | null)?.focus();
-      } catch (e) {
-        toast.error(isApiError(e) && e.status === 404 ? `Unknown barcode ${code}.` : "Could not resolve that barcode.");
+  const detailRef = React.useRef(detail);
+  React.useEffect(() => {
+    detailRef.current = detail;
+  }, [detail]);
+
+  /* barcode assist — read-only product resolver, never a receive mutation.
+     Shared verbatim by the hardware/manual scanner AND the camera. */
+  const handleAssistScan = React.useCallback(async (code: string) => {
+    try {
+      const res = await resolveBarcode(code, "stock_in");
+      const item = detailRef.current?.items.find((i) => i.product_id === res.product.id);
+      if (!item) {
+        toast.error(`${res.product.product_name} is not on this purchase order.`);
+        return;
       }
-    },
-  });
+      if (compareDecimals(item.remaining_quantity, "0") <= 0) {
+        toast.info(`${res.product.product_name} is already fully received.`);
+        return;
+      }
+      setHighlightPid(item.product_id);
+      const el = document.getElementById(`rl-${item.product_id}-qty`);
+      el?.scrollIntoView({ block: "center", behavior: "smooth" });
+      (el as HTMLInputElement | null)?.focus();
+    } catch (e) {
+      toast.error(isApiError(e) && e.status === 404 ? `Unknown barcode ${code}.` : "Could not resolve that barcode.");
+    }
+  }, []);
+
+  const scanner = useScanner({ onScan: handleAssistScan });
 
   if (detailQ.isLoading) return <LoadingState label="Loading receiving console…" />;
   if (detailQ.isError) return <ErrorState error={detailQ.error} onRetry={() => void detailQ.refetch()} />;
@@ -183,6 +191,19 @@ export function ReceivingConsole({ poId }: { poId: number }) {
               aria-label="Barcode assist"
               className="min-h-11 w-full min-w-0 bg-transparent text-[13px] outline-none"
             />
+            <Button
+              type="button"
+              variant="secondary"
+              size="icon"
+              aria-label="Scan with camera"
+              title="Scan with the device camera"
+              onClick={() => {
+                if (typeof document !== "undefined") (document.activeElement as HTMLElement | null)?.blur();
+                setCameraOpen(true);
+              }}
+            >
+              <Camera aria-hidden className="h-4 w-4" />
+            </Button>
           </div>
 
           {detail.items.map((it) => (
@@ -311,6 +332,19 @@ export function ReceivingConsole({ poId }: { poId: number }) {
           {receive.isPending ? "Submitting…" : "Receive"}
         </Button>
       </div>
+
+      <CameraBarcodeScanner
+        open={cameraOpen}
+        onOpenChange={(v) => {
+          setCameraOpen(v);
+          if (!v) scanner.focus();
+        }}
+        title="Scan a barcode"
+        onDecode={(value) => {
+          setCameraOpen(false);
+          void handleAssistScan(value);
+        }}
+      />
     </div>
   );
 }

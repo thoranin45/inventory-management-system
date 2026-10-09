@@ -265,6 +265,33 @@ function useFulfillmentScan(kind: "scan-pick" | "scan-pack") {
 export const useScanPick = () => useFulfillmentScan("scan-pick");
 export const useScanPack = () => useFulfillmentScan("scan-pack");
 
+type UndoArgs = { id: number; allocation_id: number; quantity?: string };
+
+/**
+ * Phase 12C.5 — reverse one unit of pick/pack scan progress. Counter-only on
+ * the backend (no stock movement); the confirmed response is authoritative,
+ * exactly like a scan. Never retried.
+ */
+function useFulfillmentUndo(kind: "undo-pick" | "undo-pack") {
+  const invalidate = useSalesInvalidation();
+  return useMutation<FulfillmentScanResult, unknown, UndoArgs>({
+    mutationFn: async ({ id, allocation_id, quantity }) => {
+      const json: Record<string, unknown> = { allocation_id };
+      if (quantity !== undefined) json.quantity = quantity;
+      const env = await bffJson(`/api/bff/sales-orders/${id}/${kind}`, fulfillmentScanEnvelope, {
+        method: "POST",
+        json,
+      });
+      return env.data;
+    },
+    retry: false,
+    onSuccess: (data) => invalidate(data.sales_order_id),
+  });
+}
+
+export const useUndoPick = () => useFulfillmentUndo("undo-pick");
+export const useUndoPack = () => useFulfillmentUndo("undo-pack");
+
 type CompleteArgs = { id: number } & CompleteFulfillmentInput;
 
 function useCompleteFulfillment(kind: "complete-picking" | "complete-packing") {
