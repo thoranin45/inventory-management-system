@@ -34,6 +34,13 @@ const ALLOW: { method: string; pattern: RegExp }[] = [
   { method: "POST", pattern: /^stock\/in$/ },
   { method: "POST", pattern: /^batches$/ },
 
+  // Phase 14A — Stock Out (FIFO/FEFO). Backend is warehouse+admin; FIFO/FEFO
+  // select batches algorithmically and only ever deduct from batch-linked
+  // balances. Both honour an optional Idempotency-Key (forwarded below) so
+  // the Save-once Stock-Out session cannot double-deduct.
+  { method: "POST", pattern: /^stock\/out-fifo$/ },
+  { method: "POST", pattern: /^stock\/out-fefo$/ },
+
   // Phase 3 — Sales Orders. Backend enforces role (create/confirm = admin,
   // list/detail/cancel = warehouse+); the BFF only scopes which routes exist.
   { method: "GET", pattern: /^sales-orders$/ },
@@ -146,7 +153,8 @@ const ALLOW: { method: string; pattern: RegExp }[] = [
 /** Request headers the BFF forwards upstream verbatim (allow-list). */
 const FORWARD_HEADERS = ["idempotency-key"];
 
-function isAllowed(method: string, path: string): boolean {
+/** Exported for allow-list unit tests (route.test.ts) — not used elsewhere. */
+export function isAllowed(method: string, path: string): boolean {
   return ALLOW.some((r) => r.method === method && r.pattern.test(path));
 }
 

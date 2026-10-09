@@ -16,6 +16,7 @@ import {
   type StockInSaveBody,
   type StockOperationResult,
 } from "@/lib/api/schemas/stock-in";
+import type { StockOutSaveBody } from "@/lib/api/schemas/stock-out";
 
 /**
  * Phase 12 — direct Stock In mutations.
@@ -135,5 +136,54 @@ export function useSaveStockInSession() {
     },
     retry: false,
     onSuccess: (data) => invalidate(data.productId),
+  });
+}
+
+/* ------------------------------------------------------------- Stock Out --- */
+
+/** Everything a Stock-Out success can touch. Same surfaces as Stock-In — a
+ *  deduction affects the identical set of dependent views. */
+export function useStockOutInvalidation() {
+  const qc = useQueryClient();
+  return (productId?: number) => {
+    void qc.invalidateQueries({ queryKey: queryKeys.stock.all });
+    void qc.invalidateQueries({ queryKey: queryKeys.products.all });
+    if (productId !== undefined) {
+      void qc.invalidateQueries({ queryKey: queryKeys.products.detail(productId) });
+    }
+    void qc.invalidateQueries({ queryKey: queryKeys.batches.all });
+    void qc.invalidateQueries({ queryKey: queryKeys.dashboardSummary });
+    void qc.invalidateQueries({ queryKey: queryKeys.attentionSummary });
+    void qc.invalidateQueries({ queryKey: queryKeys.recentActivity });
+    void qc.invalidateQueries({ queryKey: queryKeys.reports.all });
+    void qc.invalidateQueries({ queryKey: ["search"] });
+  };
+}
+
+/**
+ * Phase 14A — commit a whole Stock-Out session as ONE backend mutation,
+ * mirroring useSaveStockInSession exactly: the entered/counted quantity
+ * becomes a single request, sent with the session's stable `Idempotency-Key`.
+ * Never retried automatically; a manual retry (or a page reload) re-sends the
+ * SAME key + body, and the backend replays its stored response instead of
+ * deducting stock again. A 409 "... different payload" means the session's
+ * setup/quantity/strategy changed under a used key — the console then forces
+ * a new session rather than issuing a fresh key silently (see
+ * stock-out-console.tsx's resolveStrategyChange guard).
+ */
+export function useSaveStockOutSession() {
+  const invalidate = useStockOutInvalidation();
+  return useMutation<StockOperationResult, unknown, { body: StockOutSaveBody; idempotencyKey: string }>({
+    mutationFn: async ({ body, idempotencyKey }) => {
+      const headers = { "Idempotency-Key": idempotencyKey };
+      const env = await bffJson(`/api/bff/${body.endpoint}`, stockOperationEnvelope, {
+        method: "POST",
+        json: body.json,
+        headers,
+      });
+      return env.data;
+    },
+    retry: false,
+    onSuccess: (data) => invalidate(data.product_id),
   });
 }
