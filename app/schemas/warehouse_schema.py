@@ -6,7 +6,8 @@ class WarehouseLocationResponse(BaseModel):
 
     id: int
     location_code: str
-    location_name: str
+    # warehouse_locations.location_name is a nullable column.
+    location_name: str | None
     location_type: str | None
     is_active: bool
 

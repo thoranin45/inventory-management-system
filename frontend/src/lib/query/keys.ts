@@ -70,4 +70,10 @@ export const queryKeys = {
   warehouses: {
     all: ["warehouses"] as const,
   },
+  /** Phase 14C: the viewer id is part of the key — redaction is per user. */
+  inventoryLedger: {
+    all: ["inventory-movements"] as const,
+    list: (viewerId: number | string, params: Record<string, unknown>) =>
+      ["inventory-movements", "list", String(viewerId), params] as const,
+  },
 };

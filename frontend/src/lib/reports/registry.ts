@@ -66,8 +66,8 @@ export const REPORTS: ReportDef[] = [
   },
   {
     slug: "movements",
-    title: "Movement history",
-    blurb: "Bounded stock-transaction history with type and date filters.",
+    title: "Transaction summary",
+    blurb: "Product-level stock-transaction summary. For per-location, per-lot movements use the Inventory Ledger.",
     group: "Inventory",
     icon: ClipboardList,
   },

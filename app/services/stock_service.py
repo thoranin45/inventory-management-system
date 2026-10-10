@@ -38,6 +38,7 @@ from app.schemas.stock_schema import (
     StockIn,
     StockOperationResponse,
     StockOut,
+    StockTransactionResponse,
 )
 
 
@@ -627,7 +628,10 @@ def execute_adjustment_mutation(
     new_quantity: Decimal,
     remark: str | None,
     created_by_user_id: int,
-) -> StockOperationResponse:
+    reference_type: str,
+    reference_id: int,
+    reference_number: str,
+) -> tuple[StockOperationResponse, StockTransaction]:
     """The tested stock-mutation core, shared by every caller that is
     allowed to actually move stock for an adjustment.
 
@@ -638,6 +642,14 @@ def execute_adjustment_mutation(
     decimal handling, same AuditLog/InventoryMovement shape. Takes no new
     transaction of its own; the caller's ``UnitOfWork`` covers this and
     whatever else it does alongside it (e.g. the request's own status flip).
+
+    Phase 14C: the reference triple is required (no default) so every
+    caller -- including Phase 14D's batch branch -- must name the business
+    document that authorised the change. The movement points at that
+    document and keeps the transaction link in ``stock_transaction_id``;
+    the transaction is returned so the caller can record it too. ``remark``
+    lands in broadly readable StockTransaction / InventoryMovement rows, so
+    callers must never pass private request notes here.
     """
     product = (
         stock_repo
@@ -751,13 +763,10 @@ def execute_adjustment_mutation(
             balance_after=(
                 balance.on_hand_qty
             ),
-            reference_type=(
-                "STOCK_TRANSACTION"
-            ),
-            reference_id=(
-                transaction.id
-            ),
-            reference_number=None,
+            reference_type=reference_type,
+            reference_id=reference_id,
+            reference_number=reference_number,
+            stock_transaction_id=transaction.id,
             remark=remark,
             created_by_user_id=(
                 created_by_user_id
@@ -776,10 +785,24 @@ def execute_adjustment_mutation(
         previous_stock=previous_stock,
         current_stock=product.stock_qty,
         difference=difference,
-    )
+    ), transaction
 
 
 def get_stock_history_service(
     stock_repo: StockRepository,
-) -> list[StockTransaction]:
-    return stock_repo.get_history()
+    current_user: User,
+) -> list[StockTransactionResponse]:
+    """Phase 14C: same rows and order as before; an adjustment remark the
+    viewer may not see is replaced on a response copy, never on the ORM row."""
+    from app.services import adjustment_visibility as visibility
+
+    transactions = stock_repo.get_history()
+    requests = visibility.requests_for_transactions(stock_repo.db, transactions)
+    items = []
+    for t in transactions:
+        item = StockTransactionResponse.model_validate(t)
+        visible = visibility.transaction_remark(current_user, t, requests)
+        if visible.redacted:
+            item = item.model_copy(update={"remark": visible.remark})
+        items.append(item)
+    return items

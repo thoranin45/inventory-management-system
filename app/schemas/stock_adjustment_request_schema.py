@@ -85,7 +85,8 @@ class WarehouseRef(_Ref):
 class LocationRef(_Ref):
     id: int
     location_code: str
-    location_name: str
+    # warehouse_locations.location_name is a nullable column.
+    location_name: str | None
 
 
 class UserRef(_Ref):
@@ -132,3 +133,6 @@ class StockAdjustmentRequestDetail(BaseModel):
     reviewed_at: datetime | None
     completed_at: datetime | None
     history: list[AdjustmentRequestHistoryEntry] = Field(default_factory=list)
+    # Phase 14C (D7). Defaulted so replay snapshots stored before 14C still
+    # validate; this detail is only ever served to the requester or Admin.
+    stock_transaction_id: int | None = None

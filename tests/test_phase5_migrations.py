@@ -91,4 +91,4 @@ def test_downgrade_guard(migration_engine,history):
             command.downgrade(migration_config(c),PHASE4)
     with migration_engine.connect() as c:
         # Refused Phase 4 downgrade leaves the database at the current head revision.
-        assert c.scalar(text("SELECT version_num FROM alembic_version"))=="ea1a00000002"
+        assert c.scalar(text("SELECT version_num FROM alembic_version"))=="ea1a00000004"

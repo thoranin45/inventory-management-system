@@ -64,6 +64,10 @@ vi.mock("@/lib/query/reports", () => ({
   useStockChart: () => ok(chartStockSchema.parse(chartStockResponse)),
   useExpiryChart: () => ok(chartExpirySchema.parse(chartExpiryResponse)),
 }));
+// Phase 14C: the Transfers report resolves warehouse names from the directory.
+vi.mock("@/lib/query/transfers", () => ({
+  useWarehouseNames: () => ({ data: {}, isLoading: false }),
+}));
 vi.mock("@/lib/query/sales", () => ({
   useProductLookup: () => ({
     data: { 1: { id: 1, sku: "WH-COFFEE-1KG", product_name: "Arabica Whole Bean 1kg" }, 3: { id: 3, sku: "WH-SUGAR-25KG", product_name: "Refined Sugar Sack 25kg" }, 6: { id: 6, sku: "WH-TEA-200G", product_name: "Green Tea 200g" } },

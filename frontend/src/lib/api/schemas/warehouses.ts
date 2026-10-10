@@ -5,7 +5,7 @@ import { apiEnvelope } from "./common";
 export const warehouseLocationSchema = z.object({
   id: z.number(),
   location_code: z.string(),
-  location_name: z.string(),
+  location_name: z.string().nullable(),
   location_type: z.string().nullable(),
   is_active: z.boolean(),
 });

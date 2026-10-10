@@ -235,6 +235,8 @@ def test_adjustment_missing_actor_rolls_back(client, admin_headers, db_session, 
                 product_id=product["id"], warehouse=warehouse, location=location,
                 new_quantity=Decimal("5"), remark="Count correction",
                 created_by_user_id=actor_id,
+                reference_type="STOCK_ADJUSTMENT_REQUEST", reference_id=1,
+                reference_number="ADJ-000001",
             )
     db_session.expire_all()
     assert db_session.get(Product, product["id"]).stock_qty == Decimal("0")
@@ -260,6 +262,8 @@ def test_adjustment_ledger_failure_rolls_back_audit_and_stock(
                 product_id=product["id"], warehouse=warehouse, location=location,
                 new_quantity=Decimal("5"), remark="Count correction",
                 created_by_user_id=admin_user.id,
+                reference_type="STOCK_ADJUSTMENT_REQUEST", reference_id=1,
+                reference_number="ADJ-000001",
             )
     db_session.expire_all()
     assert db_session.get(Product, product["id"]).stock_qty == Decimal("0")

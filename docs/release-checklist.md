@@ -27,6 +27,36 @@
       copy off-box. Record filename + size + sha256.
 - [ ] **Preflight**: relevant `scripts/check_phaseN_preflight.py` with its
       explicit `*_PREFLIGHT_DATABASE_URL` → zero findings.
+- [ ] **Timestamp provenance (Phase 14C)**: understand what `ea1a00000004` does.
+      - It adds `inventory_movements.recorded_at_utc` (TIMESTAMPTZ) in two
+        steps: no default first, then `DEFAULT now()`. Every pre-migration
+        row therefore stays NULL, i.e. `timestamp_verified=false`.
+      - Every new movement is stamped by the database itself; nothing in
+        configuration can mark a row verified.
+      - Unverified history has `occurred_at=null`. Business-day filters
+        include those rows conservatively (up to 14 h past either edge of the
+        range) and flag them.
+      - Optional evidence for those historical windows: run
+        `scripts/check_inventory_consistency.py` with
+        `INVENTORY_DIAGNOSTIC_NAIVE_TIMEZONE` set to the zone you expect.
+        Its `timestamp_provenance` / `UNANCHORED` findings are diagnostic
+        evidence about the historical windows only — never per-row proof, and
+        they do not change what the API reports.
+- [ ] **Trusted writers for `recorded_at_utc` (Phase 14C)**: the column is
+      authoritative only for trusted database writers.
+      - `DEFAULT now()` can be bypassed by a direct SQL writer that supplies
+        a value or an explicit NULL, or UPDATEs it later. No API exposes a
+        setter, and app code never assigns it.
+      - Before release, list who can write the table. The API's own DB role
+        should be the only non-superuser writer:
+        `SELECT grantee, privilege_type FROM information_schema.role_table_grants
+        WHERE table_name = 'inventory_movements' AND privilege_type IN ('INSERT', 'UPDATE');`
+      - Inventory every external writer — ad-hoc psql, import or seed
+        scripts, BI or ETL jobs. Revoke INSERT/UPDATE from any role that is
+        not the API, or document an approved exception.
+      - Ledger ordering with `order_mode=chronological` puts verified rows
+        first (by `recorded_at_utc`), then unverified history (by stored
+        `created_at`), in both directions.
 - [ ] Announce maintenance; stop `api` if tables are large.
 - [ ] **Migrate (one-shot)**:
       `docker compose -f compose.prod.yml --profile migrate run --rm migrate`.

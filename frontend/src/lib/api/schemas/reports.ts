@@ -25,32 +25,34 @@ export const numericString = z
 
 /* ------------------------------------------------------------------ enums == */
 
-/** `StockTransaction.transaction_type` vocabulary (from app/). */
+/**
+ * `StockTransaction.transaction_type` vocabulary — exactly the values app/
+ * writes (Phase 14C fix: the old list offered transfer/transit types that
+ * never exist on a StockTransaction and omitted IN / SALE_SHIPMENT /
+ * SALE_RETURN). Transfers write no StockTransaction at all; their physical
+ * legs live in the Inventory Ledger (`/inventory/ledger`).
+ */
 export const MOVEMENT_TYPES = [
-  "IN_PO",
+  "IN",
   "IN_BATCH",
-  "IN_TRANSIT",
-  "OUT_FEFO",
+  "IN_PO",
   "OUT_FIFO",
+  "OUT_FEFO",
   "ADJUST",
-  "TRANSFER_IN",
-  "TRANSFER_OUT",
-  "TRANSFER_TRANSIT_IN",
-  "TRANSFER_TRANSIT_OUT",
+  "SALE_SHIPMENT",
+  "SALE_RETURN",
 ] as const;
 export type MovementType = (typeof MOVEMENT_TYPES)[number];
 
 export const MOVEMENT_TYPE_LABEL: Record<string, string> = {
+  IN: "Stock in",
   IN_PO: "PO receipt",
   IN_BATCH: "Batch in",
-  IN_TRANSIT: "Into transit",
   OUT_FEFO: "Pick (FEFO)",
   OUT_FIFO: "Pick (FIFO)",
   ADJUST: "Adjustment",
-  TRANSFER_IN: "Transfer in",
-  TRANSFER_OUT: "Transfer out",
-  TRANSFER_TRANSIT_IN: "Transit in",
-  TRANSFER_TRANSIT_OUT: "Transit out",
+  SALE_SHIPMENT: "Sales shipment",
+  SALE_RETURN: "Sales return",
 };
 
 export function movementTypeLabel(t: string): string {

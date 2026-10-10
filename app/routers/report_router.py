@@ -10,7 +10,7 @@ from app.core.config import settings
 from app.core.pagination import ListParams, list_params, phase8_json
 from app.database import get_db
 from datetime import date, datetime, timedelta
-from app.models import Product, SalesOrder, StockTransaction, ProductBatch
+from app.models import Product, SalesOrder, StockTransaction, ProductBatch, User
 
 from fastapi.responses import FileResponse
 from openpyxl import Workbook
@@ -115,8 +115,14 @@ def stock_movement(
     date_from: datetime | None = Query(default=None),
     date_to: datetime | None = Query(default=None),
     params: ListParams = Depends(list_params),
+    current_user: User = Depends(require_warehouse),
 ):
-    """Bounded StockTransaction history (Phase 8: no longer dumps the whole table)."""
+    """Bounded StockTransaction history (Phase 8: no longer dumps the whole table).
+
+    Phase 14C: adjustment remarks are filtered through the shared
+    adjustment-visibility policy. Same keys and shape as before."""
+    from app.services import adjustment_visibility as visibility
+
     query = db.query(StockTransaction)
     if transaction_type:
         query = query.filter(StockTransaction.transaction_type == transaction_type)
@@ -131,6 +137,7 @@ def stock_movement(
         .limit(params.page_size)
         .all()
     )
+    requests = visibility.requests_for_transactions(db, rows)
     return _report_page(
         [
             {
@@ -138,7 +145,7 @@ def stock_movement(
                 "product_id": t.product_id,
                 "transaction_type": t.transaction_type,
                 "quantity": t.quantity,
-                "remark": t.remark,
+                "remark": visibility.transaction_remark(current_user, t, requests).remark,
                 "created_at": getattr(t, "created_at", None),
             }
             for t in rows

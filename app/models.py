@@ -1456,6 +1456,19 @@ class InventoryMovement(Base):
         server_default=func.now(),
     )
 
+    # Phase 14C (ea1a00000004): explicit instant stamped by the DATABASE on
+    # every new row (server default now()), so a row's time never depends on
+    # the writer's session TimeZone. Never set by application code (no API
+    # exposes a setter). NULL for all history recorded before the revision =
+    # provenance unverified. Authoritative only for TRUSTED writers: a direct
+    # SQL writer can bypass the default by supplying a value or NULL, so
+    # production INSERT/UPDATE on this table must be limited to the API role.
+    recorded_at_utc = Column(
+        DateTime(timezone=True),
+        nullable=True,
+        server_default=func.now(),
+    )
+
     product = relationship(
         "Product",
     )
@@ -1502,9 +1515,18 @@ class InventoryMovement(Base):
             ),
         ),
 
+        # Phase 14C: replaces the single-column product_id index (its left
+        # prefix) and serves the ledger's newest-first per-product query.
         Index(
-            "ix_inventory_movements_product_id",
+            "ix_inventory_movements_product_created_id",
             "product_id",
+            "created_at",
+            "id",
+        ),
+
+        Index(
+            "ix_inventory_movements_reference_number",
+            "reference_number",
         ),
 
         Index(
@@ -1607,6 +1629,7 @@ class StockAdjustmentRequest(Base):
     __tablename__ = "stock_adjustment_requests"
     __table_args__ = (
         UniqueConstraint("reference_number", name="uq_stock_adjustment_requests_reference_number"),
+        UniqueConstraint("stock_transaction_id", name="uq_stock_adjustment_requests_stock_transaction_id"),
         Index("ix_stock_adjustment_requests_status_created_at", "status", "created_at"),
         Index("ix_stock_adjustment_requests_scope_status", "product_id", "warehouse_id", "location_id", "status"),
         Index("ix_stock_adjustment_requests_requested_by_user_id", "requested_by_user_id"),
@@ -1633,6 +1656,14 @@ class StockAdjustmentRequest(Base):
     reviewed_by_user_id = Column(Integer, ForeignKey("users.id", name="fk_stock_adjustment_requests_reviewed_by_user"), nullable=True)
     rejection_reason = Column(String(500), nullable=True)
     create_operation_key = Column(String(128), nullable=True)
+    # Phase 14C (D7): set on every successful approval -- including a
+    # zero-difference one that writes no InventoryMovement -- so the
+    # Request -> StockTransaction -> AuditLog chain never depends on a movement.
+    stock_transaction_id = Column(
+        Integer,
+        ForeignKey("stock_transactions.id", name="fk_stock_adjustment_requests_stock_transaction"),
+        nullable=True,
+    )
 
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     reviewed_at = Column(DateTime(timezone=True), nullable=True)

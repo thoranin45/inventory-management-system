@@ -9,6 +9,7 @@ import { ProgressRing } from "@/components/work/progress-ring";
 import { ReportShell } from "./report-shell";
 import { ReportsFilterBar } from "./reports-filter-bar";
 import { useTransfersReport } from "@/lib/query/reports";
+import { useWarehouseNames } from "@/lib/query/transfers";
 import { useReportParams } from "@/lib/reports/use-report-params";
 import { TRANSFER_STATUSES, TRANSFER_STATUS_LABEL, type TransferRow } from "@/lib/api/schemas/transfers";
 import { formatIsoDate } from "@/lib/format";
@@ -26,7 +27,9 @@ export function TransfersReport() {
   const rows = q.data?.data.items ?? [];
   const pg = q.data?.data.pagination;
 
-  const wh = (id: number, name: string | null) => name ?? `Warehouse #${id}`;
+  // Directory names first (inactive ones labelled), then the row's own name.
+  const whNames = useWarehouseNames().data ?? {};
+  const wh = (id: number, name: string | null) => whNames[id] ?? name ?? `Warehouse #${id}`;
 
   const columns: Column<TransferRow>[] = [
     { key: "tr", header: "Transfer #", cell: (r) => <span className="mono">{r.transfer_number}</span> },

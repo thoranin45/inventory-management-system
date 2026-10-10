@@ -1,5 +1,6 @@
 "use client";
 
+import * as React from "react";
 import { keepPreviousData, useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { bffJson } from "@/lib/api/browser";
@@ -16,6 +17,7 @@ import {
 } from "@/lib/api/schemas/transfers";
 import type { TransferReceivePayload } from "@/lib/transfer-receipt-draft";
 import { queryKeys } from "./keys";
+import { useWarehouses } from "./warehouses";
 
 type Query = Record<string, string | number | boolean | undefined | null>;
 
@@ -54,28 +56,23 @@ export function useTransfer(id: number | string | null) {
 }
 
 /**
- * Warehouse id → name map, composed from the transfer LIST rows (there is no
- * /warehouses endpoint). Only warehouses that have appeared in a transfer get a
- * name; the rest fall back to "Warehouse #id".
+ * Warehouse id → display name, from the read-only directory
+ * (GET /warehouses?active_only=false). Every non-transit warehouse is named —
+ * including ones that never appeared in a transfer, and inactive ones, which
+ * are labelled rather than hidden so historical transfers stay readable.
  */
-export function useWarehouseNames() {
-  return useQuery<Record<number, string>>({
-    queryKey: ["inventory-transfers", "warehouse-names"],
-    queryFn: async ({ signal }) => {
-      const env = await bffJson("/api/bff/inventory-transfers", transferListEnvelope, {
-        query: { page: 1, page_size: 100 },
-        signal,
-      });
-      const map: Record<number, string> = {};
-      for (const r of env.data.items) {
-        if (r.source_warehouse_name) map[r.source_warehouse_id] = r.source_warehouse_name;
-        if (r.destination_warehouse_name) map[r.destination_warehouse_id] = r.destination_warehouse_name;
-      }
-      return map;
-    },
-    staleTime: 60_000,
-    retry: RETRY_ONCE_NOT_AUTH,
-  });
+export function useWarehouseNames(): { data: Record<number, string> | undefined; isLoading: boolean } {
+  const q = useWarehouses(false);
+  const data = React.useMemo(
+    () =>
+      q.data
+        ? Object.fromEntries(
+            q.data.map((w) => [w.id, w.is_active ? w.warehouse_name : `${w.warehouse_name} (inactive)`]),
+          )
+        : undefined,
+    [q.data],
+  );
+  return { data, isLoading: q.isLoading };
 }
 
 export interface BatchExpiryInfo {

@@ -5,6 +5,7 @@ variable. No .env files are opened, and connection errors never expose credentia
 """
 import json
 import os
+import re
 from collections import defaultdict
 from datetime import date
 from decimal import Decimal
@@ -15,6 +16,39 @@ from sqlalchemy import create_engine, text
 # config import): overridable via INVENTORY_DIAGNOSTIC_TIMEZONE, default matches
 # the application's Asia/Bangkok business timezone.
 DIAGNOSTIC_TIMEZONE = os.environ.get("INVENTORY_DIAGNOSTIC_TIMEZONE", "Asia/Bangkok")
+# Phase 14C: the zone the operator EXPECTS naive created_at values to have
+# been written in. The timestamp_provenance check tests this expectation
+# against same-transaction evidence. Diagnostic evidence only: the API never
+# uses it -- per-row proof is inventory_movements.recorded_at_utc.
+DIAGNOSTIC_NAIVE_TIMEZONE = os.environ.get("INVENTORY_DIAGNOSTIC_NAIVE_TIMEZONE", "UTC")
+
+# Exact APPROVE_ADJUSTMENT_REQUEST audit texts, per code generation. The
+# whole description must match -- never just a suffix.
+_PRE_14C_APPROVE_AUDIT = "{ref}: PENDING -> APPROVED"
+_14C_APPROVE_AUDIT = "{ref}: PENDING -> APPROVED; stock_transaction_id={tx}"
+_14C_APPROVE_AUDIT_RE = r"{ref}: PENDING -> APPROVED; stock_transaction_id=([1-9][0-9]*)"
+
+# Same-transaction (timestamptz, naive) pairs: both default to now(), which
+# is the transaction's start time, so their difference is the exact session
+# offset in force when the rows were written.
+_TIMESTAMP_ANCHORS_SQL = (
+    "SELECT 'PURCHASE_RECEIPT' AS anchor, r.id AS anchor_id, "
+    "r.received_at AT TIME ZONE 'UTC' AS aware_utc, min(m.created_at) AS naive_at "
+    "FROM purchase_order_receipts r JOIN inventory_movements m ON m.purchase_receipt_id = r.id "
+    "GROUP BY r.id, r.received_at "
+    "UNION ALL "
+    "SELECT 'TRANSFER_RECEIPT', r.id, r.received_at AT TIME ZONE 'UTC', min(m.created_at) "
+    "FROM inventory_transfer_receipts r JOIN inventory_movements m ON m.transfer_receipt_id = r.id "
+    "GROUP BY r.id, r.received_at "
+    "UNION ALL "
+    "SELECT 'MOVEMENT_RECORDED', m.id, m.recorded_at_utc AT TIME ZONE 'UTC', m.created_at "
+    "FROM inventory_movements m WHERE m.recorded_at_utc IS NOT NULL "
+    "UNION ALL "
+    "SELECT 'ADJUSTMENT_REQUEST', s.id, s.created_at AT TIME ZONE 'UTC', min(a.created_at) "
+    "FROM stock_adjustment_requests s JOIN audit_logs a ON a.table_name = 'stock_adjustment_requests' "
+    "AND a.record_id = s.id AND a.action = 'CREATE_ADJUSTMENT_REQUEST' "
+    "GROUP BY s.id, s.created_at"
+)
 
 
 def analyze_inventory(snapshot: dict, today: date | None = None) -> list[dict]:
@@ -52,8 +86,21 @@ def analyze_inventory(snapshot: dict, today: date | None = None) -> list[dict]:
         history[key(movement)].append(movement)
         valid = movement["balance_before"] + movement["quantity"] == movement["balance_after"]
         report("movement_arithmetic", "CONSISTENT" if valid else "UNRESOLVED", movement_id=movement["id"])
-        if movement["reference_type"] == "STOCK_TRANSACTION":
-            linked[movement["reference_id"]].append(movement)
+        # Phase 14C: the explicit stock_transaction_id FK is the primary link;
+        # a legacy reference_type=STOCK_TRANSACTION pointer is the fallback.
+        # A movement carrying both is linked once; if they disagree the FK
+        # wins and the contradiction is reported.
+        fk_transaction = movement.get("stock_transaction_id")
+        ref_transaction = (
+            movement["reference_id"] if movement["reference_type"] == "STOCK_TRANSACTION" else None
+        )
+        if fk_transaction is not None and ref_transaction is not None and fk_transaction != ref_transaction:
+            report("conflicting_transaction_link", "UNRESOLVED", movement_id=movement["id"],
+                   stock_transaction_id=fk_transaction, reference_id=ref_transaction,
+                   reason="stock_transaction_id and reference_id name different transactions")
+        transaction_link = fk_transaction if fk_transaction is not None else ref_transaction
+        if transaction_link is not None:
+            linked[transaction_link].append(movement)
         elif movement["reference_type"] == "INVENTORY_TRANSFER":
             peers = [m for m in movements if m["reference_type"] == "INVENTORY_TRANSFER"
                      and m["reference_id"] == movement["reference_id"]
@@ -96,7 +143,144 @@ def analyze_inventory(snapshot: dict, today: date | None = None) -> list[dict]:
 
     _analyze_transfers(snapshot, balances, movements, report)
     _analyze_expiry(snapshot, balances, today, report)
+    _analyze_adjustment_links(snapshot, transactions, movements, linked, report)
+    _analyze_timestamp_provenance(snapshot, movements, report)
     return findings
+
+
+def _analyze_adjustment_links(snapshot, transactions, movements, linked, report):
+    """Phase 14C (D7): every approval records stock_transaction_id, so
+    Request -> StockTransaction(ADJUST) -> movements is checkable even for a
+    zero-difference approval that wrote no movement.
+
+    Every approval writes exactly one APPROVE_ADJUSTMENT_REQUEST audit row in
+    its own transaction, and its WHOLE description is compared with the
+    exact text the writing code generation produces:
+
+    - pre-14C:  ``"<ref>: PENDING -> APPROVED"``
+    - 14C+:     ``"<ref>: PENDING -> APPROVED; stock_transaction_id=<id>"``
+
+    A NULL link is EXPLAINED only when the audit is exactly the pre-14C text
+    and no movement references the request. A link is CONSISTENT only when
+    the audit is exactly the 14C text naming that same transaction (plus the
+    transaction / movement checks). Anything else -- missing, duplicated,
+    malformed, extra-suffixed or contradictory audit text, or a movement
+    disagreeing with the link -- is UNRESOLVED. Timestamps are never used as
+    evidence here."""
+    requests = snapshot.get("adjustment_requests")
+    if not requests:
+        return
+    transactions_by_id = {t["id"]: t for t in transactions}
+    audits = defaultdict(list)
+    for row in snapshot.get("adjustment_approval_audits", []):
+        audits[row["record_id"]].append(row["description"] or "")
+    request_moves = defaultdict(list)
+    for m in movements:
+        if m["reference_type"] == "STOCK_ADJUSTMENT_REQUEST":
+            request_moves[m["reference_id"]].append(m)
+
+    def result(request, classification, reason, **evidence):
+        report("adjustment_request_transaction_link", classification, request_id=request["id"],
+               stock_transaction_id=request["stock_transaction_id"], reason=reason, **evidence)
+
+    for request in requests:
+        transaction_id = request["stock_transaction_id"]
+        own_moves = request_moves.get(request["id"], [])
+        own_audits = audits.get(request["id"], [])
+        if request["status"] != "APPROVED":
+            clean = transaction_id is None and not own_moves and not own_audits
+            result(request, "CONSISTENT" if clean else "UNRESOLVED",
+                   "Not approved: no transaction, movement or approval audit expected",
+                   status=request["status"])
+            continue
+        if len(own_audits) != 1:
+            result(request, "UNRESOLVED", "Approved request needs exactly one APPROVE audit row",
+                   approve_audits=len(own_audits))
+            continue
+        audit_text = own_audits[0]
+        reference = request["reference_number"] or ""
+        audited = re.fullmatch(_14C_APPROVE_AUDIT_RE.format(ref=re.escape(reference)), audit_text)
+        audited_id = int(audited.group(1)) if audited else None
+
+        if transaction_id is None:
+            if audit_text == _PRE_14C_APPROVE_AUDIT.format(ref=reference) and not own_moves:
+                result(request, "EXPLAINED",
+                       "Approved before Phase 14C linkage (pre-14C audit format); no backfill (D2)")
+            else:
+                result(request, "UNRESOLVED",
+                       "Approved without a stock_transaction_id link and no proof it predates Phase 14C",
+                       audited_stock_transaction_id=audited_id, movement_ids=[m["id"] for m in own_moves])
+            continue
+
+        transaction = transactions_by_id.get(transaction_id)
+        moves = linked.get(transaction_id, [])
+        valid = (
+            transaction is not None
+            and transaction["transaction_type"] == "ADJUST"
+            and transaction["product_id"] == request["product_id"]
+            and audit_text == _14C_APPROVE_AUDIT.format(ref=reference, tx=transaction_id)
+            and all(m["reference_type"] == "STOCK_ADJUSTMENT_REQUEST"
+                    and m["reference_id"] == request["id"] for m in moves)
+            and all(m.get("stock_transaction_id") == transaction_id for m in own_moves)
+            and len(moves) <= 1
+            and len(own_moves) <= 1
+        )
+        result(request, "CONSISTENT" if valid else "UNRESOLVED",
+               "Zero-difference approval: transaction without movement" if valid and not moves else "",
+               movement_ids=[m["id"] for m in moves], audited_stock_transaction_id=audited_id)
+
+
+def _analyze_timestamp_provenance(snapshot, movements, report):
+    """Phase 14C (D8): which zone were the naive created_at values written in?
+
+    Never inferred from the current session TimeZone. Instead, rows written
+    in one transaction with both a timestamptz and a naive ``now()`` column
+    (PO receipts, transfer receipts, adjustment requests vs their audit row)
+    reveal the exact offset in force when each was written. Periods with no
+    such anchor are reported as UNANCHORED, never assumed."""
+    anchors = snapshot.get("timestamp_anchors")
+    if anchors is None:
+        return
+    from datetime import timezone as dt_timezone
+    from zoneinfo import ZoneInfo
+
+    declared = ZoneInfo(DIAGNOSTIC_NAIVE_TIMEZONE)
+    if snapshot.get("session_timezone") is not None:
+        report("db_session_timezone", "EXPLAINED", value=snapshot["session_timezone"],
+               reason="Current session only; says nothing about when historical rows were written")
+
+    groups = defaultdict(list)
+    for anchor in anchors:
+        offset = int((anchor["naive_at"] - anchor["aware_utc"]).total_seconds())
+        instant = anchor["aware_utc"].replace(tzinfo=dt_timezone.utc)
+        expected = int(declared.utcoffset(instant).total_seconds())
+        groups[(anchor["anchor"], offset, expected)].append(anchor["naive_at"])
+    for (kind, offset, expected), stamps in sorted(groups.items()):
+        report("timestamp_provenance", "CONSISTENT" if offset == expected else "UNRESOLVED",
+               anchor=kind, offset_seconds=offset, declared_zone=DIAGNOSTIC_NAIVE_TIMEZONE,
+               declared_offset_seconds=expected, anchors=len(stamps),
+               first_naive=min(stamps), last_naive=max(stamps))
+    offsets = {offset for (_, offset, _) in groups}
+    if len(offsets) > 1:
+        report("timestamp_provenance_change", "UNRESOLVED", offsets_seconds=sorted(offsets),
+               reason="Naive rows were written under more than one session TimeZone")
+
+    stamps = [m["created_at"] for m in movements if m.get("created_at") is not None]
+    if not anchors:
+        if stamps:
+            report("timestamp_provenance_unanchored", "UNANCHORED", movements=len(stamps),
+                   earliest_naive=min(stamps), latest_naive=max(stamps),
+                   reason="No same-transaction anchor exists; storage zone is assumed, not proven")
+        return
+    window_start = min(a["naive_at"] for a in anchors)
+    window_end = max(a["naive_at"] for a in anchors)
+    before = [s for s in stamps if s < window_start]
+    after = [s for s in stamps if s > window_end]
+    if before or after:
+        report("timestamp_provenance_unanchored", "UNANCHORED",
+               movements_before=len(before), movements_after=len(after),
+               anchored_from=window_start, anchored_to=window_end,
+               reason="Movements outside the anchored window; storage zone is assumed, not proven")
 
 
 def _analyze_expiry(snapshot, balances, today, report):
@@ -244,8 +428,18 @@ def diagnose_inventory(engine, today: date | None = None) -> list[dict]:
         "balances": "SELECT id, product_id, warehouse_id, location_id, batch_id, on_hand_qty, reserved_qty FROM stock_balances",
         "movements": (
             "SELECT id, product_id, warehouse_id, location_id, batch_id, quantity, balance_before, balance_after, "
-            "reference_type, reference_id, movement_type, transfer_item_id, transfer_receipt_id FROM inventory_movements"
+            "reference_type, reference_id, movement_type, transfer_item_id, transfer_receipt_id, "
+            "stock_transaction_id, created_at FROM inventory_movements"
         ),
+        "adjustment_requests": (
+            "SELECT id, reference_number, status, product_id, stock_transaction_id "
+            "FROM stock_adjustment_requests"
+        ),
+        "adjustment_approval_audits": (
+            "SELECT record_id, description FROM audit_logs "
+            "WHERE table_name = 'stock_adjustment_requests' AND action = 'APPROVE_ADJUSTMENT_REQUEST'"
+        ),
+        "timestamp_anchors": _TIMESTAMP_ANCHORS_SQL,
         "transactions": "SELECT id, product_id, transaction_type, quantity FROM stock_transactions",
         "transfers": "SELECT id, status, legacy_completed FROM inventory_transfers",
         "transfer_items": (
@@ -262,6 +456,9 @@ def diagnose_inventory(engine, today: date | None = None) -> list[dict]:
                     text("SELECT (now() AT TIME ZONE :tz)::date"), {"tz": DIAGNOSTIC_TIMEZONE}
                 ).scalar()
             snapshot = {name: list(connection.execute(text(sql)).mappings()) for name, sql in queries.items()}
+            snapshot["session_timezone"] = connection.execute(
+                text("SELECT current_setting('TimeZone')")
+            ).scalar()
             return analyze_inventory(snapshot, today=today)
 
 

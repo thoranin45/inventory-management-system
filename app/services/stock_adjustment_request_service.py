@@ -40,11 +40,12 @@ from app.schemas.stock_adjustment_request_schema import (
     UserRef,
     WarehouseRef,
 )
+from app.services.adjustment_visibility import (
+    ADJUSTMENT_REFERENCE_TYPE,
+    adjustment_public_remark,
+    is_admin as _is_admin,
+)
 from app.services.stock_service import execute_adjustment_mutation
-
-
-def _is_admin(user: User) -> bool:
-    return (getattr(user, "role", None) or "").lower() == "admin"
 
 
 def _create_fingerprint(data: StockAdjustmentRequestCreate) -> str:
@@ -110,6 +111,7 @@ def _build_detail_response(
         created_at=request.created_at,
         reviewed_at=request.reviewed_at,
         completed_at=request.completed_at,
+        stock_transaction_id=request.stock_transaction_id,
         history=[
             AdjustmentRequestHistoryEntry(
                 action=row.action, actor=row.username or "system",
@@ -310,19 +312,25 @@ def approve_adjustment_request_service(
         if actual_quantity != Decimal(str(request.observed_quantity)):
             raise StaleQuantityConflictException(actual_quantity)
 
-        remark = (
-            f"{request.reason_code}: {request.notes}" if request.notes else request.reason_code
-        )[:255]
+        # Phase 14C: the StockTransaction / InventoryMovement / STOCK_ADJUST
+        # audit remark is readable far more broadly than the request itself
+        # (dashboard, reports, ledger), so it carries only the public
+        # reference + reason code -- never the request's private notes,
+        # which stay on the access-controlled request row.
+        remark = adjustment_public_remark(request.reference_number, request.reason_code)
 
         # The tested mutation core (product-active + batch-tracked guard +
         # balance/transaction/AuditLog(STOCK_ADJUST)/InventoryMovement) --
         # reused verbatim, not duplicated. Re-validates product eligibility
         # and the batch-tracked guard again on its own.
-        execute_adjustment_mutation(
+        _, transaction = execute_adjustment_mutation(
             db, stock_repo, balance_repo, movement_repo,
             product_id=request.product_id, warehouse=warehouse, location=location,
             new_quantity=request.requested_quantity, remark=remark,
             created_by_user_id=current_user.id,
+            reference_type=ADJUSTMENT_REFERENCE_TYPE,
+            reference_id=request.id,
+            reference_number=request.reference_number,
         )
 
         now = datetime.now(timezone.utc)
@@ -330,13 +338,19 @@ def approve_adjustment_request_service(
         request.reviewed_by_user_id = current_user.id
         request.reviewed_at = now
         request.completed_at = now
+        # D7: recorded on every approval -- a zero-difference one writes no
+        # movement, so this is its only deterministic transaction link.
+        request.stock_transaction_id = transaction.id
 
         db.add(AuditLog(
             username=current_user.username,
             action="APPROVE_ADJUSTMENT_REQUEST",
             table_name="stock_adjustment_requests",
             record_id=request.id,
-            description=f"{request.reference_number}: PENDING -> APPROVED",
+            description=(
+                f"{request.reference_number}: PENDING -> APPROVED; "
+                f"stock_transaction_id={transaction.id}"
+            ),
         ))
 
         response = _build_detail_response(db, request, warehouse=warehouse, location=location)

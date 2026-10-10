@@ -1,6 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import {
   ArrowLeftRight,
+  BookOpen,
   Boxes,
   ClipboardCheck,
   ClipboardList,
@@ -35,6 +36,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key: "products", label: "Products", href: "/products", icon: Boxes },
   { key: "categories", label: "Categories", href: "/categories", icon: Tags },
   { key: "stock", label: "Stock", href: "/stock", icon: Layers },
+  { key: "inventory-ledger", label: "Inventory Ledger", href: "/inventory/ledger", icon: BookOpen },
   { key: "stock-in", label: "Stock In", href: "/stock-in", icon: PackagePlus },
   { key: "stock-out", label: "Stock Out", href: "/stock-out", icon: PackageMinus },
   { key: "stock-adjustments", label: "Stock Adjustments", href: "/stock-adjustments/mine", icon: ClipboardList },

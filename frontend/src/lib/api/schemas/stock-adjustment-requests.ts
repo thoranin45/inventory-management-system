@@ -94,7 +94,7 @@ export const adjustmentRequestDetailSchema = z.object({
   status: z.enum(["PENDING", "APPROVED", "REJECTED", "CANCELLED"]),
   product: refSchema.extend({ sku: z.string(), product_name: z.string() }),
   warehouse: refSchema.extend({ warehouse_code: z.string(), warehouse_name: z.string() }),
-  location: refSchema.extend({ location_code: z.string(), location_name: z.string() }),
+  location: refSchema.extend({ location_code: z.string(), location_name: z.string().nullable() }),
   observed_quantity: decimalString,
   requested_quantity: decimalString,
   reason_code: z.string(),
@@ -106,6 +106,8 @@ export const adjustmentRequestDetailSchema = z.object({
   reviewed_at: z.string().nullable(),
   completed_at: z.string().nullable(),
   history: z.array(adjustmentRequestHistoryEntrySchema),
+  // Phase 14C (D7): request -> StockTransaction link; served only to requester/admin.
+  stock_transaction_id: z.number().nullable().optional(),
 });
 export type AdjustmentRequestDetail = z.infer<typeof adjustmentRequestDetailSchema>;
 export const adjustmentRequestDetailEnvelope = apiEnvelope(adjustmentRequestDetailSchema);

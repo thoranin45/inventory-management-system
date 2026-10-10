@@ -13,6 +13,7 @@ _DOCS_CSP = (
     "worker-src 'self' blob:; frame-ancestors 'none'"
 )
 _DOCS_PATHS = ("/docs", "/redoc", "/openapi.json")
+_API_PREFIX = "/api/v1/"
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -29,6 +30,14 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "Content-Security-Policy",
             _DOCS_CSP if path.startswith(_DOCS_PATHS) else _API_CSP,
         )
+
+        # Phase 14C (D9): API responses are per-user (role- and
+        # ownership-scoped, e.g. redacted adjustment notes), so no browser or
+        # intermediary may store and replay them for someone else. Static
+        # product images under /uploads are left cacheable. A route that sets
+        # its own Cache-Control keeps it.
+        if path.startswith(_API_PREFIX):
+            response.headers.setdefault("Cache-Control", "private, no-store")
 
         # HSTS only makes sense once TLS terminates in front of the service.
         if settings.is_production:
