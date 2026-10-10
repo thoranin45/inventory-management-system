@@ -49,6 +49,9 @@ interface RequestLine {
   locationId: number | null;
   batchId: number | null;
   batchExpired: boolean;
+  /** On-hand of the chosen lot balance when it was picked (batch only);
+   * absent on drafts saved before it existed, which then read as stale. */
+  pickedOnHand?: string | null;
   reserved: string;
   observed: string;
   requested: string;
@@ -74,6 +77,66 @@ function buildPayload(lines: Record<number, RequestLine>): CreateAdjustmentReque
 
 const FIELD_CLS =
   "h-11 w-full rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-[15px] tabular-nums outline-none focus-visible:outline-2 focus-visible:outline-[var(--focus)] disabled:opacity-60";
+
+type SelectionState =
+  | { kind: "checking" }
+  | { kind: "error" }
+  | { kind: "missing" }
+  | { kind: "changed"; option: BalanceOption }
+  | { kind: "ok"; option: BalanceOption };
+
+function SelectionNotice({
+  selection,
+  onRetry,
+  onUseRefreshed,
+}: {
+  selection: Exclude<SelectionState, { kind: "ok" }>;
+  onRetry: () => void;
+  onUseRefreshed: (option: BalanceOption) => void;
+}) {
+  if (selection.kind === "checking") {
+    return (
+      <p role="status" className="text-[12px] text-[var(--muted)]">
+        Checking the latest balance for this lot…
+      </p>
+    );
+  }
+  return (
+    <div
+      role="alert"
+      className="flex flex-col gap-2 rounded-[var(--r-sm)] border border-[color-mix(in_srgb,var(--danger)_45%,transparent)] bg-[var(--danger-subtle)] p-3 text-[12px] text-[var(--danger)]"
+    >
+      {selection.kind === "error" ? (
+        <>
+          <span>Couldn&apos;t refresh this lot&apos;s balance, so it can&apos;t be submitted yet.</span>
+          <Button variant="secondary" size="sm" className="self-start" onClick={onRetry}>
+            Refresh balance
+          </Button>
+        </>
+      ) : selection.kind === "missing" ? (
+        <span>
+          The selected lot is no longer available at that location (removed, in transit or an inactive location).
+          Pick a lot again.
+        </span>
+      ) : (
+        <>
+          <span>
+            This lot&apos;s balance changed since you picked it (now on hand {selection.option.onHand}, reserved{" "}
+            {selection.option.reserved}). Using the refreshed balance resets the observed quantity to the new on-hand.
+          </span>
+          <Button
+            variant="secondary"
+            size="sm"
+            className="self-start"
+            onClick={() => onUseRefreshed(selection.option)}
+          >
+            Use refreshed balance
+          </Button>
+        </>
+      )}
+    </div>
+  );
+}
 
 function rid(e: unknown): string | undefined {
   return isApiError(e) ? e.requestId : undefined;
@@ -137,6 +200,7 @@ export function StockAdjustmentRequestForm() {
       locationId: null,
       batchId: null,
       batchExpired: false,
+      pickedOnHand: null,
       reserved: "0",
       observed: "",
       requested: "",
@@ -167,12 +231,39 @@ export function StockAdjustmentRequestForm() {
       locationId: option.locationId,
       batchId: option.batchId,
       batchExpired: option.isExpired,
+      pickedOnHand: option.onHand,
       reserved: option.reserved,
       observed: option.onHand, // B2: on-hand, never available
       reasonCode: line?.reasonCode === "EXPIRY_WRITE_OFF" && !option.isExpired ? "CYCLE_COUNT_VARIANCE" : line?.reasonCode,
     });
 
   const patch = (p: Partial<RequestLine>) => draft.setLine(0, p);
+
+  // A batch selection is only submittable while it is verified against the
+  // LATEST successful balance + directory load: same product, warehouse,
+  // location and batch, still operational, and unchanged since it was
+  // picked. Approval re-checks the live balance regardless.
+  const selection = React.useMemo((): SelectionState | null => {
+    if (!line || !line.trackBatch || line.batchId == null) return null;
+    if (stockQ.isError || directoryQ.isError) return { kind: "error" };
+    if (!stockQ.data || !directoryQ.data || stockQ.isFetching || directoryQ.isFetching) return { kind: "checking" };
+    const option = batchOptions.find(
+      (o) =>
+        o.productId === line.productId &&
+        o.warehouseId === line.warehouseId &&
+        o.locationId === line.locationId &&
+        o.batchId === line.batchId,
+    );
+    if (!option) return { kind: "missing" };
+    if (
+      compareQty(line.pickedOnHand ?? "", option.onHand) !== 0 ||
+      compareQty(line.reserved, option.reserved) !== 0 ||
+      line.batchExpired !== option.isExpired
+    ) {
+      return { kind: "changed", option };
+    }
+    return { kind: "ok", option };
+  }, [line, stockQ.isError, stockQ.data, stockQ.isFetching, directoryQ.isError, directoryQ.data, directoryQ.isFetching, batchOptions]);
 
   const ruleError =
     line && line.trackBatch && line.batchId != null
@@ -190,7 +281,7 @@ export function StockAdjustmentRequestForm() {
 
   const valid = React.useMemo(() => {
     if (!line) return false;
-    if (line.trackBatch && (line.batchId == null || ruleError || belowReserved)) return false;
+    if (line.trackBatch && (line.batchId == null || selection?.kind !== "ok" || ruleError || belowReserved)) return false;
     return createAdjustmentRequestInput.safeParse({
       product_id: line.productId,
       ...(line.trackBatch && line.batchId != null
@@ -201,7 +292,7 @@ export function StockAdjustmentRequestForm() {
       reason_code: line.reasonCode,
       notes: line.notes || undefined,
     }).success;
-  }, [line, ruleError, belowReserved]);
+  }, [line, selection, ruleError, belowReserved]);
 
   const reasonOptions: readonly ReasonCode[] = line?.trackBatch ? BATCH_REASON_CODES : REASON_CODES;
 
@@ -219,7 +310,7 @@ export function StockAdjustmentRequestForm() {
 
   const submit = () => {
     const body = draft.payload;
-    if (!body || createMut.isPending) return;
+    if (!body || !valid || createMut.isPending) return;
     createMut.mutate(
       { body, idempotencyKey: draft.idempotencyKey },
       {
@@ -402,6 +493,17 @@ export function StockAdjustmentRequestForm() {
                       placeholder="e.g. counted 38 during weekly stocktake"
                     />
                   </label>
+
+                  {selection && selection.kind !== "ok" ? (
+                    <SelectionNotice
+                      selection={selection}
+                      onRetry={() => {
+                        void stockQ.refetch();
+                        void directoryQ.refetch();
+                      }}
+                      onUseRefreshed={pickBalance}
+                    />
+                  ) : null}
 
                   {mismatch ? (
                     <div className="flex flex-col gap-2 rounded-[var(--r-sm)] border border-[color-mix(in_srgb,var(--danger)_45%,transparent)] bg-[var(--danger-subtle)] p-3 text-[12px] text-[var(--danger)]">

@@ -13,6 +13,7 @@ import type { Warehouse } from "@/lib/api/schemas/warehouses";
  */
 export interface BalanceOption {
   key: string;
+  productId: number;
   warehouseId: number;
   locationId: number;
   batchId: number;
@@ -40,6 +41,7 @@ export function operationalBatchOptions(balances: StockBalanceRow[], directory: 
     if (!warehouse || !location || !warehouse.is_active || !location.is_active) continue;
     options.push({
       key: `${b.warehouse_id}:${b.location_id}:${b.batch_id}`,
+      productId: b.product_id,
       warehouseId: b.warehouse_id,
       locationId: b.location_id,
       batchId: b.batch_id,

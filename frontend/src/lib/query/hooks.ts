@@ -101,48 +101,63 @@ const BALANCE_PAGE_SIZE = 100;
 /** Hard stop so a misbehaving total can never loop forever (10,000 rows). */
 export const MAX_BALANCE_PAGES = 100;
 
+function balancesInconsistent(detail: string): Error {
+  return new Error(`This product's stock balances changed while loading (${detail}). Try again.`);
+}
+
 /**
- * Phase 14D — EVERY balance of one product, walking all pages (stable
- * `id asc` order). Never returns a silently truncated list: a failed page,
- * a short/empty page before the advertised end, a total that changes
- * mid-walk, or more pages than MAX_BALANCE_PAGES all throw instead.
+ * Phase 14D — EVERY balance of one product, walking all pages in `id asc`
+ * order. Each page is verified independently: its page number, page_size
+ * and total_pages must match the request and total_items, it must hold
+ * exactly the expected row count, and ids must be valid and strictly
+ * ascending within and across pages (so repeated, overlapping, shifted or
+ * out-of-order pages are rejected). Any inconsistency, a failed page, a
+ * changed total or more than MAX_BALANCE_PAGES throws -- never a partial
+ * or silently truncated list.
  */
 export async function fetchAllProductStock(
   productId: number | string,
   signal?: AbortSignal,
 ): Promise<StockBalanceListEnvelope["data"]> {
   const items: StockBalanceListEnvelope["data"]["items"] = [];
-  const seen = new Set<number>();
-  let first: StockBalanceListEnvelope["data"]["pagination"] | null = null;
+  let lastId = 0;
+  let total: number | null = null;
   for (let page = 1; ; page++) {
     const env = await bffJson(`/api/bff/stock-balances/product/${productId}`, stockBalanceListEnvelope, {
       query: { page, page_size: BALANCE_PAGE_SIZE, sort_by: "id", sort_order: "asc" },
       signal,
     });
-    const { pagination } = env.data;
-    if (first === null) {
-      first = pagination;
-      if (first.total_pages > MAX_BALANCE_PAGES) {
-        throw new Error(`This product has too many stock balances to list (${first.total_items}).`);
-      }
-    } else if (pagination.total_items !== first.total_items || pagination.total_pages !== first.total_pages) {
-      throw new Error("This product's stock balances changed while loading. Try again.");
+    const { items: rows, pagination } = env.data;
+    if (pagination.page !== page) throw balancesInconsistent(`asked for page ${page}, got ${pagination.page}`);
+    if (pagination.page_size !== BALANCE_PAGE_SIZE) throw balancesInconsistent(`unexpected page size ${pagination.page_size}`);
+    if (!Number.isSafeInteger(pagination.total_items) || pagination.total_items < 0) {
+      throw balancesInconsistent("invalid total");
     }
-    for (const row of env.data.items) {
-      if (!seen.has(row.id)) {
-        seen.add(row.id);
-        items.push(row);
-      }
+    if (pagination.total_pages !== Math.ceil(pagination.total_items / BALANCE_PAGE_SIZE)) {
+      throw balancesInconsistent("page count does not match the total");
     }
-    if (page >= first.total_pages) break;
-    if (env.data.items.length === 0) {
+    if (total === null) {
+      total = pagination.total_items;
+      if (pagination.total_pages > MAX_BALANCE_PAGES) {
+        throw new Error(`This product has too many stock balances to list (${total}).`);
+      }
+    } else if (pagination.total_items !== total) {
+      throw balancesInconsistent("total changed");
+    }
+    const expected = Math.min(BALANCE_PAGE_SIZE, Math.max(0, total - (page - 1) * BALANCE_PAGE_SIZE));
+    if (rows.length === 0 && expected > 0) {
       throw new Error("This product's stock balances ended early while loading. Try again.");
     }
+    if (rows.length !== expected) throw balancesInconsistent(`page ${page} has ${rows.length} of ${expected} rows`);
+    for (const row of rows) {
+      if (!Number.isSafeInteger(row.id) || row.id <= 0) throw balancesInconsistent("invalid balance id");
+      if (row.id <= lastId) throw balancesInconsistent("duplicate or out-of-order balance");
+      lastId = row.id;
+      items.push(row);
+    }
+    if (page >= pagination.total_pages) break;
   }
-  if (items.length !== first.total_items) {
-    throw new Error("This product's stock balances changed while loading. Try again.");
-  }
-  return { items, pagination: { ...first, page: 1, page_size: items.length, total_pages: items.length ? 1 : 0 } };
+  return { items, pagination: { page: 1, page_size: items.length, total_items: total, total_pages: items.length ? 1 : 0 } };
 }
 
 export function useAllProductStock(productId: number | null) {

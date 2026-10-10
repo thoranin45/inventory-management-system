@@ -93,4 +93,92 @@ describe("fetchAllProductStock", () => {
     await expect(fetchAllProductStock(9)).rejects.toThrow(/too many stock balances/);
     expect(bffJson).toHaveBeenCalledTimes(1);
   });
+
+  describe("per-page ordering and metadata verification", () => {
+    it("accepts correct multi-page id-ascending data with sparse ids", async () => {
+      const ids = Array.from({ length: 230 }, (_, i) => 10 + i * 7); // gaps are fine, order is what matters
+      bffJson.mockImplementation(async (_p: string, _s: unknown, opts: { query: { page: number; page_size: number } }) => {
+        const { page, page_size } = opts.query;
+        return { success: true, message: "ok", data: {
+          items: ids.slice((page - 1) * page_size, page * page_size).map(row),
+          pagination: { page, page_size, total_items: 230, total_pages: 3 },
+        } };
+      });
+      const data = await fetchAllProductStock(9);
+      expect(data.items.map((r) => r.id)).toEqual(ids);
+      expect(data.items.find((r) => r.id === ids[229])?.batch_lot_no).toBe(`LOT-${ids[229]}`); // last lot selectable
+    });
+
+    it("rejects a repeated page index (server answers page 1 again)", async () => {
+      serve(250, (page, data) => {
+        if (page === 2) data.pagination.page = 1;
+      });
+      await expect(fetchAllProductStock(9)).rejects.toThrow(/asked for page 2, got 1/);
+    });
+
+    it("rejects a page that silently skips ahead (page 3 served for page 2)", async () => {
+      serve(250, (page, data) => {
+        if (page === 2) data.pagination.page = 3;
+      });
+      await expect(fetchAllProductStock(9)).rejects.toThrow(/asked for page 2, got 3/);
+    });
+
+    it("rejects a page_size other than the one requested", async () => {
+      serve(250, (_page, data) => {
+        data.pagination.page_size = 50;
+      });
+      await expect(fetchAllProductStock(9)).rejects.toThrow(/unexpected page size 50/);
+    });
+
+    it("rejects total_pages that does not match total_items", async () => {
+      serve(250, (_page, data) => {
+        data.pagination.total_pages = 2; // would hide the last 50 rows
+      });
+      await expect(fetchAllProductStock(9)).rejects.toThrow(/page count does not match/);
+    });
+
+    it("rejects out-of-order ids within a page", async () => {
+      serve(150, (page, data) => {
+        if (page === 1) [data.items[3], data.items[4]] = [data.items[4], data.items[3]];
+      });
+      await expect(fetchAllProductStock(9)).rejects.toThrow(/out-of-order/);
+    });
+
+    it("rejects duplicate ids within a page", async () => {
+      serve(150, (page, data) => {
+        if (page === 1) data.items[5] = data.items[4];
+      });
+      await expect(fetchAllProductStock(9)).rejects.toThrow(/duplicate/);
+    });
+
+    it("rejects a page that overlaps the previous one (shifted window)", async () => {
+      serve(250, (page, data) => {
+        if (page === 2) data.items = [row(100), ...data.items.slice(0, 99)]; // starts one row early
+      });
+      await expect(fetchAllProductStock(9)).rejects.toThrow(/duplicate or out-of-order/);
+    });
+
+    it("rejects a short intermediate page (rows missing)", async () => {
+      serve(250, (page, data) => {
+        if (page === 2) data.items = data.items.slice(0, 99);
+      });
+      await expect(fetchAllProductStock(9)).rejects.toThrow(/page 2 has 99 of 100 rows/);
+    });
+
+    it("rejects an over-long last page", async () => {
+      serve(250, (page, data) => {
+        if (page === 3) data.items = [...data.items, row(9999)];
+      });
+      await expect(fetchAllProductStock(9)).rejects.toThrow(/page 3 has 51 of 50 rows/);
+    });
+
+    it("rejects a non-integer or non-positive id", async () => {
+      for (const bad of [0, -4, 1.5]) {
+        serve(3, (_page, data) => {
+          (data.items[0] as { id: number }).id = bad;
+        });
+        await expect(fetchAllProductStock(9)).rejects.toThrow(/invalid balance id/);
+      }
+    });
+  });
 });

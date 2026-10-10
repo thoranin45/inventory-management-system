@@ -10,6 +10,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: (...a: unknown[]) => toastError(...a), info: vi.fn() } }));
 
 const PRODUCT = { id: 9, sku: "LOT-MILK", product_name: "Milk 1L", is_active: true, barcode: null, track_batch: true };
+const PRODUCT_B = { id: 10, sku: "LOT-YOG", product_name: "Yogurt", is_active: true, barcode: null, track_batch: true };
 
 const row = (over: Record<string, unknown>) => ({
   product_id: 9, batch_id: null, on_hand_qty: "0.000", reserved_qty: "0.000", available_qty: "0.000",
@@ -18,12 +19,21 @@ const row = (over: Record<string, unknown>) => ({
 });
 let BALANCES: Record<string, unknown>[] = [];
 let STOCK_ERROR = false;
+/** A background refetch of already-loaded balances: still running, or failed. */
+let REFETCH: "fetching" | "error" | null = null;
+const refetch = vi.fn();
 vi.mock("@/lib/query/hooks", () => ({
-  useProducts: () => ({ data: { items: [PRODUCT] }, isFetching: false }),
+  useProducts: () => ({ data: { items: [PRODUCT, PRODUCT_B] }, isFetching: false }),
   useAllProductStock: (id: number | null) =>
     STOCK_ERROR
-      ? { data: undefined, isLoading: false, isError: true }
-      : { data: id ? { items: BALANCES } : undefined, isLoading: false, isError: false },
+      ? { data: undefined, isLoading: false, isError: true, isFetching: false, refetch }
+      : {
+          data: id ? { items: BALANCES.filter((b) => b.product_id === id) } : undefined,
+          isLoading: false,
+          isError: REFETCH === "error",
+          isFetching: REFETCH === "fetching",
+          refetch,
+        },
 }));
 vi.mock("@/lib/query/warehouses", () => ({
   useWarehouses: () => ({
@@ -36,7 +46,7 @@ vi.mock("@/lib/query/warehouses", () => ({
         { id: 21, location_code: "FRONT", location_name: null, location_type: null, is_active: true },
       ] },
     ],
-    isLoading: false, isError: false,
+    isLoading: false, isError: false, isFetching: false, refetch: vi.fn(),
   }),
 }));
 
@@ -52,9 +62,9 @@ const FRESH = row({ id: 1, warehouse_id: 1, location_id: 11, batch_id: 101, batc
 const EXPIRED = row({ id: 2, warehouse_id: 2, location_id: 21, batch_id: 102, batch_lot_no: "LOT-OLD",
   on_hand_qty: "5.000", available_qty: "5.000", batch_expiry_date: "2026-06-14", is_expired: true });
 
-async function pickProduct(user: ReturnType<typeof userEvent.setup>) {
+async function pickProduct(user: ReturnType<typeof userEvent.setup>, name: RegExp = /Milk 1L/) {
   await user.click(screen.getByRole("combobox", { name: /search products/i }));
-  const option = await screen.findByRole("option", { name: /Milk 1L/ });
+  const option = await screen.findByRole("option", { name });
   await user.click(within(option).getByRole("button"));
 }
 
@@ -65,6 +75,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   window.sessionStorage.clear();
   STOCK_ERROR = false;
+  REFETCH = null;
   BALANCES = [
     FRESH,
     EXPIRED,
@@ -236,5 +247,176 @@ describe("Batch adjustment form (Phase 14D)", () => {
     await user.type(observed, "ten");
     expect(screen.getByRole("alert")).toHaveTextContent("Observed: Quantity must be a number");
     expect(submit()).toBeDisabled();
+  });
+
+  describe("stale or unverified lot selection", () => {
+    /** Pick LOT-FRESH (on hand 10.000, reserved 4.000) and type a valid decrease. */
+    async function pickFreshReady(user: ReturnType<typeof userEvent.setup>) {
+      await pickProduct(user);
+      await user.click(screen.getByRole("button", { name: /LOT-FRESH/ }));
+      await user.type(requested(), "8.000");
+      expect(submit()).toBeEnabled();
+    }
+    const replaceFresh = (over: Record<string, unknown>) => {
+      BALANCES = BALANCES.map((b) => (b.id === 1 ? { ...b, ...over } : b));
+    };
+
+    it("disables Submit while the balance refetch is running", async () => {
+      const user = userEvent.setup();
+      const { rerender } = render(<StockAdjustmentRequestForm />);
+      await pickFreshReady(user);
+      REFETCH = "fetching";
+      rerender(<StockAdjustmentRequestForm />);
+      expect(submit()).toBeDisabled();
+      expect(screen.getByText(/Checking the latest balance/)).toBeInTheDocument();
+    });
+
+    it("disables Submit when the balance refetch fails and offers a refresh", async () => {
+      const user = userEvent.setup();
+      const { rerender } = render(<StockAdjustmentRequestForm />);
+      await pickFreshReady(user);
+      REFETCH = "error";
+      rerender(<StockAdjustmentRequestForm />);
+      expect(submit()).toBeDisabled();
+      await user.click(screen.getByRole("button", { name: /Refresh balance/ }));
+      expect(refetch).toHaveBeenCalled();
+      await user.click(submit());
+      expect(createMutate).not.toHaveBeenCalled();
+    });
+
+    it("keeps Submit enabled after a refresh that returns the same balance", async () => {
+      const user = userEvent.setup();
+      const { rerender } = render(<StockAdjustmentRequestForm />);
+      await pickFreshReady(user);
+      REFETCH = "fetching";
+      rerender(<StockAdjustmentRequestForm />);
+      REFETCH = null;
+      BALANCES = BALANCES.map((b) => ({ ...b })); // fresh objects, identical values
+      rerender(<StockAdjustmentRequestForm />);
+      expect(submit()).toBeEnabled();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+
+    it("disables Submit when the selected balance disappears after a refresh", async () => {
+      const user = userEvent.setup();
+      const { rerender } = render(<StockAdjustmentRequestForm />);
+      await pickFreshReady(user);
+      BALANCES = BALANCES.filter((b) => b.id !== 1);
+      rerender(<StockAdjustmentRequestForm />);
+      expect(submit()).toBeDisabled();
+      expect(screen.getByRole("alert")).toHaveTextContent(/no longer available at that location/);
+    });
+
+    it.each([
+      ["moves to an inactive location", { location_id: 12 }],
+      ["becomes transit", { is_transit: true }],
+      ["is reported for a different batch", { batch_id: 999 }],
+    ])("disables Submit when the selected balance %s", async (_label, over) => {
+      const user = userEvent.setup();
+      const { rerender } = render(<StockAdjustmentRequestForm />);
+      await pickFreshReady(user);
+      replaceFresh(over);
+      rerender(<StockAdjustmentRequestForm />);
+      expect(submit()).toBeDisabled();
+      expect(screen.getByRole("alert")).toHaveTextContent(/Pick a lot again/);
+    });
+
+    it("requires using the refreshed balance when on-hand changed, then re-prefills observed", async () => {
+      const user = userEvent.setup();
+      const { rerender } = render(<StockAdjustmentRequestForm />);
+      await pickFreshReady(user);
+      replaceFresh({ on_hand_qty: "12.000", available_qty: "8.000" });
+      rerender(<StockAdjustmentRequestForm />);
+      expect(submit()).toBeDisabled();
+      expect(screen.getByRole("alert")).toHaveTextContent(/balance changed since you picked it \(now on hand 12.000/);
+      expect(screen.getByLabelText("Observed quantity")).toHaveValue("10.000"); // never silently rewritten
+      await user.click(screen.getByRole("button", { name: /Use refreshed balance/ }));
+      expect(screen.getByLabelText("Observed quantity")).toHaveValue("12.000");
+      expect(submit()).toBeEnabled();
+      await user.click(submit());
+      expect(createMutate.mock.calls[0][0].body).toMatchObject({
+        batch_id: 101, observed_quantity: "12.000", requested_quantity: "8.000",
+      });
+    });
+
+    it("treats a reserved change as a changed balance too", async () => {
+      const user = userEvent.setup();
+      const { rerender } = render(<StockAdjustmentRequestForm />);
+      await pickFreshReady(user);
+      replaceFresh({ reserved_qty: "9.000", available_qty: "1.000" });
+      rerender(<StockAdjustmentRequestForm />);
+      expect(submit()).toBeDisabled();
+      await user.click(screen.getByRole("button", { name: /Use refreshed balance/ }));
+      // The refreshed 9.000 reservation now trips the reserved floor for 8.000.
+      expect(screen.getByRole("alert")).toHaveTextContent(/below the 9.000 reserved/);
+      expect(submit()).toBeDisabled();
+    });
+
+    it("disables Submit for a restored draft whose balance changed or vanished", async () => {
+      const user = userEvent.setup();
+      const first = render(<StockAdjustmentRequestForm />);
+      await pickFreshReady(user);
+      first.unmount();
+
+      replaceFresh({ on_hand_qty: "7.000" });
+      const second = render(<StockAdjustmentRequestForm />);
+      expect(screen.getByLabelText("Observed quantity")).toHaveValue("10.000");
+      expect(submit()).toBeDisabled();
+      expect(screen.getByRole("alert")).toHaveTextContent(/balance changed since you picked it/);
+      second.unmount();
+
+      BALANCES = BALANCES.filter((b) => b.id !== 1);
+      render(<StockAdjustmentRequestForm />);
+      expect(submit()).toBeDisabled();
+      expect(screen.getByRole("alert")).toHaveTextContent(/no longer available/);
+    });
+
+    it("restores a still-valid draft as submittable", async () => {
+      const user = userEvent.setup();
+      const first = render(<StockAdjustmentRequestForm />);
+      await pickFreshReady(user);
+      first.unmount();
+      render(<StockAdjustmentRequestForm />);
+      expect(submit()).toBeEnabled();
+    });
+
+    it("disables Submit for a draft saved before the picked on-hand was recorded", async () => {
+      const user = userEvent.setup();
+      const first = render(<StockAdjustmentRequestForm />);
+      await pickFreshReady(user);
+      first.unmount();
+      for (let i = 0; i < window.sessionStorage.length; i++) {
+        const key = window.sessionStorage.key(i)!;
+        let raw: { lines?: Record<number, Record<string, unknown>> } | null = null;
+        try {
+          raw = JSON.parse(window.sessionStorage.getItem(key)!);
+        } catch {
+          continue; // not a draft record
+        }
+        if (raw?.lines?.[0]) {
+          delete raw.lines[0].pickedOnHand;
+          window.sessionStorage.setItem(key, JSON.stringify(raw));
+        }
+      }
+      render(<StockAdjustmentRequestForm />);
+      expect(submit()).toBeDisabled();
+      expect(screen.getByRole("button", { name: /Use refreshed balance/ })).toBeInTheDocument();
+    });
+
+    it("never reuses the previous product's selection after switching products", async () => {
+      // Same warehouse/location/batch ids under a different product.
+      BALANCES = [...BALANCES, row({ id: 50, product_id: 10, warehouse_id: 1, location_id: 11, batch_id: 101,
+        batch_lot_no: "YOG-1", on_hand_qty: "3.000", available_qty: "3.000" })];
+      const user = userEvent.setup();
+      render(<StockAdjustmentRequestForm />);
+      await pickFreshReady(user);
+      await user.click(screen.getByText("Milk 1L").closest("button")!); // reopen the product picker
+      await pickProduct(user, /Yogurt/);
+      const picker = screen.getByRole("group", { name: /lot and location/i });
+      expect(within(picker).getAllByRole("button")).toHaveLength(1);
+      expect(within(picker).getByRole("button", { name: /YOG-1/ })).toHaveAttribute("aria-pressed", "false");
+      expect(screen.queryByLabelText("Observed quantity")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /submit request/i })).not.toBeInTheDocument();
+    });
   });
 });
