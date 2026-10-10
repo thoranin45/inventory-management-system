@@ -418,6 +418,7 @@ def test_approve_failure_after_mutation_rolls_back_everything(client, admin_head
     refreshed = db_session.query(StockAdjustmentRequest).filter_by(id=created["id"]).one()
     assert refreshed.status == "PENDING"
     assert refreshed.reviewed_by_user_id is None
+    assert refreshed.stock_transaction_id is None  # Phase 14C: the D7 link rolls back too
 
     product_after = _get_product(client, admin_headers, product["id"])
     assert Decimal(str(product_after["stock_qty"])) == Decimal("10.000")
@@ -596,6 +597,14 @@ def test_concurrent_decisions_resolve_to_exactly_one_outcome(concurrent_inventor
         assert final.status != "PENDING"
         if final.status == "APPROVED":
             assert db.query(InventoryMovement).filter_by(product_id=product_id, movement_type="STOCK_ADJUST").count() == 1
+            # Phase 14C: exactly one ADJUST transaction, linked both ways.
+            adjust_txs = db.query(StockTransaction).filter_by(product_id=product_id, transaction_type="ADJUST").all()
+            assert [t.id for t in adjust_txs] == [final.stock_transaction_id]
+            movement = db.query(InventoryMovement).filter_by(product_id=product_id, movement_type="STOCK_ADJUST").one()
+            assert movement.stock_transaction_id == final.stock_transaction_id
+            assert (movement.reference_type, movement.reference_id) == ("STOCK_ADJUSTMENT_REQUEST", request_id)
+        else:
+            assert final.stock_transaction_id is None
 
 
 def _race_on_receipt_insert(s, requests):

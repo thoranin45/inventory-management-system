@@ -9,9 +9,9 @@ Update ``EXPECTED_ALEMBIC_HEAD`` in the same change that adds a migration.
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
-# Phase 14B: ea1a00000001 (safe MAIN/DEFAULT provisioning) + ea1a00000002
-# (stock_adjustment_requests table)
-EXPECTED_ALEMBIC_HEAD = "ea1a00000002"
+# Phase 14C: ea1a00000003 (ledger indexes + stock_adjustment_requests
+# .stock_transaction_id link)
+EXPECTED_ALEMBIC_HEAD = "ea1a00000003"
 
 
 def current_db_revision(connection: Connection) -> str | None:
