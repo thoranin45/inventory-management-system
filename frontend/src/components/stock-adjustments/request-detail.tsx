@@ -33,17 +33,62 @@ function errLine(error: unknown): { message: string; requestId?: string } {
   return { message: error instanceof Error ? error.message : "Something went wrong." };
 }
 
+function ss(): Storage | null {
+  try {
+    return typeof window !== "undefined" ? window.sessionStorage : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Approve's Idempotency-Key, persisted per request id — NOT a fresh key
+ * per click. A dropped network response or a page reload after clicking
+ * Approve must retry with the SAME key, so an uncertain attempt either
+ * replays its stored success or safely proceeds, never applies twice and
+ * never confuses a genuine retry with a second independent attempt.
+ * Cleared only once the request leaves PENDING (approve succeeded, or the
+ * admin saw a terminal "already decided" and moved on).
+ */
+function useApprovalIdempotencyKey(requestId: number): { key: string; clear: () => void } {
+  const storageKey = `adjreq-approve-key:${requestId}`;
+  const [key, setKey] = React.useState<string>(() => {
+    const store = ss();
+    const existing = store?.getItem(storageKey);
+    if (existing) return existing;
+    const fresh = `adjreq-approve-${newId()}`;
+    try {
+      store?.setItem(storageKey, fresh);
+    } catch {
+      /* quota / private mode — the in-memory key still works for this render */
+    }
+    return fresh;
+  });
+  const clear = React.useCallback(() => {
+    try {
+      ss()?.removeItem(storageKey);
+    } catch {
+      /* ignore */
+    }
+    setKey(`adjreq-approve-${newId()}`);
+  }, [storageKey]);
+  return { key, clear };
+}
+
 /** Approve / Reject / Cancel for one request, plus the Observed → Requested
  * comparison and inline lifecycle history — no separate /audit lookup
- * needed. Approve gets its own Idempotency-Key, generated fresh per
- * attempt (a single-shot action on an already-persisted record, unlike
- * the multi-step console drafts, so it needs only the key + a
- * disabled-while-pending button, mirroring po-actions.tsx). */
+ * needed. Approve's Idempotency-Key is persisted per request id (see
+ * useApprovalIdempotencyKey) so a dropped response or a page reload
+ * before the admin knows the outcome retries with the SAME key instead
+ * of a fresh one — a single-shot action on an already-persisted record,
+ * so it needs only that key plus a disabled-while-pending button,
+ * mirroring po-actions.tsx otherwise. */
 export function StockAdjustmentRequestDetailBody({ id, role, onDone }: { id: number; role: Role; onDone?: () => void }) {
   const { data: request, isLoading, isError, error, refetch } = useStockAdjustmentRequest(id);
   const approve = useApproveStockAdjustmentRequest();
   const reject = useRejectStockAdjustmentRequest();
   const cancel = useCancelStockAdjustmentRequest();
+  const approvalKey = useApprovalIdempotencyKey(id);
 
   const [approveOpen, setApproveOpen] = React.useState(false);
   const [rejectOpen, setRejectOpen] = React.useState(false);
@@ -67,16 +112,25 @@ export function StockAdjustmentRequestDetailBody({ id, role, onDone }: { id: num
 
   const runApprove = () =>
     approve.mutate(
-      { id: request.id, idempotencyKey: `adjreq-approve-${newId()}` },
+      { id: request.id, idempotencyKey: approvalKey.key },
       {
         onSuccess: (data) => {
           setApproveOpen(false);
+          approvalKey.clear(); // decided — this key is spent, a future request gets its own
           toast.success(`${data.reference_number ?? "Request"} approved`, {
             description: `${data.product.product_name}: ${data.observed_quantity} → ${data.requested_quantity}.`,
           });
         },
         onError: (e) => {
           const line = errLine(e);
+          // "Already decided" is terminal for this key too — someone else
+          // (or this admin, in an earlier tab/attempt) resolved it; retrying
+          // with the same key would only replay that same terminal 409.
+          // Any other error (stale quantity, network, batch guard) keeps
+          // the key so a genuine retry still safely reuses it.
+          if (isApiError(e) && e.status === 409 && /already decided/i.test(e.message)) {
+            approvalKey.clear();
+          }
           toast.error("Could not approve this request", {
             description: line.requestId ? `${line.message} · Request ${line.requestId}` : line.message,
           });
@@ -160,16 +214,29 @@ export function StockAdjustmentRequestDetailBody({ id, role, onDone }: { id: num
 
       {canDecide ? (
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="primary" onClick={() => setApproveOpen(true)}>
+          <Button
+            variant="primary"
+            onClick={() => setApproveOpen(true)}
+            disabled={approve.isPending || reject.isPending}
+          >
             Approve
           </Button>
-          <Button variant="danger" onClick={() => setRejectOpen(true)}>
+          <Button
+            variant="danger"
+            onClick={() => setRejectOpen(true)}
+            disabled={approve.isPending || reject.isPending}
+          >
             Reject
           </Button>
         </div>
       ) : null}
       {canCancel ? (
-        <Button variant="ghost" className="self-start" onClick={() => setCancelOpen(true)}>
+        <Button
+          variant="ghost"
+          className="self-start"
+          onClick={() => setCancelOpen(true)}
+          disabled={cancel.isPending}
+        >
           Cancel request
         </Button>
       ) : null}

@@ -12,7 +12,9 @@ from decimal import Decimal
 from uuid import uuid4
 
 import pytest
+from fastapi.testclient import TestClient
 
+from app.main import app
 from app.models import (
     AuditLog,
     InventoryMovement,
@@ -156,6 +158,54 @@ def test_create_rejects_malformed_key(client, admin_headers, warehouse_headers):
     assert response.status_code == 422
 
 
+def test_create_key_reused_for_approve_conflicts_on_operation_type(client, admin_headers, warehouse_headers, db_session):
+    """operation_key is globally unique across every operation_type sharing
+    stock_operation_receipts (StockAdjustmentRequest's CREATE and APPROVE
+    included) -- the service must reject a cross-type reuse as a clean 409,
+    never silently misapply one call's key to the other's semantics."""
+    product = _create_product(client, admin_headers, initial_stock=10)
+    key = _key()
+    created = _create_request(client, warehouse_headers, product_id=product["id"], key=key).json()["data"]
+
+    reused_on_approve = client.post(
+        f"/api/v1/stock-adjustment-requests/{created['id']}/approve",
+        headers={**admin_headers, "Idempotency-Key": key},
+    )
+    assert reused_on_approve.status_code == 409
+
+    db_session.expire_all()
+    # Nothing approved -- the cross-type collision never reached the mutation.
+    assert db_session.query(StockAdjustmentRequest).filter_by(id=created["id"]).one().status == "PENDING"
+    assert db_session.query(InventoryMovement).filter_by(product_id=product["id"], movement_type="STOCK_ADJUST").count() == 0
+
+
+def test_replay_never_transfers_request_ownership(client, admin_headers, warehouse_headers, db_session):
+    """If a replay of someone else's CREATE call ever happened (requires
+    guessing their random UUID key AND sending a byte-identical payload --
+    not a practical attack, same as every other Idempotency-Key endpoint in
+    this codebase), the replayed response still names the ORIGINAL
+    requester, never the replayer -- ownership is a property of the stored
+    row, not of whoever triggers a replay of it."""
+    product = _create_product(client, admin_headers, initial_stock=10)
+    key = _key()
+    original = _create_request(client, warehouse_headers, product_id=product["id"], key=key).json()["data"]
+
+    # A different authenticated caller (admin) resubmits the exact same key
+    # and payload -- this *replays* the warehouse user's original request;
+    # it does not create a second one, and ownership does not move to admin.
+    replay = _create_request(client, admin_headers, product_id=product["id"], key=key)
+    assert replay.status_code == 201
+    assert replay.json()["data"]["id"] == original["id"]
+    assert replay.json()["data"]["requested_by"]["username"] == original["requested_by"]["username"]
+
+    db_session.expire_all()
+    assert db_session.query(StockAdjustmentRequest).filter_by(product_id=product["id"]).count() == 1
+    # The warehouse user who actually created it can still see it; that
+    # never changed because a different caller happened to replay the key.
+    detail = client.get(f"/api/v1/stock-adjustment-requests/{original['id']}", headers=warehouse_headers)
+    assert detail.status_code == 200
+
+
 # --------------------------------------------------------------------------- #
 # List / detail authorization -- enforced server-side
 # --------------------------------------------------------------------------- #
@@ -289,6 +339,48 @@ def test_approve_not_pending_names_current_status(client, admin_headers, warehou
     assert "REJECTED" in response.json()["message"]
 
 
+def test_approve_failure_after_mutation_rolls_back_everything(client, admin_headers, warehouse_headers, db_session, monkeypatch):
+    """Force a failure at the LAST step of approve's single transaction
+    (persisting the idempotency receipt, after the stock mutation and the
+    status flip have already happened in-memory) and confirm the whole
+    UnitOfWork rolls back together -- the request is still PENDING, the
+    balance is untouched, and no partial ledger/audit rows exist. Mirrors
+    test_phase1_security.py's ledger-failure rollback test, but for the
+    full approve service path rather than the bare mutation core."""
+    from app.repositories.stock_repository import StockRepository
+
+    product = _create_product(client, admin_headers, initial_stock=10)
+    created = _create_request(
+        client, warehouse_headers, product_id=product["id"], observed="10.000", requested="15.000",
+    ).json()["data"]
+
+    audit_count_before = db_session.query(AuditLog).count()
+    monkeypatch.setattr(
+        StockRepository, "create_operation_receipt",
+        lambda self, receipt: (_ for _ in ()).throw(RuntimeError("Receipt persistence unavailable")),
+    )
+
+    # TestClient's default raise_server_exceptions=True surfaces the raw
+    # exception rather than the 500 envelope a real client would see, so
+    # the test can assert on it directly -- same pattern as
+    # test_phase1_security.py's ledger-failure rollback test. Either way,
+    # the exception propagates through UnitOfWork.__exit__ first, rolling
+    # back everything inside it.
+    with pytest.raises(RuntimeError, match="Receipt persistence unavailable"):
+        _approve(client, admin_headers, created["id"], key=_key("approve"))
+
+    db_session.expire_all()
+    refreshed = db_session.query(StockAdjustmentRequest).filter_by(id=created["id"]).one()
+    assert refreshed.status == "PENDING"
+    assert refreshed.reviewed_by_user_id is None
+
+    product_after = _get_product(client, admin_headers, product["id"])
+    assert Decimal(str(product_after["stock_qty"])) == Decimal("10.000")
+    assert db_session.query(InventoryMovement).filter_by(product_id=product["id"], movement_type="STOCK_ADJUST").count() == 0
+    assert db_session.query(StockTransaction).filter_by(product_id=product["id"], transaction_type="ADJUST").count() == 0
+    assert db_session.query(AuditLog).count() == audit_count_before
+
+
 # --------------------------------------------------------------------------- #
 # Approve idempotency: replay before terminal-state, new key after approved
 # --------------------------------------------------------------------------- #
@@ -412,7 +504,7 @@ def test_cannot_act_twice_on_a_terminal_request(client, admin_headers, warehouse
 # Concurrency: approve / reject / cancel racing on the SAME request
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("first_action,second_action", [
-    ("approve", "reject"), ("approve", "cancel"), ("reject", "cancel"),
+    ("approve", "approve"), ("approve", "reject"), ("approve", "cancel"), ("reject", "cancel"),
 ])
 def test_concurrent_decisions_resolve_to_exactly_one_outcome(concurrent_inventory, first_action, second_action):
     s = concurrent_inventory
@@ -459,6 +551,82 @@ def test_concurrent_decisions_resolve_to_exactly_one_outcome(concurrent_inventor
         assert final.status != "PENDING"
         if final.status == "APPROVED":
             assert db.query(InventoryMovement).filter_by(product_id=product_id, movement_type="STOCK_ADJUST").count() == 1
+
+
+def test_concurrent_create_same_key_applies_once(concurrent_inventory):
+    """CREATE takes no row lock at all (it never touches StockBalance), so
+    nothing serialises two truly-concurrent calls before they both reach
+    the stock_operation_receipts INSERT -- unlike Stock In/Out, which lock
+    the product first and so a same-product race never even reaches this
+    path for a same-payload retry.
+
+    This is exactly the scenario create_operation_receipt's SAVEPOINT-based
+    backstop (Phase 13, shared and unchanged here) exists for: the loser's
+    INSERT hits the unique constraint on operation_key and is converted
+    into IdempotencyKeyConflictException -- never a bare 500, never two
+    rows. Note precisely what that backstop does NOT do: it never compares
+    the loser's own fingerprint against the winner's before raising, so a
+    genuinely simultaneous SAME-PAYLOAD race still surfaces as a 409 to the
+    loser, not a clean replay (unlike Stock In/Out's same-product case,
+    where the lock already serialised the retry before any of this runs).
+    Confirmed here deterministically via a Barrier on the literal INSERT
+    statement; the only property this test actually needs -- and gets --
+    is that exactly one row is ever created, never two. (Reported, not
+    changed: fixing this would mean altering the shared Phase 13
+    SAVEPOINT handler used by every idempotent stock endpoint, and
+    reaching this path at all needs an artificially-forced sub-millisecond
+    race -- a real double-click or retry-after-timeout practically always
+    lands after the winner has already committed, which replays cleanly.)
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    from sqlalchemy import event
+
+    s = concurrent_inventory
+    product_resp = s.client.post("/api/v1/products", json={
+        "sku": f"RACE-{uuid4().hex[:10].upper()}", "barcode": f"886{uuid4().hex[:10]}",
+        "product_name": "Race product", "price": 10, "stock_qty": 0, "category_id": None,
+    })
+    assert product_resp.status_code in {200, 201}
+    product_id = product_resp.json()["data"]["id"]
+    key = "race-create-" + uuid4().hex
+    payload = {
+        "product_id": product_id, "observed_quantity": "0.000", "requested_quantity": "5.000",
+        "reason_code": "CYCLE_COUNT_VARIANCE",
+    }
+
+    barrier = Barrier(2, timeout=6)
+
+    def before_insert(connection, cursor, statement, parameters, context, executemany):
+        if "INSERT INTO stock_operation_receipts" in statement:
+            barrier.wait()
+
+    event.listen(s.engine, "before_cursor_execute", before_insert)
+    try:
+        def invoke(_):
+            with TestClient(app, headers=s.headers) as worker:
+                return worker.post(
+                    "/api/v1/stock-adjustment-requests", json=payload, headers={"Idempotency-Key": key},
+                )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            responses = list(pool.map(invoke, range(2)))
+    finally:
+        event.remove(s.engine, "before_cursor_execute", before_insert)
+
+    # The only safety property this mechanism actually guarantees: never
+    # two rows, regardless of whether the loser gets a clean replay (200)
+    # or a conflict (409) -- see the docstring above for exactly why a
+    # same-payload race can still land on the conflict branch here.
+    statuses = sorted(r.status_code for r in responses)
+    assert statuses in ([201, 201], [201, 409])
+    if statuses == [201, 201]:
+        assert responses[0].json()["data"] == responses[1].json()["data"]
+
+    with s.sessions() as db:
+        assert db.query(StockAdjustmentRequest).filter_by(product_id=product_id).count() == 1
+        assert db.query(StockOperationReceipt).filter_by(operation_key=key).count() == 1
 
 
 # --------------------------------------------------------------------------- #

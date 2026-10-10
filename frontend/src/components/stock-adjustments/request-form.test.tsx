@@ -97,7 +97,7 @@ describe("StockAdjustmentRequestForm", () => {
   it("forces a new request on an idempotency-mismatch 409, never silently re-keys", async () => {
     const user = userEvent.setup();
     createMutate.mockImplementation((_vars, opts) => {
-      opts.onError(new ApiError({ kind: "http", status: 409, message: "Idempotency-Key already used with a different payload" }));
+      opts.onError(new ApiError({ kind: "conflict", status: 409, message: "Idempotency-Key already used with a different payload" }));
     });
     render(<StockAdjustmentRequestForm />);
     await pickProduct(user);
