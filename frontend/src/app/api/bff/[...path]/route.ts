@@ -41,6 +41,18 @@ const ALLOW: { method: string; pattern: RegExp }[] = [
   { method: "POST", pattern: /^stock\/out-fifo$/ },
   { method: "POST", pattern: /^stock\/out-fefo$/ },
 
+  // Phase 14B — Stock Adjustment Request & Approval. Create/list/detail/cancel
+  // are warehouse+admin; approve/reject are admin-only (backend-enforced).
+  // CREATE and APPROVE both honour a mandatory Idempotency-Key (forwarded
+  // below). GET /warehouses is the read-only directory this workflow needs.
+  { method: "POST", pattern: /^stock-adjustment-requests$/ },
+  { method: "GET", pattern: /^stock-adjustment-requests$/ },
+  { method: "GET", pattern: /^stock-adjustment-requests\/\d+$/ },
+  { method: "POST", pattern: /^stock-adjustment-requests\/\d+\/approve$/ },
+  { method: "POST", pattern: /^stock-adjustment-requests\/\d+\/reject$/ },
+  { method: "POST", pattern: /^stock-adjustment-requests\/\d+\/cancel$/ },
+  { method: "GET", pattern: /^warehouses$/ },
+
   // Phase 3 — Sales Orders. Backend enforces role (create/confirm = admin,
   // list/detail/cancel = warehouse+); the BFF only scopes which routes exist.
   { method: "GET", pattern: /^sales-orders$/ },

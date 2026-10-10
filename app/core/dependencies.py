@@ -42,6 +42,9 @@ from app.repositories.inventory_transfer_repository import (
 from app.repositories.inventory_movement_repository import (
     InventoryMovementRepository,
 )
+from app.repositories.stock_adjustment_request_repository import (
+    StockAdjustmentRequestRepository,
+)
 
 DatabaseSession = Annotated[
     Session,
@@ -121,6 +124,11 @@ def get_inventory_movement_repository(
 ) -> InventoryMovementRepository:
     return InventoryMovementRepository(db)
 
+def get_stock_adjustment_request_repository(
+    db: DatabaseSession,
+) -> StockAdjustmentRequestRepository:
+    return StockAdjustmentRequestRepository(db)
+
 ProductRepositoryDependency = Annotated[
     ProductRepository,
     Depends(get_product_repository),
@@ -179,4 +187,9 @@ InventoryTransferRepositoryDependency = Annotated[
 InventoryMovementRepositoryDependency = Annotated[
     InventoryMovementRepository,
     Depends(get_inventory_movement_repository),
+]
+
+StockAdjustmentRequestRepositoryDependency = Annotated[
+    StockAdjustmentRequestRepository,
+    Depends(get_stock_adjustment_request_repository),
 ]

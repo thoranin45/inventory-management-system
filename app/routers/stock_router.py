@@ -7,6 +7,7 @@ from app.core.dependencies import (
     StockRepositoryDependency,
     require_warehouse,
 )
+from app.core.exceptions import StockAdjustRetiredException
 from app.models import User
 from app.schemas.response import ApiResponse
 from app.schemas.stock_schema import (
@@ -18,7 +19,6 @@ from app.schemas.stock_schema import (
 )
 from app.services.stock_service import (
     get_stock_history_service,
-    stock_adjust_service,
     stock_in_service,
     stock_out_fefo_service,
     stock_out_fifo_service,
@@ -170,20 +170,10 @@ def stock_adjust(
         require_warehouse
     ),
 ) -> ApiResponse[StockOperationResponse]:
-
-    result = stock_adjust_service(
-        db=db,
-        stock_repo=stock_repo,
-        balance_repo=balance_repo,
-        movement_repo=movement_repo,
-        data=data,
-        created_by_user_id=current_user.id,
-    )
-
-    return ApiResponse(
-        message="Stock adjusted successfully",
-        data=result,
-    )
+    # Phase 14B: retired in favour of the Stock Adjustment Request &
+    # Approval workflow. Stays authenticated, never mutates, for any role
+    # -- mirrors how InventoryTransfer's /complete route was retired.
+    raise StockAdjustRetiredException()
 
 
 @router.get(

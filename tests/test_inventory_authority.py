@@ -5,7 +5,7 @@ import pytest
 
 from app.models import AuditLog, InventoryMovement, Product, ProductBatch, StockBalance, StockTransaction
 from app.repositories.stock_balance_repository import StockBalanceRepository
-from tests.test_stock import _create_product, _create_batch
+from tests.test_stock import _create_product, _create_batch, _get_product
 from tests.test_inventory_transfer import transfer_storage
 from tests import test_purchase_order as purchase
 from tests import test_sales_order as sales
@@ -83,7 +83,11 @@ def test_stock_out_uses_balances_not_product_or_batch_cache(client, admin_header
     assert_aggregates(db_session, product["id"])
 
 
-def test_adjustment_one_location_preserves_other_locations(client, admin_headers, db_session, transfer_storage):
+def test_adjustment_one_location_preserves_other_locations(client, admin_headers, warehouse_headers, db_session, transfer_storage):
+    # Phase 14B: /stock/adjust is retired -- the correction now goes through
+    # the Stock Adjustment Request & Approval workflow (create as warehouse,
+    # approve as admin), but the underlying invariant this test guards is
+    # unchanged: adjusting MAIN's balance must never touch another location's.
     product = _create_product(client, admin_headers, initial_stock=10)
     response = client.post("/api/v1/stock/in", headers=admin_headers, json={
         "product_id": product["id"], "quantity": 20,
@@ -91,12 +95,21 @@ def test_adjustment_one_location_preserves_other_locations(client, admin_headers
         "location_id": transfer_storage["destination_location_id"],
     })
     assert response.status_code == 200
-    response = client.post("/api/v1/stock/adjust", headers=admin_headers, json={
-        "product_id": product["id"], "new_quantity": 5, "remark": "Count MAIN only",
-    })
-    assert response.status_code == 200
-    assert Decimal(response.json()["data"]["current_stock"]) == 25
-    assert Decimal(response.json()["data"]["difference"]) == -5
+
+    created = client.post(
+        "/api/v1/stock-adjustment-requests", headers={**warehouse_headers, "Idempotency-Key": uuid4().hex},
+        json={"product_id": product["id"], "observed_quantity": "10", "requested_quantity": "5",
+              "reason_code": "CYCLE_COUNT_VARIANCE", "notes": "Count MAIN only"},
+    )
+    assert created.status_code == 201
+    approved = client.post(
+        f"/api/v1/stock-adjustment-requests/{created.json()['data']['id']}/approve",
+        headers={**admin_headers, "Idempotency-Key": uuid4().hex},
+    )
+    assert approved.status_code == 200
+    db_session.expire_all()
+    product_after = _get_product(client, admin_headers, product["id"])
+    assert Decimal(product_after["stock_qty"]) == 25
     assert_aggregates(db_session, product["id"])
     remote = db_session.query(StockBalance).filter_by(product_id=product["id"], warehouse_id=transfer_storage["destination_warehouse_id"]).one()
     assert remote.on_hand_qty == 20
@@ -127,11 +140,11 @@ def test_legacy_missing_balance_evidence_is_not_reconciled(client, admin_headers
 
 
 def test_tracking_change_rejected_after_inventory_history(client, admin_headers):
+    # initial_stock=1 already gives the product both stock_qty and inventory
+    # evidence (a STOCK_IN transaction/movement) -- enough on its own to trip
+    # product_service.py's guard; no /stock/adjust call needed (Phase 14B
+    # retired the direct endpoint).
     product = _create_product(client, admin_headers, initial_stock=1)
-    response = client.post("/api/v1/stock/adjust", headers=admin_headers, json={
-        "product_id": product["id"], "new_quantity": 0, "remark": "Count zero",
-    })
-    assert response.status_code == 200
     response = client.put(f"/api/v1/products/{product['id']}", headers=admin_headers, json={"track_batch": True})
     assert response.status_code == 409
 

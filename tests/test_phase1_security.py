@@ -16,13 +16,13 @@ from sqlalchemy.orm import Session
 from app.core.security import create_access_token, get_current_user, verify_password
 from app.core import exception_handler
 from app.core.exceptions import AppException
+from app.core.unit_of_work import UnitOfWork
 from app.main import app
 from app.models import AuditLog, InventoryMovement, Product, StockBalance, StockTransaction, User
 from app.repositories.inventory_movement_repository import InventoryMovementRepository
 from app.repositories.stock_balance_repository import StockBalanceRepository
 from app.repositories.stock_repository import StockRepository
-from app.schemas.stock_schema import StockAdjust
-from app.services.stock_service import stock_adjust_service
+from app.services.stock_service import execute_adjustment_mutation
 from app.routers.auth_router import authenticate_user
 from tests.test_stock import _create_product
 
@@ -51,6 +51,8 @@ def _admin_only(method: str, path: str) -> bool:
         return True
     if path.startswith("/api/v1/purchase-orders"):
         return not path.endswith("/receive")
+    if path.startswith("/api/v1/stock-adjustment-requests"):
+        return path.endswith(("/approve", "/reject"))
     return path == "/api/v1/sales-orders/" or (path.startswith("/api/v1/sales-orders/") and path.endswith(("/confirm", "/complete")))
 
 
@@ -203,66 +205,37 @@ def test_stock_adjust_requires_reason_without_mutation(client, admin_headers, db
     assert db_session.query(InventoryMovement).filter_by(product_id=product["id"]).count() == 0
 
 
-@pytest.mark.parametrize("actor_fixture,headers_fixture", [
-    ("admin_user", "admin_headers"), ("warehouse_user", "warehouse_headers"),
-])
-@pytest.mark.parametrize("new_quantity", ["15.000", "5.000", "10.000"])
-def test_adjustment_records_reason_and_authenticated_actor(
-    client, admin_headers, db_session, request, actor_fixture, headers_fixture, new_quantity,
-):
-    actor = request.getfixturevalue(actor_fixture)
-    headers = request.getfixturevalue(headers_fixture)
-    product = _create_product(client, admin_headers)
-    response = client.post("/api/v1/stock/in", headers=headers, json={
-        "product_id": product["id"], "quantity": "10.000", "remark": "Prepare adjustment",
-    })
-    assert response.status_code == 200
-    response = client.post("/api/v1/stock/adjust", headers=headers, json={
-        "product_id": product["id"], "new_quantity": new_quantity,
-        "remark": "  Physical count verified  ", "created_by_user_id": 999999999,
-    })
-    assert response.status_code == 200
-    db_session.expire_all()
-    transaction = db_session.query(StockTransaction).filter_by(
-        product_id=product["id"], transaction_type="ADJUST",
-    ).one()
-    assert transaction.remark == "Physical count verified"
-    assert transaction.quantity == Decimal(new_quantity) - Decimal("10")
-    audit = db_session.query(AuditLog).filter_by(
-        action="STOCK_ADJUST", table_name="stock_transactions", record_id=transaction.id,
-    ).one()
-    assert audit.username == actor.username
-    assert f"actor_id={actor.id};" in audit.description
-    assert "before=10.000;" in audit.description
-    assert f"after={new_quantity};" in audit.description
-    assert "reason=Physical count verified" in audit.description
-    assert db_session.get(Product, product["id"]).stock_qty == Decimal(new_quantity)
-    balance = db_session.query(StockBalance).filter_by(product_id=product["id"], batch_id=None).one()
-    assert balance.on_hand_qty == Decimal(new_quantity)
-    movements = db_session.query(InventoryMovement).filter_by(
-        product_id=product["id"], movement_type="STOCK_ADJUST",
-    ).all()
-    if new_quantity == "10.000":
-        assert movements == []
-    else:
-        assert len(movements) == 1
-        assert movements[0].created_by_user_id == actor.id
-        assert movements[0].reference_id == transaction.id
-        assert movements[0].remark == transaction.remark
-        assert movements[0].quantity == transaction.quantity
+# test_adjustment_records_reason_and_authenticated_actor was removed: it
+# exercised a full successful /stock/adjust call, which no longer exists
+# (Phase 14B retires the direct endpoint — see test_stock.py's
+# test_stock_adjust_is_retired). Its reason/actor/audit/movement
+# assertions now live on the approve step of the Stock Adjustment Request
+# & Approval workflow instead — see
+# tests/test_stock_adjustment_requests.py::test_approve_records_reason_and_authenticated_actor.
+
+
+def _resolve_main_default(balance_repo: StockBalanceRepository):
+    return balance_repo.resolve_storage(None, None)
 
 
 @pytest.mark.parametrize("actor_id", [None, 999999999])
 def test_adjustment_missing_actor_rolls_back(client, admin_headers, db_session, actor_id):
+    """execute_adjustment_mutation is the mutation core Phase 14B's approve
+    step reuses verbatim — this invariant (no actor, no mutation) must
+    survive the Phase 13 -> Phase 14B refactor unchanged."""
     product = _create_product(client, admin_headers)
+    balance_repo = StockBalanceRepository(db_session)
+    warehouse, location = _resolve_main_default(balance_repo)
     with pytest.raises(ValueError, match="Authenticated adjustment actor is required"):
-        stock_adjust_service(
-            db=db_session, stock_repo=StockRepository(db_session),
-            balance_repo=StockBalanceRepository(db_session),
-            movement_repo=InventoryMovementRepository(db_session),
-            data=StockAdjust(product_id=product["id"], new_quantity=5, remark="Count correction"),
-            created_by_user_id=actor_id,
-        )
+        with UnitOfWork(db_session):
+            execute_adjustment_mutation(
+                db=db_session, stock_repo=StockRepository(db_session),
+                balance_repo=balance_repo,
+                movement_repo=InventoryMovementRepository(db_session),
+                product_id=product["id"], warehouse=warehouse, location=location,
+                new_quantity=Decimal("5"), remark="Count correction",
+                created_by_user_id=actor_id,
+            )
     db_session.expire_all()
     assert db_session.get(Product, product["id"]).stock_qty == Decimal("0")
     assert db_session.query(StockBalance).filter_by(product_id=product["id"]).count() == 0
@@ -275,15 +248,19 @@ def test_adjustment_ledger_failure_rolls_back_audit_and_stock(
 ):
     product = _create_product(client, admin_headers)
     audit_count = db_session.query(AuditLog).count()
+    balance_repo = StockBalanceRepository(db_session)
+    warehouse, location = _resolve_main_default(balance_repo)
     movement_repo = InventoryMovementRepository(db_session)
     monkeypatch.setattr(movement_repo, "create", Mock(side_effect=RuntimeError("Ledger unavailable")))
     with pytest.raises(RuntimeError, match="Ledger unavailable"):
-        stock_adjust_service(
-            db=db_session, stock_repo=StockRepository(db_session),
-            balance_repo=StockBalanceRepository(db_session), movement_repo=movement_repo,
-            data=StockAdjust(product_id=product["id"], new_quantity=5, remark="Count correction"),
-            created_by_user_id=admin_user.id,
-        )
+        with UnitOfWork(db_session):
+            execute_adjustment_mutation(
+                db=db_session, stock_repo=StockRepository(db_session),
+                balance_repo=balance_repo, movement_repo=movement_repo,
+                product_id=product["id"], warehouse=warehouse, location=location,
+                new_quantity=Decimal("5"), remark="Count correction",
+                created_by_user_id=admin_user.id,
+            )
     db_session.expire_all()
     assert db_session.get(Product, product["id"]).stock_qty == Decimal("0")
     assert db_session.query(StockBalance).filter_by(product_id=product["id"]).count() == 0

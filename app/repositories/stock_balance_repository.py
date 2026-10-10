@@ -69,6 +69,18 @@ class StockBalanceRepository:
         self.require_operational_storage(warehouse.id, location.id)
         return warehouse, location
 
+    def list_warehouses(self, *, active_only: bool = True) -> list[Warehouse]:
+        """Phase 14B: GET /warehouses. Excludes __TRANSIT__ -- mirrors the
+        same exclusion every operational-availability query already uses,
+        not a new filter invented for this endpoint."""
+        query = self.db.query(Warehouse).filter(
+            Warehouse.warehouse_type.is_distinct_from("TRANSIT"),
+            Warehouse.warehouse_code != "__TRANSIT__",
+        )
+        if active_only:
+            query = query.filter(Warehouse.is_active.is_(True))
+        return query.order_by(Warehouse.warehouse_code).all()
+
     def product_quantity(self, product_id: int) -> Decimal:
         self.db.flush()
         return self.db.query(func.coalesce(func.sum(StockBalance.on_hand_qty), 0)).filter(

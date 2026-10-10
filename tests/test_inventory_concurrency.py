@@ -35,14 +35,24 @@ def concurrent_inventory():
     with isolated_schema(TEST_DATABASE_URL, "head") as engine:
         sessions = sessionmaker(engine, autoflush=False, expire_on_commit=False)
         with sessions() as db:
+            # Phase 14B's migration (ea1a00000001) already seeds MAIN/DEFAULT
+            # on every freshly-migrated schema, including this isolated one
+            # -- get-or-create rather than blind-insert, mirroring
+            # conftest.py's own seed_test_foundation() pattern.
             user = User(username="concurrency_admin", password_hash="unused-test-token", role="ADMIN")
-            main = Warehouse(warehouse_code="MAIN", warehouse_name="Main")
+            main = db.query(Warehouse).filter_by(warehouse_code="MAIN").first()
+            if main is None:
+                main = Warehouse(warehouse_code="MAIN", warehouse_name="Main")
+                db.add(main)
             shop = Warehouse(warehouse_code="SHOP", warehouse_name="Shop")
-            db.add_all([user, main, shop])
+            db.add_all([user, shop])
             db.flush()
-            main_location = WarehouseLocation(warehouse_id=main.id, location_code="DEFAULT")
+            main_location = db.query(WarehouseLocation).filter_by(warehouse_id=main.id, location_code="DEFAULT").first()
+            if main_location is None:
+                main_location = WarehouseLocation(warehouse_id=main.id, location_code="DEFAULT")
+                db.add(main_location)
             shop_location = WarehouseLocation(warehouse_id=shop.id, location_code="DEFAULT")
-            db.add_all([main_location, shop_location])
+            db.add(shop_location)
             db.commit()
             headers = {"Authorization": "Bearer " + create_access_token({"sub": str(user.id)})}
             storage = dict(source_warehouse_id=main.id, source_location_id=main_location.id,
@@ -70,7 +80,7 @@ def concurrent_inventory():
 
 def overlap(state, requests, table, ids):
     """Hold a real row lock until both independent backends visibly wait on locks."""
-    assert table in {"products", "sales_orders", "purchase_orders", "inventory_transfers"}
+    assert table in {"products", "sales_orders", "purchase_orders", "inventory_transfers", "stock_adjustment_requests"}
     barrier = Barrier(2, timeout=6)
     mutex = Lock()
     pids = set()

@@ -1589,3 +1589,51 @@ class StockOperationReceipt(Base):
     response_snapshot = Column(JSONB, nullable=False)
     created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class StockAdjustmentRequest(Base):
+    """Phase 14B: Warehouse requests a correction; only Admin approves/rejects.
+
+    No inventory changes happen on create, reject, or cancel -- only a
+    successful approve mutates ``StockBalance``, reusing the same
+    mutation path ``POST /stock/adjust`` used before it was retired.
+    ``status`` is a plain string, matching every other lifecycle table in
+    this codebase; validity of transitions lives in the service layer.
+    No uniqueness constraint on (product, warehouse, location, batch):
+    multiple pending requests for the same scope are permitted and
+    arbitrated safely at approval time by a stale-quantity check.
+    """
+
+    __tablename__ = "stock_adjustment_requests"
+    __table_args__ = (
+        UniqueConstraint("reference_number", name="uq_stock_adjustment_requests_reference_number"),
+        Index("ix_stock_adjustment_requests_status_created_at", "status", "created_at"),
+        Index("ix_stock_adjustment_requests_scope_status", "product_id", "warehouse_id", "location_id", "status"),
+        Index("ix_stock_adjustment_requests_requested_by_user_id", "requested_by_user_id"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    # Assigned after insert, from the row's own id (mirrors po_number/so_number).
+    reference_number = Column(String(20), nullable=True)
+
+    product_id = Column(Integer, ForeignKey("products.id", name="fk_stock_adjustment_requests_product"), nullable=False)
+    warehouse_id = Column(Integer, ForeignKey("warehouses.id", name="fk_stock_adjustment_requests_warehouse"), nullable=False)
+    location_id = Column(Integer, ForeignKey("warehouse_locations.id", name="fk_stock_adjustment_requests_location"), nullable=False)
+    batch_id = Column(Integer, ForeignKey("product_batches.id", name="fk_stock_adjustment_requests_batch"), nullable=True)
+
+    observed_quantity = Column(Numeric(18, 3), nullable=False)
+    requested_quantity = Column(Numeric(18, 3), nullable=False)
+
+    reason_code = Column(String(40), nullable=False)
+    notes = Column(String(500), nullable=True)
+
+    status = Column(String(20), nullable=False, default="PENDING", server_default="PENDING")
+
+    requested_by_user_id = Column(Integer, ForeignKey("users.id", name="fk_stock_adjustment_requests_requested_by_user"), nullable=False)
+    reviewed_by_user_id = Column(Integer, ForeignKey("users.id", name="fk_stock_adjustment_requests_reviewed_by_user"), nullable=True)
+    rejection_reason = Column(String(500), nullable=True)
+    create_operation_key = Column(String(128), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)

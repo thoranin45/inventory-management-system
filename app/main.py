@@ -59,6 +59,12 @@ from app.routers.inventory_transfer_router import (
 from app.routers.inventory_movement_router import (
     router as inventory_movement_router,
 )
+from app.routers.stock_adjustment_request_router import (
+    router as stock_adjustment_request_router,
+)
+from app.routers.warehouse_router import (
+    router as warehouse_router,
+)
 
 
 # -------------------------------------------------------------------
@@ -232,6 +238,16 @@ app.include_router(
 
 app.include_router(
     stock_router,
+    prefix=API_V1_PREFIX,
+)
+
+app.include_router(
+    stock_adjustment_request_router,
+    prefix=API_V1_PREFIX,
+)
+
+app.include_router(
+    warehouse_router,
     prefix=API_V1_PREFIX,
 )
 
