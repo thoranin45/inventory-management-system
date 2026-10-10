@@ -42,6 +42,21 @@
         Its `timestamp_provenance` / `UNANCHORED` findings are diagnostic
         evidence about the historical windows only — never per-row proof, and
         they do not change what the API reports.
+- [ ] **Trusted writers for `recorded_at_utc` (Phase 14C)**: the column is
+      authoritative only for trusted database writers.
+      - `DEFAULT now()` can be bypassed by a direct SQL writer that supplies
+        a value or an explicit NULL, or UPDATEs it later. No API exposes a
+        setter, and app code never assigns it.
+      - Before release, list who can write the table. The API's own DB role
+        should be the only non-superuser writer:
+        `SELECT grantee, privilege_type FROM information_schema.role_table_grants
+        WHERE table_name = 'inventory_movements' AND privilege_type IN ('INSERT', 'UPDATE');`
+      - Inventory every external writer — ad-hoc psql, import or seed
+        scripts, BI or ETL jobs. Revoke INSERT/UPDATE from any role that is
+        not the API, or document an approved exception.
+      - Ledger ordering with `order_mode=chronological` puts verified rows
+        first (by `recorded_at_utc`), then unverified history (by stored
+        `created_at`), in both directions.
 - [ ] Announce maintenance; stop `api` if tables are large.
 - [ ] **Migrate (one-shot)**:
       `docker compose -f compose.prod.yml --profile migrate run --rm migrate`.

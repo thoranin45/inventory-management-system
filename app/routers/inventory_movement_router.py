@@ -132,6 +132,17 @@ def get_inventory_movements(
         pattern="^(asc|desc)$",
     ),
 
+    order_mode: str = Query(
+        default="legacy",
+        pattern="^(legacy|chronological)$",
+        description=(
+            "legacy (default): stored created_at, then id. "
+            "chronological: verified movements first by recorded_at_utc, then "
+            "unverified history by stored created_at; id breaks ties. Same "
+            "grouping for asc and desc."
+        ),
+    ),
+
     current_user: User = Depends(
         require_warehouse
     ),
@@ -188,6 +199,7 @@ def get_inventory_movements(
         actor=actor,
         include_transit=include_transit,
         sort_order=sort_order,
+        order_mode=order_mode,
     )
 
 

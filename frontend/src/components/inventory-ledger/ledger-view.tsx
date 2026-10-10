@@ -160,6 +160,9 @@ export function InventoryLedgerView() {
     page: rp.page,
     page_size: rp.pageSize,
     sort_order: rp.sortOrder,
+    // The ledger always asks for the chronological contract: verified rows by
+    // their true recorded instant, then unverified history (API default is legacy).
+    order_mode: "chronological",
     product_id: v.product_id,
     warehouse_id: v.warehouse_id,
     location_id: v.location_id,
@@ -241,7 +244,9 @@ export function InventoryLedgerView() {
         title="Inventory Ledger"
         subtitle={
           pg
-            ? `${pg.total_items} movements · physical stock changes, ${rp.sortOrder === "asc" ? "oldest first" : "newest first"}`
+            ? `${pg.total_items} movements · verified by recorded time, ${
+                rp.sortOrder === "asc" ? "oldest first" : "newest first"
+              }; then unverified history by stored time`
             : "Loading…"
         }
         actions={

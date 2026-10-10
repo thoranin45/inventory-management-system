@@ -225,14 +225,26 @@ describe("InventoryLedgerView — unverified history and sort order", () => {
     expect(screen.getByRole("note")).toHaveTextContent(/not verified/i);
   });
 
-  it("labels the order from sort_order instead of always saying newest first", () => {
+  it("labels the active ordering policy and direction, matching the URL", () => {
     render(<InventoryLedgerView />);
-    expect(screen.getByText(/newest first$/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/verified by recorded time, newest first; then unverified history by stored time$/),
+    ).toBeInTheDocument();
     search = "sort_order=asc";
     render(<InventoryLedgerView />);
-    expect(screen.getByText(/oldest first$/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/verified by recorded time, oldest first; then unverified history by stored time$/),
+    ).toBeInTheDocument();
     expect(ledgerQueries.at(-1)?.sort_order).toBe("asc");
     expect((screen.getAllByLabelText("Order").at(-1) as HTMLSelectElement).value).toBe("asc");
+  });
+
+  it("always requests the chronological ordering contract, in both directions", () => {
+    render(<InventoryLedgerView />);
+    expect(ledgerQueries.at(-1)?.order_mode).toBe("chronological");
+    search = "sort_order=asc";
+    render(<InventoryLedgerView />);
+    expect(ledgerQueries.at(-1)).toMatchObject({ order_mode: "chronological", sort_order: "asc" });
   });
 
   it("writes the chosen order to the URL and returns to the default", () => {

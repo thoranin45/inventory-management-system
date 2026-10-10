@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, case, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.models import InventoryMovement, User, Warehouse
@@ -109,6 +109,7 @@ class InventoryMovementRepository:
         actor_username: str | None = None,
         include_transit: bool = True,
         ascending: bool = False,
+        chronological: bool = False,
     ) -> tuple[
         list[InventoryMovement],
         int,
@@ -124,7 +125,8 @@ class InventoryMovementRepository:
           page use this same predicate.
         - ``movement_types`` (from ``movement_group``), ``reference_number``
           (exact), ``actor_username`` (exact, current username of
-          ``created_by``), ``include_transit`` and ``ascending``.
+          ``created_by``), ``include_transit``, ``ascending`` and
+          ``chronological`` (the ledger ordering contract, see below).
 
         Product/batch/warehouse/location/actor are eager-loaded in the page
         query itself (all many-to-one), so a page costs one count + one
@@ -240,11 +242,29 @@ class InventoryMovementRepository:
 
         total = query.count()
 
-        ordering = (
-            (InventoryMovement.created_at.asc(), InventoryMovement.id.asc())
-            if ascending
-            else (InventoryMovement.created_at.desc(), InventoryMovement.id.desc())
-        )
+        direction = (lambda column: column.asc()) if ascending else (lambda column: column.desc())
+        if chronological:
+            # Phase 14C ledger ordering contract (order_mode=chronological),
+            # applied in SQL before LIMIT/OFFSET, same policy for asc and desc:
+            #   1. verified rows (recorded_at_utc set) before unverified history,
+            #      in BOTH directions -- the two groups are never interleaved,
+            #      because unverified naive times cannot be compared with
+            #      true instants;
+            #   2. verified rows by recorded_at_utc (true chronology) -- the
+            #      naive created_at never orders them;
+            #   3. unverified rows by created_at (stored wall clock: a
+            #      deterministic order, NOT a claim of true chronology);
+            #   4. id as the stable final tie-breaker.
+            recorded = InventoryMovement.recorded_at_utc
+            ordering = (
+                case((recorded.is_(None), 1), else_=0).asc(),
+                direction(recorded),
+                direction(case((recorded.is_(None), InventoryMovement.created_at), else_=None)),
+                direction(InventoryMovement.id),
+            )
+        else:
+            # Legacy ordering (default, unchanged): stored created_at, then id.
+            ordering = (direction(InventoryMovement.created_at), direction(InventoryMovement.id))
 
         items = (
             query

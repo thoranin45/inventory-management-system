@@ -1458,8 +1458,11 @@ class InventoryMovement(Base):
 
     # Phase 14C (ea1a00000004): explicit instant stamped by the DATABASE on
     # every new row (server default now()), so a row's time never depends on
-    # the writer's session TimeZone. Never set by application code. NULL for
-    # all history recorded before the revision = provenance unverified.
+    # the writer's session TimeZone. Never set by application code (no API
+    # exposes a setter). NULL for all history recorded before the revision =
+    # provenance unverified. Authoritative only for TRUSTED writers: a direct
+    # SQL writer can bypass the default by supplying a value or NULL, so
+    # production INSERT/UPDATE on this table must be limited to the API role.
     recorded_at_utc = Column(
         DateTime(timezone=True),
         nullable=True,

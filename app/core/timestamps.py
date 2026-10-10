@@ -21,6 +21,19 @@ row -- an explicit instant, whatever the writer's session zone.
 
 Nothing here rewrites stored values; ``created_at`` and the legacy
 ``date_from``/``date_to`` filters are untouched.
+
+Trust boundary: ``recorded_at_utc`` is authoritative only for TRUSTED
+database writers. ``DEFAULT now()`` stamps any INSERT that omits the column,
+but a writer with direct SQL access can bypass it by supplying an arbitrary
+value or an explicit NULL (or UPDATE it later). No application API exposes a
+setter, and application code never assigns it; production INSERT/UPDATE
+privileges on ``inventory_movements`` must therefore be restricted to the API
+role (see docs/release-checklist.md).
+
+Ledger ordering (``order_mode=chronological``) follows the same split:
+verified rows by ``recorded_at_utc``, then unverified history by stored
+``created_at`` (deterministic, not a chronology claim) -- see
+``InventoryMovementRepository.search``.
 """
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone

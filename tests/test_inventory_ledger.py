@@ -572,3 +572,93 @@ def test_stock_transaction_lookups_cover_legacy_and_linked_adjustments(
     ids = {r["id"] for r in _ledger(client, admin_headers, product_id=product["id"],
                                     reference_type="STOCK_TRANSACTION")["items"]}
     assert ids == {legacy_move.id, both.id}
+
+
+# --------------------------------------------------------------------------- #
+# Ledger ordering contract: order_mode=chronological
+# --------------------------------------------------------------------------- #
+@pytest.fixture
+def ordering_rows(client, admin_headers, db_session):
+    """A: verified 12:00Z, naive 19:00 (a +07:00 writer); B: verified 13:00Z,
+    naive 13:00 (a UTC writer). Naive order says A is newer -- the true
+    instants say B is. U1..U3: unverified history (U1/U3 share a stored time)."""
+    product = _create_product(client, admin_headers)
+    _movements_at(db_session, product["id"], [
+        (datetime(2026, 10, 10, 19, 0, 0), datetime(2026, 10, 10, 12, 0, tzinfo=UTC)),  # A
+        (datetime(2026, 10, 10, 13, 0, 0), datetime(2026, 10, 10, 13, 0, tzinfo=UTC)),  # B
+        (datetime(2026, 10, 10, 10, 0, 0), None),                                        # U1
+        (datetime(2026, 10, 10, 8, 0, 0), None),                                         # U2
+        (datetime(2026, 10, 10, 10, 0, 0), None),                                        # U3
+    ])
+    ids = [m.id for m in db_session.query(InventoryMovement).filter_by(product_id=product["id"])
+           .order_by(InventoryMovement.id)]
+    return product["id"], dict(zip(("A", "B", "U1", "U2", "U3"), ids))
+
+
+def _order(client, headers, product_id, ids, **params):
+    by_id = {v: k for k, v in ids.items()}
+    data = _ledger(client, headers, product_id=product_id, page_size=100, **params)
+    return [by_id[i["id"]] for i in data["items"]]
+
+
+def test_chronological_desc_uses_true_instants_then_groups_unverified_history(client, admin_headers,
+                                                                             ordering_rows):
+    product_id, ids = ordering_rows
+    assert _order(client, admin_headers, product_id, ids, order_mode="chronological") == [
+        "B", "A",          # verified, true instant newest first (naive created_at would say A first)
+        "U3", "U1", "U2",  # unverified group: stored time desc, id desc tie-break
+    ]
+
+
+def test_chronological_asc_keeps_verified_first_and_reverses_within_groups(client, admin_headers,
+                                                                          ordering_rows):
+    product_id, ids = ordering_rows
+    assert _order(client, admin_headers, product_id, ids, order_mode="chronological", sort_order="asc") == [
+        "A", "B",          # verified first in BOTH directions
+        "U2", "U1", "U3",
+    ]
+
+
+def test_legacy_ordering_is_unchanged_without_order_mode(client, admin_headers, ordering_rows):
+    product_id, ids = ordering_rows
+    legacy = ["A", "B", "U3", "U1", "U2"]  # stored created_at desc, id desc -- exactly as before
+    assert _order(client, admin_headers, product_id, ids) == legacy
+    assert _order(client, admin_headers, product_id, ids, order_mode="legacy") == legacy
+
+
+@pytest.mark.parametrize("sort_order", ["desc", "asc"])
+def test_chronological_paging_crosses_groups_without_gaps_or_duplicates(client, admin_headers, ordering_rows,
+                                                                       sort_order):
+    product_id, ids = ordering_rows
+    params = dict(product_id=product_id, order_mode="chronological", sort_order=sort_order)
+    full = [i["id"] for i in _ledger(client, admin_headers, page_size=100, **params)["items"]]
+    seen, totals = [], set()
+    for page in range(1, 6):
+        data = _ledger(client, admin_headers, page=page, page_size=1, **params)
+        totals.add(data["pagination"]["total_items"])
+        seen += [i["id"] for i in data["items"]]
+    assert totals == {5}
+    assert seen == full and len(set(seen)) == 5
+    # The group boundary is explicit in every row.
+    flags = [i["timestamp_verified"] for i in _ledger(client, admin_headers, page_size=100, **params)["items"]]
+    assert flags == [True, True, False, False, False]
+
+
+def test_chronological_mode_keeps_business_day_filtering(client, admin_headers, ordering_rows):
+    product_id, ids = ordering_rows
+    # 2026-10-10 Bangkok = [09T17:00Z, 10T17:00Z): A and B (verified) are inside;
+    # U1..U3 (unverified, stored 08:00-10:00 on the 10th) are possible -> included.
+    assert _order(client, admin_headers, product_id, ids, order_mode="chronological",
+                  from_date="2026-10-10", to_date="2026-10-10") == ["B", "A", "U3", "U1", "U2"]
+    # 2026-10-11 Bangkok = [10T17:00Z, 11T17:00Z): no verified row qualifies,
+    # but unverified rows stored 08:00-10:00 on the 10th COULD fall there if
+    # written at UTC-12 -> still included (conservative), verified excluded.
+    assert _order(client, admin_headers, product_id, ids, order_mode="chronological",
+                  from_date="2026-10-11", to_date="2026-10-11") == ["U3", "U1", "U2"]
+    # 2026-10-12 Bangkok: impossible for every row under any offset.
+    assert _order(client, admin_headers, product_id, ids, order_mode="chronological",
+                  from_date="2026-10-12", to_date="2026-10-12") == []
+
+
+def test_unknown_order_mode_is_rejected(client, admin_headers):
+    assert client.get(URL, headers=admin_headers, params={"order_mode": "random"}).status_code == 422

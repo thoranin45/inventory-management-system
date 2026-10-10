@@ -210,6 +210,7 @@ def search_inventory_movements_service(
     actor: str | None = None,
     include_transit: bool = True,
     sort_order: str = "desc",
+    order_mode: str = "legacy",
 ) -> InventoryMovementListResponse:
     """Validation of the new parameters lives in the router; this layer
     trusts it. ``actor`` is already restricted to Admin there.
@@ -240,6 +241,7 @@ def search_inventory_movements_service(
         actor_username=actor,
         include_transit=include_transit,
         ascending=sort_order == "asc",
+        chronological=order_mode == "chronological",
     )
 
     from app.core.pagination import phase8_json
