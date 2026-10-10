@@ -23,6 +23,8 @@ export const stockBalanceRowSchema = z.object({
   updated_at: z.string().nullish(),
   is_transit: z.boolean(),
   batch_expiry_date: z.string().nullable(),
+  /** Phase 14D (additive) — lot number for exact-balance pickers. */
+  batch_lot_no: z.string().nullish(),
   days_to_expiry: z.number().nullable(),
   is_expired: z.boolean(),
   as_of_date: z.string(),

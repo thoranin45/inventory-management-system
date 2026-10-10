@@ -530,3 +530,12 @@ def test_approval_retry_after_uncertain_response_replays(client, admin_headers, 
     assert retry.json()["data"] == first.json()["data"]
     assert db_session.query(StockTransaction).filter_by(product_id=product["id"], transaction_type="ADJUST").count() == 1
     assert _balance(db_session, product["id"], batch["id"]).on_hand_qty == Decimal("5.000")
+
+
+def test_product_balance_rows_name_their_lot_for_the_picker(client, admin_headers):
+    product = _lot_product(client, admin_headers)
+    batch = _batch_in(client, admin_headers, product["id"], "3.000", lot="LOT-PICKER-1")
+    rows = client.get(f"/api/v1/stock-balances/product/{product['id']}", headers=admin_headers).json()["data"]["items"]
+    row = next(r for r in rows if r["batch_id"] == batch["id"])
+    assert row["batch_lot_no"] == "LOT-PICKER-1"
+    assert {"on_hand_qty", "reserved_qty", "available_qty", "batch_expiry_date", "is_expired"} <= set(row)

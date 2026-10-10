@@ -8,13 +8,29 @@ const push = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
 
-const PRODUCT = { id: 5, sku: "WH-COFFEE", product_name: "Coffee 1kg", is_active: true, barcode: "880000000005" };
+const PRODUCT = {
+  id: 5, sku: "WH-COFFEE", product_name: "Coffee 1kg", is_active: true, barcode: "880000000005", track_batch: false,
+};
 
-const resolveBarcode = vi.fn();
-vi.mock("@/lib/query/sales", () => ({ resolveBarcode: (...a: unknown[]) => resolveBarcode(...a) }));
-
+// Phase 14D B2: the non-batch prefill reads the unbatched MAIN/DEFAULT balance.
+// on_hand (10) and available (7) deliberately differ: 3 are reserved.
+const DEFAULT_BALANCE = {
+  id: 1, product_id: 5, warehouse_id: 1, location_id: 11, batch_id: null, on_hand_qty: "10.000",
+  reserved_qty: "3.000", available_qty: "7.000", is_transit: false, batch_expiry_date: null,
+  days_to_expiry: null, is_expired: false, as_of_date: "2026-06-15",
+};
 vi.mock("@/lib/query/hooks", () => ({
   useProducts: () => ({ data: { items: [PRODUCT] }, isFetching: false }),
+  useProductStock: (id: number | null) => ({
+    data: id ? { items: [DEFAULT_BALANCE] } : undefined, isLoading: false, isError: false,
+  }),
+}));
+vi.mock("@/lib/query/warehouses", () => ({
+  useWarehouses: () => ({
+    data: [{ id: 1, warehouse_code: "MAIN", warehouse_name: "Main", warehouse_type: "MAIN", is_active: true,
+      locations: [{ id: 11, location_code: "DEFAULT", location_name: "Default", location_type: null, is_active: true }] }],
+    isLoading: false, isError: false,
+  }),
 }));
 
 const createMutate = vi.fn();
@@ -25,17 +41,7 @@ vi.mock("@/lib/query/stock-adjustment-requests", () => ({
 
 import { StockAdjustmentRequestForm } from "./request-form";
 
-function lookupResult(available = "10.000") {
-  return {
-    product: { ...PRODUCT, track_batch: false, track_expiry: false, operational_available_quantity: available },
-    batches: [],
-    barcode: "x",
-    context: "lookup",
-  };
-}
-
 async function pickProduct(user: ReturnType<typeof userEvent.setup>) {
-  resolveBarcode.mockResolvedValueOnce(lookupResult());
   await user.click(screen.getByRole("combobox", { name: /search products/i }));
   const option = await screen.findByRole("option", { name: /Coffee 1kg/ });
   await user.click(within(option).getByRole("button"));
@@ -49,12 +55,25 @@ beforeEach(() => {
 });
 
 describe("StockAdjustmentRequestForm", () => {
-  it("prefills observed quantity from availability once a product is picked", async () => {
+  it("prefills observed quantity from ON-HAND, not available, once a product is picked (B2)", async () => {
     const user = userEvent.setup();
     render(<StockAdjustmentRequestForm />);
     await pickProduct(user);
     const observed = await screen.findByLabelText("Observed quantity");
-    expect(observed).toHaveValue("10.000");
+    expect(observed).toHaveValue("10.000"); // on-hand; available would be 7.000
+  });
+
+  it("sends no batch or storage fields for a non-batch product (legacy body)", async () => {
+    const user = userEvent.setup();
+    render(<StockAdjustmentRequestForm />);
+    await pickProduct(user);
+    await user.type(screen.getByLabelText("Requested (corrected) quantity"), "12.000");
+    await user.click(screen.getByRole("button", { name: /Damage/ })); // a non-batch DAMAGE increase stays valid (B1)
+    await user.click(screen.getByRole("button", { name: /submit request/i }));
+    expect(createMutate.mock.calls[0][0].body).toEqual({
+      product_id: 5, observed_quantity: "10.000", requested_quantity: "12.000", reason_code: "DAMAGE",
+    });
+    expect(screen.queryByRole("button", { name: /Expiry write-off/ })).not.toBeInTheDocument();
   });
 
   it("disables submit until requested quantity and reason are valid", async () => {

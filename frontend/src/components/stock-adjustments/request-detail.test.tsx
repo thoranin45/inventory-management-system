@@ -57,6 +57,27 @@ beforeEach(() => {
 });
 
 describe("StockAdjustmentRequestDetailBody", () => {
+  it("Phase 14D: shows the exact lot, its expiry and the current balance for a batch request", () => {
+    requestData = {
+      ...BASE_REQUEST,
+      reason_code: "EXPIRY_WRITE_OFF",
+      batch: { id: 101, lot_no: "LOT-OLD", expiry_date: "2026-06-14", is_expired: true },
+      current_balance: { on_hand: "5.000", reserved: "1.000", available: "4.000" },
+    } as typeof BASE_REQUEST;
+    render(<StockAdjustmentRequestDetailBody id={42} role="admin" onDone={vi.fn()} />);
+    expect(screen.getByText("LOT-OLD")).toBeInTheDocument();
+    expect(screen.getByText(/exp 2026-06-14/)).toBeInTheDocument();
+    expect(screen.getByText("Expired")).toBeInTheDocument();
+    expect(screen.getByText(/Expiry write-off/)).toBeInTheDocument();
+    const balance = screen.getByText("Current balance").parentElement!;
+    expect(balance).toHaveTextContent(/On hand\s*5\.00.*Reserved\s*1\.00.*Available\s*4\.00/);
+  });
+
+  it("Phase 14D: a non-batch request shows no lot row", () => {
+    render(<StockAdjustmentRequestDetailBody id={42} role="admin" onDone={vi.fn()} />);
+    expect(screen.queryByText("Lot")).not.toBeInTheDocument();
+  });
+
   it("shows the request detail and its inline lifecycle history", () => {
     requestData.history = [
       { action: "CREATE_ADJUSTMENT_REQUEST", actor: "warehouse1", at: "2026-01-01T10:00:00Z", detail: "PENDING" },
