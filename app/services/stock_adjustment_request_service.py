@@ -127,13 +127,32 @@ def create_adjustment_request_service(
     balance_repo: StockBalanceRepository,
     data: StockAdjustmentRequestCreate,
     operation_key: str | None,
-    created_by_user_id: int,
+    current_user: User,
 ) -> StockAdjustmentRequestDetail:
     """No stock mutation here, ever -- only metadata. Idempotency check runs
     before any other validation, mirroring stock_in_service's own ordering
     (see execute_adjustment_mutation's caller, approve_adjustment_request_service,
-    for why this order matters for replay correctness)."""
+    for why this order matters for replay correctness).
+
+    CREATE is reachable by any warehouse-or-admin user (a broad set), but a
+    request's detail is only ever visible to its own creator or an admin (a
+    narrow set) -- see get_adjustment_request_service's ownership check.
+    Stock In/Out's own replay precedent has no such narrower visibility
+    concept to bypass, so copying its "return the snapshot to whoever
+    matches the key+payload" shape verbatim was wrong here: a stranger who
+    somehow obtained another user's Idempotency-Key and could reconstruct
+    their exact payload would otherwise see data a direct GET already
+    correctly denies them. Every replay return point below re-applies the
+    exact same ownership check as the GET path, never a new or different
+    one, and only after operation_type + fingerprint are already confirmed
+    to match -- a mismatch is still always a conflict, checked first."""
+    created_by_user_id = current_user.id
     fingerprint = _create_fingerprint(data)
+
+    def _authorized_replay(receipt: StockOperationReceipt) -> StockAdjustmentRequestDetail:
+        if not _is_admin(current_user) and receipt.created_by_user_id != current_user.id:
+            raise AdjustmentRequestForbiddenException()
+        return StockAdjustmentRequestDetail.model_validate(receipt.response_snapshot)
 
     with UnitOfWork(db):
         if operation_key is not None:
@@ -144,7 +163,7 @@ def create_adjustment_request_service(
                     or existing.request_fingerprint != fingerprint
                 ):
                     raise IdempotencyKeyConflictException()
-                return StockAdjustmentRequestDetail.model_validate(existing.response_snapshot)
+                return _authorized_replay(existing)
 
         warehouse, location = balance_repo.resolve_storage(data.warehouse_id, data.location_id)
 
@@ -230,7 +249,11 @@ def create_adjustment_request_service(
                 or winner.request_fingerprint != fingerprint
             ):
                 raise
-            return StockAdjustmentRequestDetail.model_validate(winner.response_snapshot)
+            # Same authorization gate as the synchronous check above --
+            # a genuinely different user who merely raced to an identical
+            # payload is not entitled to see the winner's result just
+            # because they happened to lose the race to create it.
+            return _authorized_replay(winner)
 
     return response
 

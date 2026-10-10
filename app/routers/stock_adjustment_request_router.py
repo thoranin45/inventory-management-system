@@ -48,7 +48,7 @@ def create_adjustment_request(
     current_user: User = Depends(require_warehouse),
 ) -> ApiResponse[StockAdjustmentRequestDetail]:
     result = create_adjustment_request_service(
-        db, request_repo, stock_repo, balance_repo, data, operation_key, current_user.id,
+        db, request_repo, stock_repo, balance_repo, data, operation_key, current_user,
     )
     return ApiResponse(message="Stock adjustment request submitted", data=result)
 

@@ -14,6 +14,7 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
+from app.core.security import create_access_token
 from app.main import app
 from app.models import (
     AuditLog,
@@ -43,6 +44,13 @@ def _create_request(client, headers, *, product_id, observed="10.000", requested
     return client.post(
         "/api/v1/stock-adjustment-requests", headers={**headers, "Idempotency-Key": key or _key()}, json=body,
     )
+
+
+def _mint_db_user(db_session, label: str, role: str = "WAREHOUSE") -> User:
+    user = User(username=f"{label}_{uuid4().hex[:8]}", password_hash="unused", role=role)
+    db_session.add(user)
+    db_session.commit()
+    return user
 
 
 def _approve(client, headers, request_id, key=None):
@@ -179,20 +187,21 @@ def test_create_key_reused_for_approve_conflicts_on_operation_type(client, admin
     assert db_session.query(InventoryMovement).filter_by(product_id=product["id"], movement_type="STOCK_ADJUST").count() == 0
 
 
-def test_replay_never_transfers_request_ownership(client, admin_headers, warehouse_headers, db_session):
-    """If a replay of someone else's CREATE call ever happened (requires
-    guessing their random UUID key AND sending a byte-identical payload --
-    not a practical attack, same as every other Idempotency-Key endpoint in
-    this codebase), the replayed response still names the ORIGINAL
-    requester, never the replayer -- ownership is a property of the stored
-    row, not of whoever triggers a replay of it."""
+def test_admin_replay_of_a_warehouse_users_create_never_transfers_ownership(client, admin_headers, warehouse_headers, db_session):
+    """Authorization fix, sequential case: admin is explicitly exempt from
+    the ownership check (get_adjustment_request_service's own rule, mirrored
+    here), so admin CAN replay a warehouse user's exact key+payload -- but
+    the replayed response still names the ORIGINAL requester, never the
+    replayer; ownership is a property of the stored row, not of whoever
+    triggers a replay of it. (Requires guessing the warehouse user's random
+    UUID key AND reproducing their exact payload -- not a practical attack
+    on its own, but admin's visibility into every request makes this an
+    intentional, RBAC-consistent allowance rather than a gap, unlike the
+    non-admin case in the next test.)"""
     product = _create_product(client, admin_headers, initial_stock=10)
     key = _key()
     original = _create_request(client, warehouse_headers, product_id=product["id"], key=key).json()["data"]
 
-    # A different authenticated caller (admin) resubmits the exact same key
-    # and payload -- this *replays* the warehouse user's original request;
-    # it does not create a second one, and ownership does not move to admin.
     replay = _create_request(client, admin_headers, product_id=product["id"], key=key)
     assert replay.status_code == 201
     assert replay.json()["data"]["id"] == original["id"]
@@ -204,6 +213,42 @@ def test_replay_never_transfers_request_ownership(client, admin_headers, warehou
     # never changed because a different caller happened to replay the key.
     detail = client.get(f"/api/v1/stock-adjustment-requests/{original['id']}", headers=warehouse_headers)
     assert detail.status_code == 200
+
+
+def test_non_admin_cross_user_replay_blocked_with_403_no_data_leak(client, admin_headers, warehouse_headers, db_session):
+    """Authorization fix, sequential case: a second, non-admin, non-owner
+    user who reproduces another user's exact key+payload must be refused
+    -- 403, not the cached response -- even though a direct GET on the
+    same id would ALSO 403 them (this proves the replay path now enforces
+    the identical boundary the GET path already had, closing the gap
+    where it previously didn't)."""
+    product = _create_product(client, admin_headers, initial_stock=10)
+    key = _key()
+    original = _create_request(client, warehouse_headers, product_id=product["id"], key=key).json()["data"]
+
+    other_token = create_access_token({"sub": str(_mint_db_user(db_session, "seq_other").id)})
+    other_headers = {"Authorization": f"Bearer {other_token}"}
+
+    direct_get = client.get(f"/api/v1/stock-adjustment-requests/{original['id']}", headers=other_headers)
+    assert direct_get.status_code == 403
+
+    replay_attempt = _create_request(client, other_headers, product_id=product["id"], key=key)
+    assert replay_attempt.status_code == 403
+    assert "observed_quantity" not in replay_attempt.text
+    assert "requested_quantity" not in replay_attempt.text
+    assert original["requested_by"]["username"] not in replay_attempt.text
+
+    db_session.expire_all()
+    # The blocked attempt wrote nothing -- no second row, no new receipt
+    # (the key already belongs to the original request), no audit entry.
+    assert db_session.query(StockAdjustmentRequest).filter_by(product_id=product["id"]).count() == 1
+    assert db_session.query(AuditLog).filter_by(
+        action="CREATE_ADJUSTMENT_REQUEST", table_name="stock_adjustment_requests",
+    ).filter(AuditLog.description.like(f"%{original['reference_number']}%")).count() == 1
+
+    # The original owner is entirely unaffected.
+    own_get = client.get(f"/api/v1/stock-adjustment-requests/{original['id']}", headers=warehouse_headers)
+    assert own_get.status_code == 200
 
 
 # --------------------------------------------------------------------------- #
@@ -662,26 +707,33 @@ def test_concurrent_create_same_key_different_payload_one_conflicts(concurrent_i
         assert db.query(StockOperationReceipt).filter_by(operation_key=key).count() == 1
 
 
-def test_concurrent_create_same_key_different_users_identical_payload_both_replay(concurrent_inventory):
-    """Same key, same payload, but from two genuinely DIFFERENT
-    authenticated users racing at the literal INSERT. The fix's replay
-    check validates operation_type + fingerprint only -- exactly the same
-    contract the pre-existing sequential path already has (see
-    test_replay_never_transfers_request_ownership: replay has never been
-    gated on "who is asking", matching Stock In/Out/PO/Transfer's own
-    Idempotency-Key precedent) -- so this is consistent, not a new
-    allowance introduced by the fix. Ownership of the resulting ROW stays
-    with whichever user's attempt actually committed; it never flips to
-    the other racer just because their request happened to replay it."""
+def _mint_warehouse_user(s, label):
     from app.core.security import create_access_token
 
-    s = concurrent_inventory
     with s.sessions() as db:
-        other = User(username=f"race_other_{uuid4().hex[:8]}", password_hash="unused", role="WAREHOUSE")
-        db.add(other)
+        user = User(username=f"race_{label}_{uuid4().hex[:8]}", password_hash="unused", role="WAREHOUSE")
+        db.add(user)
         db.commit()
-        other_id = other.id
-    other_headers = {"Authorization": "Bearer " + create_access_token({"sub": str(other_id)})}
+        user_id = user.id
+    headers = {"Authorization": "Bearer " + create_access_token({"sub": str(user_id)})}
+    return user_id, headers
+
+
+def test_concurrent_create_same_key_different_non_admin_users_one_blocked(concurrent_inventory):
+    """Authorization fix: same key, same payload, but from two genuinely
+    DIFFERENT, non-admin, authenticated users racing at the literal
+    INSERT. Deliberately uses two freshly-minted WAREHOUSE users (not the
+    isolated-schema fixture's own default actor, which is itself an ADMIN
+    and would otherwise make this race's outcome depend on which side
+    wins -- see the admin-specific test below for that case). Whichever
+    side's transaction actually commits gets 201 with their own data; the
+    other side -- regardless of which one that is, this is deterministic
+    for ANY pairing of two non-admins -- is correctly refused the winner's
+    result with 403, never silently handed another user's private
+    request details just because their payload happened to collide."""
+    s = concurrent_inventory
+    user_a_id, headers_a = _mint_warehouse_user(s, "a")
+    user_b_id, headers_b = _mint_warehouse_user(s, "b")
 
     product_resp = s.client.post("/api/v1/products", json={
         "sku": f"RACE-{uuid4().hex[:10].upper()}", "barcode": f"883{uuid4().hex[:10]}",
@@ -694,17 +746,17 @@ def test_concurrent_create_same_key_different_users_identical_payload_both_repla
         "reason_code": "CYCLE_COUNT_VARIANCE",
     }
 
-    with s.sessions() as db:
-        fixture_user_id = db.query(User).filter_by(username="concurrency_admin").one().id
+    responses = _race_on_receipt_insert(s, [(headers_a, payload, key), (headers_b, payload, key)])
 
-    responses = _race_on_receipt_insert(s, [(None, payload, key), (other_headers, payload, key)])
-
-    assert [r.status_code for r in responses] == [201, 201]
-    assert responses[0].json()["data"] == responses[1].json()["data"]
-    # Ownership is whichever actor's transaction actually committed -- a
-    # real, single value, one of the two racers, never both, never neither.
-    winner_requester_id = responses[0].json()["data"]["requested_by"]["id"]
-    assert winner_requester_id in {fixture_user_id, other_id}
+    statuses = sorted(r.status_code for r in responses)
+    assert statuses == [201, 403]
+    winner = next(r for r in responses if r.status_code == 201)
+    loser = next(r for r in responses if r.status_code == 403)
+    winner_requester_id = winner.json()["data"]["requested_by"]["id"]
+    assert winner_requester_id in {user_a_id, user_b_id}
+    # The 403 must not leak the winner's request details.
+    assert "observed_quantity" not in loser.text
+    assert "requested_quantity" not in loser.text
 
     with s.sessions() as db:
         rows = db.query(StockAdjustmentRequest).filter_by(product_id=product_id).all()
@@ -714,6 +766,54 @@ def test_concurrent_create_same_key_different_users_identical_payload_both_repla
         assert db.query(AuditLog).filter_by(
             action="CREATE_ADJUSTMENT_REQUEST", table_name="stock_adjustment_requests", record_id=rows[0].id,
         ).count() == 1
+
+
+def test_concurrent_create_admin_vs_warehouse_race_resolves_by_rbac(concurrent_inventory):
+    """The isolated-schema fixture's default actor is itself an ADMIN (see
+    concurrent_inventory), so racing it against a freshly-minted WAREHOUSE
+    user exercises the race-handling branch's authorization gate on BOTH
+    possible outcomes, whichever the OS thread scheduler actually produces:
+    if admin wins, the warehouse loser is correctly blocked (403) -- no
+    different from two non-admins racing, admin or not, the loser still
+    isn't the winner; if the warehouse user wins, admin's losing attempt
+    still replays (201) -- admin can see every request regardless of who
+    created it, per get_adjustment_request_service's own exemption, so
+    this is a confirmed-unaffected carve-out, not a new allowance. Exactly
+    one of those two shapes must be observed; never both sides succeeding
+    when the loser isn't admin, and never both failing."""
+    s = concurrent_inventory
+    other_id, other_headers = _mint_warehouse_user(s, "nonadmin")
+
+    with s.sessions() as db:
+        admin_id = db.query(User).filter_by(username="concurrency_admin").one().id
+
+    product_resp = s.client.post("/api/v1/products", json={
+        "sku": f"RACE-{uuid4().hex[:10].upper()}", "barcode": f"882{uuid4().hex[:10]}",
+        "product_name": "Race product", "price": 10, "stock_qty": 0, "category_id": None,
+    })
+    product_id = product_resp.json()["data"]["id"]
+    key = "race-create-admin-" + uuid4().hex
+    payload = {
+        "product_id": product_id, "observed_quantity": "0.000", "requested_quantity": "5.000",
+        "reason_code": "CYCLE_COUNT_VARIANCE",
+    }
+
+    responses = _race_on_receipt_insert(s, [(None, payload, key), (other_headers, payload, key)])
+    admin_response, warehouse_response = responses[0], responses[1]
+
+    assert admin_response.status_code == 201  # admin wins outright, or replays as the exempt loser -- either way 201
+    if warehouse_response.status_code == 201:
+        # The warehouse user won the race outright.
+        assert warehouse_response.json()["data"] == admin_response.json()["data"]
+    else:
+        # Admin won; the warehouse user's replay attempt is correctly blocked.
+        assert warehouse_response.status_code == 403
+
+    with s.sessions() as db:
+        rows = db.query(StockAdjustmentRequest).filter_by(product_id=product_id).all()
+        assert len(rows) == 1
+        assert rows[0].requested_by_user_id in {admin_id, other_id}
+        assert db.query(StockOperationReceipt).filter_by(operation_key=key).count() == 1
 
 
 # --------------------------------------------------------------------------- #
