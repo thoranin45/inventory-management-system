@@ -553,50 +553,17 @@ def test_concurrent_decisions_resolve_to_exactly_one_outcome(concurrent_inventor
             assert db.query(InventoryMovement).filter_by(product_id=product_id, movement_type="STOCK_ADJUST").count() == 1
 
 
-def test_concurrent_create_same_key_applies_once(concurrent_inventory):
-    """CREATE takes no row lock at all (it never touches StockBalance), so
-    nothing serialises two truly-concurrent calls before they both reach
-    the stock_operation_receipts INSERT -- unlike Stock In/Out, which lock
-    the product first and so a same-product race never even reaches this
-    path for a same-payload retry.
-
-    This is exactly the scenario create_operation_receipt's SAVEPOINT-based
-    backstop (Phase 13, shared and unchanged here) exists for: the loser's
-    INSERT hits the unique constraint on operation_key and is converted
-    into IdempotencyKeyConflictException -- never a bare 500, never two
-    rows. Note precisely what that backstop does NOT do: it never compares
-    the loser's own fingerprint against the winner's before raising, so a
-    genuinely simultaneous SAME-PAYLOAD race still surfaces as a 409 to the
-    loser, not a clean replay (unlike Stock In/Out's same-product case,
-    where the lock already serialised the retry before any of this runs).
-    Confirmed here deterministically via a Barrier on the literal INSERT
-    statement; the only property this test actually needs -- and gets --
-    is that exactly one row is ever created, never two. (Reported, not
-    changed: fixing this would mean altering the shared Phase 13
-    SAVEPOINT handler used by every idempotent stock endpoint, and
-    reaching this path at all needs an artificially-forced sub-millisecond
-    race -- a real double-click or retry-after-timeout practically always
-    lands after the winner has already committed, which replays cleanly.)
-    """
+def _race_on_receipt_insert(s, requests):
+    """Fire every (headers, payload, key) in `requests` genuinely
+    concurrently, deterministically racing them at the literal
+    stock_operation_receipts INSERT via a Barrier -- not timing-dependent.
+    `headers` may be None to reuse the fixture's own default actor."""
     from concurrent.futures import ThreadPoolExecutor
     from threading import Barrier
 
     from sqlalchemy import event
 
-    s = concurrent_inventory
-    product_resp = s.client.post("/api/v1/products", json={
-        "sku": f"RACE-{uuid4().hex[:10].upper()}", "barcode": f"886{uuid4().hex[:10]}",
-        "product_name": "Race product", "price": 10, "stock_qty": 0, "category_id": None,
-    })
-    assert product_resp.status_code in {200, 201}
-    product_id = product_resp.json()["data"]["id"]
-    key = "race-create-" + uuid4().hex
-    payload = {
-        "product_id": product_id, "observed_quantity": "0.000", "requested_quantity": "5.000",
-        "reason_code": "CYCLE_COUNT_VARIANCE",
-    }
-
-    barrier = Barrier(2, timeout=6)
+    barrier = Barrier(len(requests), timeout=6)
 
     def before_insert(connection, cursor, statement, parameters, context, executemany):
         if "INSERT INTO stock_operation_receipts" in statement:
@@ -604,29 +571,149 @@ def test_concurrent_create_same_key_applies_once(concurrent_inventory):
 
     event.listen(s.engine, "before_cursor_execute", before_insert)
     try:
-        def invoke(_):
-            with TestClient(app, headers=s.headers) as worker:
+        def invoke(req):
+            headers, payload, key = req
+            with TestClient(app, headers=headers or s.headers) as worker:
                 return worker.post(
                     "/api/v1/stock-adjustment-requests", json=payload, headers={"Idempotency-Key": key},
                 )
 
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            responses = list(pool.map(invoke, range(2)))
+        with ThreadPoolExecutor(max_workers=len(requests)) as pool:
+            return list(pool.map(invoke, requests))
     finally:
         event.remove(s.engine, "before_cursor_execute", before_insert)
 
-    # The only safety property this mechanism actually guarantees: never
-    # two rows, regardless of whether the loser gets a clean replay (200)
-    # or a conflict (409) -- see the docstring above for exactly why a
-    # same-payload race can still land on the conflict branch here.
-    statuses = sorted(r.status_code for r in responses)
-    assert statuses in ([201, 201], [201, 409])
-    if statuses == [201, 201]:
+
+def test_concurrent_create_same_key_identical_payload_both_replay(concurrent_inventory):
+    """A1 fix (post-root-cause-review): CREATE takes no row lock at all (it
+    never touches StockBalance), so nothing serialises two truly-concurrent
+    calls before they both reach the stock_operation_receipts INSERT --
+    unlike Stock In/Out, which lock the product first and so a same-product
+    race never even reaches this path for a same-payload retry.
+
+    Before the fix, the loser's INSERT hit the unique constraint and was
+    unconditionally converted into a 409 -- safe (never two rows) but
+    confusing (a genuinely identical retry looked like a conflict). The
+    fix widens the SAVEPOINT around this request's own row + audit entry,
+    so a lost race now discards all of it and re-checks the committed
+    winner's operation_type + fingerprint before deciding: a genuine match
+    (this test) now replays cleanly on BOTH sides; a real mismatch (the
+    next test) still conflicts, unchanged. Deterministic via a Barrier on
+    the literal INSERT statement, run three times to rule out flakiness
+    either direction could hide.
+    """
+    s = concurrent_inventory
+    for _ in range(3):
+        product_resp = s.client.post("/api/v1/products", json={
+            "sku": f"RACE-{uuid4().hex[:10].upper()}", "barcode": f"886{uuid4().hex[:10]}",
+            "product_name": "Race product", "price": 10, "stock_qty": 0, "category_id": None,
+        })
+        assert product_resp.status_code in {200, 201}
+        product_id = product_resp.json()["data"]["id"]
+        key = "race-create-" + uuid4().hex
+        payload = {
+            "product_id": product_id, "observed_quantity": "0.000", "requested_quantity": "5.000",
+            "reason_code": "CYCLE_COUNT_VARIANCE",
+        }
+
+        responses = _race_on_receipt_insert(s, [(None, payload, key), (None, payload, key)])
+
+        assert [r.status_code for r in responses] == [201, 201]
         assert responses[0].json()["data"] == responses[1].json()["data"]
 
+        with s.sessions() as db:
+            assert db.query(StockAdjustmentRequest).filter_by(product_id=product_id).count() == 1
+            assert db.query(StockOperationReceipt).filter_by(operation_key=key).count() == 1
+            assert db.query(AuditLog).filter_by(
+                action="CREATE_ADJUSTMENT_REQUEST", table_name="stock_adjustment_requests",
+                record_id=responses[0].json()["data"]["id"],
+            ).count() == 1
+
+
+def test_concurrent_create_same_key_different_payload_one_conflicts(concurrent_inventory):
+    """Unchanged by the fix: a genuinely different payload under the same
+    key must still conflict, exactly like Stock Out's cross-product race --
+    the fix only ever replays on a verified operation_type + fingerprint
+    match, never loosens the mismatch case."""
+    s = concurrent_inventory
+    first = s.client.post("/api/v1/products", json={
+        "sku": f"RACE-{uuid4().hex[:10].upper()}", "barcode": f"885{uuid4().hex[:10]}",
+        "product_name": "Race product A", "price": 10, "stock_qty": 0, "category_id": None,
+    }).json()["data"]
+    second = s.client.post("/api/v1/products", json={
+        "sku": f"RACE-{uuid4().hex[:10].upper()}", "barcode": f"884{uuid4().hex[:10]}",
+        "product_name": "Race product B", "price": 10, "stock_qty": 0, "category_id": None,
+    }).json()["data"]
+    key = "race-create-diff-" + uuid4().hex
+    payload_a = {"product_id": first["id"], "observed_quantity": "0.000", "requested_quantity": "5.000",
+                 "reason_code": "CYCLE_COUNT_VARIANCE"}
+    payload_b = {"product_id": second["id"], "observed_quantity": "0.000", "requested_quantity": "9.000",
+                 "reason_code": "DAMAGE"}
+
+    responses = _race_on_receipt_insert(s, [(None, payload_a, key), (None, payload_b, key)])
+
+    assert sorted(r.status_code for r in responses) == [201, 409]
+    loser = next(r for r in responses if r.status_code == 409)
+    assert "different payload" in loser.text
+
     with s.sessions() as db:
-        assert db.query(StockAdjustmentRequest).filter_by(product_id=product_id).count() == 1
+        assert db.query(StockAdjustmentRequest).filter_by(product_id=first["id"]).count() + \
+            db.query(StockAdjustmentRequest).filter_by(product_id=second["id"]).count() == 1
         assert db.query(StockOperationReceipt).filter_by(operation_key=key).count() == 1
+
+
+def test_concurrent_create_same_key_different_users_identical_payload_both_replay(concurrent_inventory):
+    """Same key, same payload, but from two genuinely DIFFERENT
+    authenticated users racing at the literal INSERT. The fix's replay
+    check validates operation_type + fingerprint only -- exactly the same
+    contract the pre-existing sequential path already has (see
+    test_replay_never_transfers_request_ownership: replay has never been
+    gated on "who is asking", matching Stock In/Out/PO/Transfer's own
+    Idempotency-Key precedent) -- so this is consistent, not a new
+    allowance introduced by the fix. Ownership of the resulting ROW stays
+    with whichever user's attempt actually committed; it never flips to
+    the other racer just because their request happened to replay it."""
+    from app.core.security import create_access_token
+
+    s = concurrent_inventory
+    with s.sessions() as db:
+        other = User(username=f"race_other_{uuid4().hex[:8]}", password_hash="unused", role="WAREHOUSE")
+        db.add(other)
+        db.commit()
+        other_id = other.id
+    other_headers = {"Authorization": "Bearer " + create_access_token({"sub": str(other_id)})}
+
+    product_resp = s.client.post("/api/v1/products", json={
+        "sku": f"RACE-{uuid4().hex[:10].upper()}", "barcode": f"883{uuid4().hex[:10]}",
+        "product_name": "Race product", "price": 10, "stock_qty": 0, "category_id": None,
+    })
+    product_id = product_resp.json()["data"]["id"]
+    key = "race-create-users-" + uuid4().hex
+    payload = {
+        "product_id": product_id, "observed_quantity": "0.000", "requested_quantity": "5.000",
+        "reason_code": "CYCLE_COUNT_VARIANCE",
+    }
+
+    with s.sessions() as db:
+        fixture_user_id = db.query(User).filter_by(username="concurrency_admin").one().id
+
+    responses = _race_on_receipt_insert(s, [(None, payload, key), (other_headers, payload, key)])
+
+    assert [r.status_code for r in responses] == [201, 201]
+    assert responses[0].json()["data"] == responses[1].json()["data"]
+    # Ownership is whichever actor's transaction actually committed -- a
+    # real, single value, one of the two racers, never both, never neither.
+    winner_requester_id = responses[0].json()["data"]["requested_by"]["id"]
+    assert winner_requester_id in {fixture_user_id, other_id}
+
+    with s.sessions() as db:
+        rows = db.query(StockAdjustmentRequest).filter_by(product_id=product_id).all()
+        assert len(rows) == 1
+        assert rows[0].requested_by_user_id == winner_requester_id
+        assert db.query(StockOperationReceipt).filter_by(operation_key=key).count() == 1
+        assert db.query(AuditLog).filter_by(
+            action="CREATE_ADJUSTMENT_REQUEST", table_name="stock_adjustment_requests", record_id=rows[0].id,
+        ).count() == 1
 
 
 # --------------------------------------------------------------------------- #

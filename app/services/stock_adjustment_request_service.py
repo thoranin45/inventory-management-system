@@ -157,46 +157,80 @@ def create_adjustment_request_service(
         if product.track_batch:
             raise BatchTrackedAdjustmentException()
 
-        request = StockAdjustmentRequest(
-            reference_number=None,
-            product_id=product.id,
-            warehouse_id=warehouse.id,
-            location_id=location.id,
-            batch_id=None,
-            observed_quantity=data.observed_quantity,
-            requested_quantity=data.requested_quantity,
-            reason_code=data.reason_code,
-            notes=data.notes,
-            status="PENDING",
-            requested_by_user_id=created_by_user_id,
-            create_operation_key=operation_key,
-        )
-        request_repo.create(request)
-        request.reference_number = f"ADJ-{request.id:06d}"
+        # CREATE takes no row lock (it never touches StockBalance, unlike
+        # every mutating endpoint whose lock_inventory() already serialises
+        # a same-product retry before this point) -- so a genuinely
+        # concurrent, identical-key CREATE can still race another one to
+        # stock_operation_receipts' unique constraint. The nested
+        # transaction below widens Phase 13's existing per-insert SAVEPOINT
+        # to cover this request's own row and audit entry too: a lost race
+        # discards all of it (pure metadata, nothing stock-related, safe to
+        # throw away) rather than just the receipt insert, so the except
+        # branch below can cleanly re-check what actually won and decide
+        # replay-or-conflict with nothing of this attempt left dangling.
+        try:
+            with db.begin_nested():
+                request = StockAdjustmentRequest(
+                    reference_number=None,
+                    product_id=product.id,
+                    warehouse_id=warehouse.id,
+                    location_id=location.id,
+                    batch_id=None,
+                    observed_quantity=data.observed_quantity,
+                    requested_quantity=data.requested_quantity,
+                    reason_code=data.reason_code,
+                    notes=data.notes,
+                    status="PENDING",
+                    requested_by_user_id=created_by_user_id,
+                    create_operation_key=operation_key,
+                )
+                request_repo.create(request)
+                request.reference_number = f"ADJ-{request.id:06d}"
 
-        actor = db.get(User, created_by_user_id)
-        db.add(AuditLog(
-            username=actor.username if actor else "system",
-            action="CREATE_ADJUSTMENT_REQUEST",
-            table_name="stock_adjustment_requests",
-            record_id=request.id,
-            description=(
-                f"{request.reference_number}: -> PENDING. "
-                f"Product {product.id}; observed={data.observed_quantity}; "
-                f"requested={data.requested_quantity}; reason={data.reason_code}"
-            ),
-        ))
+                actor = db.get(User, created_by_user_id)
+                db.add(AuditLog(
+                    username=actor.username if actor else "system",
+                    action="CREATE_ADJUSTMENT_REQUEST",
+                    table_name="stock_adjustment_requests",
+                    record_id=request.id,
+                    description=(
+                        f"{request.reference_number}: -> PENDING. "
+                        f"Product {product.id}; observed={data.observed_quantity}; "
+                        f"requested={data.requested_quantity}; reason={data.reason_code}"
+                    ),
+                ))
 
-        response = _build_detail_response(db, request, product=product, warehouse=warehouse, location=location)
+                response = _build_detail_response(db, request, product=product, warehouse=warehouse, location=location)
 
-        if operation_key is not None:
-            stock_repo.create_operation_receipt(StockOperationReceipt(
-                operation_type="STOCK_ADJUST_REQUEST_CREATE",
-                operation_key=operation_key,
-                request_fingerprint=fingerprint,
-                response_snapshot=response.model_dump(mode="json"),
-                created_by_user_id=created_by_user_id,
-            ))
+                if operation_key is not None:
+                    stock_repo.create_operation_receipt(StockOperationReceipt(
+                        operation_type="STOCK_ADJUST_REQUEST_CREATE",
+                        operation_key=operation_key,
+                        request_fingerprint=fingerprint,
+                        response_snapshot=response.model_dump(mode="json"),
+                        created_by_user_id=created_by_user_id,
+                    ))
+        except IdempotencyKeyConflictException:
+            # Lost a genuine race at the INSERT. Re-query under READ
+            # COMMITTED -- the winner's transaction has committed by the
+            # time this exception reaches us (create_operation_receipt's
+            # own nested block only raises after the blocked INSERT's
+            # unique-violation resolves, which only happens once the
+            # blocking transaction is gone), so this SELECT sees it.
+            # Validate operation_type + fingerprint exactly like the
+            # synchronous check above -- a genuine match replays the
+            # winner's result (same contract as that check, not a new or
+            # looser one); anything else (different payload, different
+            # operation_type, or no committed receipt at all -- defensive,
+            # shouldn't happen) is a real conflict, unchanged.
+            winner = stock_repo.get_operation_receipt(operation_key)
+            if (
+                winner is None
+                or winner.operation_type != "STOCK_ADJUST_REQUEST_CREATE"
+                or winner.request_fingerprint != fingerprint
+            ):
+                raise
+            return StockAdjustmentRequestDetail.model_validate(winner.response_snapshot)
 
     return response
 
