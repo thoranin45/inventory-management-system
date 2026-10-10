@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Combobox, type ComboboxItem } from "@/components/ui/combobox";
 import { QuantityDisplay } from "@/components/ui/quantity-display";
 import { isApiError } from "@/lib/api/errors";
-import { useProductStock, useProducts } from "@/lib/query/hooks";
+import { useAllProductStock, useProducts } from "@/lib/query/hooks";
 import { useWarehouses } from "@/lib/query/warehouses";
 import { useIdempotentDraft } from "@/lib/idempotent-draft";
 import { useCreateStockAdjustmentRequest } from "@/lib/query/stock-adjustment-requests";
@@ -22,6 +22,8 @@ import {
   buildCreateAdjustmentRequestBody,
   compareQty,
   createAdjustmentRequestInput,
+  isQty,
+  qtyInputError,
   REASON_CODES,
   REASON_LABELS,
   type CreateAdjustmentRequestBody,
@@ -109,9 +111,9 @@ export function StockAdjustmentRequestForm() {
     .map((p) => ({ id: p.id, label: p.product_name, sublabel: p.sku }));
 
   // Exact balances for the chosen product + the warehouse directory (names,
-  // active flags). B2: "observed" is always prefilled from ON-HAND -- the
-  // value approval compares against -- never from available stock.
-  const stockQ = useProductStock(line?.productId ?? null);
+  // active flags), across EVERY page. B2: "observed" is always prefilled
+  // from ON-HAND -- the value approval compares against -- never available.
+  const stockQ = useAllProductStock(line?.productId ?? null);
   const directoryQ = useWarehouses(false);
   const balances: StockBalanceRow[] = React.useMemo(() => stockQ.data?.items ?? [], [stockQ.data]);
   const directory: Warehouse[] = React.useMemo(() => directoryQ.data ?? [], [directoryQ.data]);
@@ -182,7 +184,9 @@ export function StockAdjustmentRequestForm() {
         })
       : null;
   const belowReserved =
-    !!line && line.requested !== "" && /^\d+(\.\d+)?$/.test(line.requested) && compareQty(line.requested, line.reserved || "0") < 0;
+    !!line && isQty(line.requested) && compareQty(line.requested, line.reserved || "0") < 0;
+  const observedError = line ? qtyInputError(line.observed) : null;
+  const requestedError = line ? qtyInputError(line.requested) : null;
 
   const valid = React.useMemo(() => {
     if (!line) return false;
@@ -318,6 +322,16 @@ export function StockAdjustmentRequestForm() {
                       />
                     </label>
                   </div>
+                  {observedError ? (
+                    <p role="alert" className="text-[12px] text-[var(--danger)]">
+                      Observed: {observedError}
+                    </p>
+                  ) : null}
+                  {requestedError ? (
+                    <p role="alert" className="text-[12px] text-[var(--danger)]">
+                      Requested: {requestedError}
+                    </p>
+                  ) : null}
 
                   {/* before/after preview — live, client-side, no network round-trip */}
                   <div

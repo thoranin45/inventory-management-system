@@ -17,9 +17,13 @@ const row = (over: Record<string, unknown>) => ({
   ...over,
 });
 let BALANCES: Record<string, unknown>[] = [];
+let STOCK_ERROR = false;
 vi.mock("@/lib/query/hooks", () => ({
   useProducts: () => ({ data: { items: [PRODUCT] }, isFetching: false }),
-  useProductStock: (id: number | null) => ({ data: id ? { items: BALANCES } : undefined, isLoading: false, isError: false }),
+  useAllProductStock: (id: number | null) =>
+    STOCK_ERROR
+      ? { data: undefined, isLoading: false, isError: true }
+      : { data: id ? { items: BALANCES } : undefined, isLoading: false, isError: false },
 }));
 vi.mock("@/lib/query/warehouses", () => ({
   useWarehouses: () => ({
@@ -60,6 +64,7 @@ const submit = () => screen.getByRole("button", { name: /submit request/i });
 beforeEach(() => {
   vi.resetAllMocks();
   window.sessionStorage.clear();
+  STOCK_ERROR = false;
   BALANCES = [
     FRESH,
     EXPIRED,
@@ -167,5 +172,69 @@ describe("Batch adjustment form (Phase 14D)", () => {
     await user.type(requested(), "9.000");
     await user.click(submit());
     expect(toastError.mock.calls[0][1].description).toMatch(/no stock record at that location/);
+  });
+
+  it("offers every eligible lot beyond the first 50 balances and lets a later-page lot be picked", async () => {
+    const many = Array.from({ length: 60 }, (_, i) =>
+      row({ id: 1000 + i, warehouse_id: 2, location_id: 21, batch_id: 2000 + i,
+        batch_lot_no: `LOT-${String(i).padStart(3, "0")}`, on_hand_qty: `${i + 1}.000`, available_qty: `${i + 1}.000` }),
+    );
+    BALANCES = [
+      ...many,
+      row({ id: 5, warehouse_id: 1, location_id: 12, batch_id: 105, batch_lot_no: "LOT-INACTIVE" }),
+      row({ id: 6, warehouse_id: 9, location_id: 99, batch_id: 106, batch_lot_no: "LOT-TRANSIT", is_transit: true }),
+      row({ id: 7, warehouse_id: 1, location_id: 11, batch_id: null }), // unbatched
+    ];
+    const user = userEvent.setup();
+    render(<StockAdjustmentRequestForm />);
+    await pickProduct(user);
+    const picker = screen.getByRole("group", { name: /lot and location/i });
+    expect(within(picker).getAllByRole("button")).toHaveLength(60);
+    expect(within(picker).queryByText("LOT-INACTIVE")).not.toBeInTheDocument();
+    expect(within(picker).queryByText("LOT-TRANSIT")).not.toBeInTheDocument();
+    await user.click(within(picker).getByText("LOT-055").closest("button")!); // beyond the old 50-row page
+    expect(screen.getByLabelText("Observed quantity")).toHaveValue("56.000"); // B2 on-hand prefill
+    await user.type(requested(), "50");
+    await user.click(submit());
+    expect(createMutate.mock.calls[0][0].body).toMatchObject({ warehouse_id: 2, location_id: 21, batch_id: 2055 });
+  }, 15_000);
+
+  it("shows a visible error (no partial lot list) when the balances cannot be fully loaded", async () => {
+    STOCK_ERROR = true;
+    const user = userEvent.setup();
+    render(<StockAdjustmentRequestForm />);
+    await pickProduct(user);
+    expect(screen.getByRole("alert")).toHaveTextContent(/load this product.s lots/);
+    expect(screen.queryByRole("group", { name: /lot and location/i })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["abc", "Quantity must be a number"],
+    ["5.", "Quantity must be a number"],
+    ["-1", "Quantity must be a number"],
+    ["5.1234", "At most 3 decimal places"],
+  ])("DAMAGE on a lot with requested %j shows the quantity message instead of crashing", async (text, message) => {
+    const user = userEvent.setup();
+    render(<StockAdjustmentRequestForm />);
+    await pickProduct(user);
+    await user.click(screen.getByRole("button", { name: /LOT-FRESH/ }));
+    await user.click(screen.getByRole("button", { name: /Damage/ }));
+    await user.type(requested(), text);
+    expect(screen.getByRole("alert")).toHaveTextContent(`Requested: ${message}`);
+    expect(submit()).toBeDisabled();
+  });
+
+  it("shows the quantity message for invalid observed text on a lot", async () => {
+    const user = userEvent.setup();
+    render(<StockAdjustmentRequestForm />);
+    await pickProduct(user);
+    await user.click(screen.getByRole("button", { name: /LOT-FRESH/ }));
+    await user.click(screen.getByRole("button", { name: /Damage/ }));
+    await user.type(requested(), "5.000");
+    const observed = screen.getByLabelText("Observed quantity");
+    await user.clear(observed);
+    await user.type(observed, "ten");
+    expect(screen.getByRole("alert")).toHaveTextContent("Observed: Quantity must be a number");
+    expect(submit()).toBeDisabled();
   });
 });

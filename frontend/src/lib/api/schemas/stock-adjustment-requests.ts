@@ -52,7 +52,8 @@ export function batchReasonError(input: {
   if (input.reasonCode === "EXPIRY_WRITE_OFF" && !input.isExpired) {
     return "Expiry write-off is only for a lot whose expiry date is before today (Asia/Bangkok).";
   }
-  if (BATCH_DECREASE_ONLY_REASONS.has(input.reasonCode) && input.observed !== "" && input.requested !== "") {
+  // Invalid / half-typed quantities are reported by qtyInputError instead.
+  if (BATCH_DECREASE_ONLY_REASONS.has(input.reasonCode) && isQty(input.observed) && isQty(input.requested)) {
     if (compareQty(input.requested, input.observed) >= 0) {
       return `${REASON_LABELS[input.reasonCode].label} must lower the quantity: requested must be below observed.`;
     }
@@ -60,8 +61,18 @@ export function batchReasonError(input: {
   return null;
 }
 
-/** String-exact decimal comparison (no float): -1, 0 or 1. */
+/** A complete, non-negative quantity with at most 3 decimal places. */
+export function isQty(v: string): boolean {
+  return /^\d+(\.\d{1,3})?$/.test(v.trim());
+}
+
+/**
+ * String-exact decimal comparison (no float): -1, 0 or 1 — or NaN when
+ * either side is not a valid quantity (so every `<`/`>=` test is false and
+ * nothing ever reaches BigInt with bad input).
+ */
 export function compareQty(a: string, b: string): number {
+  if (!isQty(a) || !isQty(b)) return Number.NaN;
   const scale = (v: string) => {
     const [i, f = ""] = v.trim().split(".");
     return BigInt((i || "0") + (f + "000").slice(0, 3));
@@ -78,6 +89,13 @@ const qtyInput = z
   .trim()
   .regex(/^\d+(\.\d+)?$/, "Quantity must be a number")
   .refine((v) => (v.split(".")[1]?.length ?? 0) <= 3, "At most 3 decimal places");
+
+/** The quantity field's validation message, or null when empty or valid. */
+export function qtyInputError(v: string): string | null {
+  if (v.trim() === "") return null;
+  const parsed = qtyInput.safeParse(v);
+  return parsed.success ? null : parsed.error.issues[0].message;
+}
 
 export const createAdjustmentRequestInput = z
   .object({

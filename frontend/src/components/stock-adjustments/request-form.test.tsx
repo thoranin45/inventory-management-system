@@ -21,7 +21,7 @@ const DEFAULT_BALANCE = {
 };
 vi.mock("@/lib/query/hooks", () => ({
   useProducts: () => ({ data: { items: [PRODUCT] }, isFetching: false }),
-  useProductStock: (id: number | null) => ({
+  useAllProductStock: (id: number | null) => ({
     data: id ? { items: [DEFAULT_BALANCE] } : undefined, isLoading: false, isError: false,
   }),
 }));
@@ -82,6 +82,21 @@ describe("StockAdjustmentRequestForm", () => {
     await pickProduct(user);
     expect(screen.getByRole("button", { name: /submit request/i })).toBeDisabled();
     await user.type(screen.getByLabelText("Requested (corrected) quantity"), "8.000");
+    expect(screen.getByRole("button", { name: /submit request/i })).toBeEnabled();
+  });
+
+  it("shows the quantity message for invalid text without crashing and keeps a non-batch DAMAGE increase valid", async () => {
+    const user = userEvent.setup();
+    render(<StockAdjustmentRequestForm />);
+    await pickProduct(user);
+    await user.click(screen.getByRole("button", { name: /Damage/ }));
+    const requested = screen.getByLabelText("Requested (corrected) quantity");
+    await user.type(requested, "abc");
+    expect(screen.getByRole("alert")).toHaveTextContent("Requested: Quantity must be a number");
+    expect(screen.getByRole("button", { name: /submit request/i })).toBeDisabled();
+    await user.clear(requested);
+    await user.type(requested, "12.000"); // non-batch: no decrease-only rule
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /submit request/i })).toBeEnabled();
   });
 
