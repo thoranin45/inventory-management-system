@@ -10,6 +10,7 @@ from app.core.dependencies import (
     StockBalanceRepositoryDependency,
 )
 from app.core.response import success_response
+from app.models import User
 from app.services.dashboard_service import (
     get_dashboard_service,
     get_expired_batches_service,
@@ -72,9 +73,11 @@ def get_low_stock_products(
 @router.get("/dashboard/recent-transactions")
 def get_dashboard_recent_transactions(
     dashboard_repo: DashboardRepositoryDependency,
+    current_user: User = Depends(require_warehouse),
 ):
     result = get_recent_transactions_service(
-        dashboard_repo=dashboard_repo
+        dashboard_repo=dashboard_repo,
+        current_user=current_user,
     )
 
     return success_response(

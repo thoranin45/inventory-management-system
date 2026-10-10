@@ -184,6 +184,9 @@ def stock_adjust(
 )
 def stock_history(
     stock_repo: StockRepositoryDependency,
+    current_user: User = Depends(
+        require_warehouse
+    ),
 ) -> ApiResponse[
     list[StockTransactionResponse]
 ]:
@@ -191,6 +194,7 @@ def stock_history(
     transactions = (
         get_stock_history_service(
             stock_repo=stock_repo,
+            current_user=current_user,
         )
     )
 

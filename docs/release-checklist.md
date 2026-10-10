@@ -27,6 +27,13 @@
       copy off-box. Record filename + size + sha256.
 - [ ] **Preflight**: relevant `scripts/check_phaseN_preflight.py` with its
       explicit `*_PREFLIGHT_DATABASE_URL` → zero findings.
+- [ ] **Timestamp provenance (Phase 14C)**: run
+      `scripts/check_inventory_consistency.py` with
+      `INVENTORY_DIAGNOSTIC_NAIVE_TIMEZONE` = the intended `DB_NAIVE_TIMEZONE`.
+      Every `timestamp_provenance` finding must be `CONSISTENT`, with no
+      `timestamp_provenance_change`. Record any `UNANCHORED` window: those
+      rows' zone is assumed, not proven. Set `DB_SESSION_TIMEZONE_PIN=true`
+      only after this passes.
 - [ ] Announce maintenance; stop `api` if tables are large.
 - [ ] **Migrate (one-shot)**:
       `docker compose -f compose.prod.yml --profile migrate run --rm migrate`.

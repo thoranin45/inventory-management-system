@@ -1,8 +1,9 @@
 from datetime import datetime
 
-from sqlalchemy.orm import Session
+from sqlalchemy import or_
+from sqlalchemy.orm import Session, joinedload
 
-from app.models import InventoryMovement
+from app.models import InventoryMovement, User, Warehouse
 
 
 class InventoryMovementRepository:
@@ -83,13 +84,69 @@ class InventoryMovementRepository:
         reference_id: int | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
+        naive_start: datetime | None = None,
+        naive_end: datetime | None = None,
+        movement_types: tuple[str, ...] | None = None,
+        reference_number: str | None = None,
+        actor_username: str | None = None,
+        include_transit: bool = True,
+        ascending: bool = False,
     ) -> tuple[
         list[InventoryMovement],
         int,
     ]:
+        """Legacy filters keep their exact pre-14C semantics (including raw
+        naive ``date_from``/``date_to`` comparison). Phase 14C adds:
+
+        - ``naive_start``/``naive_end``: half-open ``[start, end)`` bounds the
+          service already converted from business days into the declared
+          naive storage zone.
+        - ``movement_types`` (from ``movement_group``), ``reference_number``
+          (exact), ``actor_username`` (exact, current username of
+          ``created_by``), ``include_transit`` and ``ascending``.
+
+        Product/batch/warehouse/location/actor are eager-loaded in the page
+        query itself (all many-to-one), so a page costs one count + one
+        select regardless of size. No ``is_active`` predicate is applied to
+        any related entity: inactive history stays visible.
+        """
         query = self.db.query(
             InventoryMovement
         )
+
+        if not include_transit:
+            transit_ids = (
+                self.db.query(Warehouse.id)
+                .filter(or_(
+                    Warehouse.warehouse_code == "__TRANSIT__",
+                    Warehouse.warehouse_type == "TRANSIT",
+                ))
+            )
+            query = query.filter(
+                InventoryMovement.warehouse_id.not_in(transit_ids.scalar_subquery())
+            )
+
+        if movement_types is not None:
+            query = query.filter(
+                InventoryMovement.movement_type.in_(movement_types)
+            )
+
+        if reference_number is not None:
+            query = query.filter(
+                InventoryMovement.reference_number == reference_number
+            )
+
+        if actor_username is not None:
+            actor_ids = self.db.query(User.id).filter(User.username == actor_username)
+            query = query.filter(
+                InventoryMovement.created_by_user_id.in_(actor_ids.scalar_subquery())
+            )
+
+        if naive_start is not None:
+            query = query.filter(InventoryMovement.created_at >= naive_start)
+
+        if naive_end is not None:
+            query = query.filter(InventoryMovement.created_at < naive_end)
 
         if product_id is not None:
             query = query.filter(
@@ -147,12 +204,22 @@ class InventoryMovementRepository:
 
         total = query.count()
 
+        ordering = (
+            (InventoryMovement.created_at.asc(), InventoryMovement.id.asc())
+            if ascending
+            else (InventoryMovement.created_at.desc(), InventoryMovement.id.desc())
+        )
+
         items = (
             query
-            .order_by(
-                InventoryMovement.created_at.desc(),
-                InventoryMovement.id.desc(),
+            .options(
+                joinedload(InventoryMovement.product),
+                joinedload(InventoryMovement.batch),
+                joinedload(InventoryMovement.warehouse),
+                joinedload(InventoryMovement.location),
+                joinedload(InventoryMovement.created_by),
             )
+            .order_by(*ordering)
             .offset(
                 (page - 1) * size
             )

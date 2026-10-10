@@ -21,6 +21,10 @@ def _build_connect_args() -> dict:
         f"-c idle_in_transaction_session_timeout="
         f"{settings.db_idle_in_transaction_timeout_ms}"
     )
+    # Phase 14C: opt-in only, after the timestamp-provenance check (see
+    # settings.db_session_timezone_pin). Validated as a real zone name.
+    if settings.db_session_timezone_pin:
+        server_settings += f" -c TimeZone={settings.db_naive_timezone}"
     args: dict = {"options": server_settings}
     if settings.db_connect_timeout_seconds > 0:
         args["connect_timeout"] = settings.db_connect_timeout_seconds

@@ -73,10 +73,29 @@ def get_low_stock_products_service(
 
 def get_recent_transactions_service(
     dashboard_repo: DashboardRepository,
-) -> list:
-    return dashboard_repo.get_recent_transactions(
+    current_user,
+) -> list[dict]:
+    """Phase 14C: explicit rows with exactly the column keys the raw ORM
+    serialization produced before, so the contract is unchanged -- but the
+    adjustment remark goes through the shared visibility policy and the ORM
+    rows themselves are never modified."""
+    from app.services import adjustment_visibility as visibility
+
+    transactions = dashboard_repo.get_recent_transactions(
         RECENT_TRANSACTION_LIMIT
     )
+    requests = visibility.requests_for_transactions(dashboard_repo.db, transactions)
+    return [
+        {
+            "id": t.id,
+            "product_id": t.product_id,
+            "transaction_type": t.transaction_type,
+            "quantity": t.quantity,
+            "remark": visibility.transaction_remark(current_user, t, requests).remark,
+            "created_at": t.created_at,
+        }
+        for t in transactions
+    ]
 
 
 def get_stock_summary_service(

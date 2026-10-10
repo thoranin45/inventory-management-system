@@ -38,6 +38,7 @@ from app.schemas.stock_schema import (
     StockIn,
     StockOperationResponse,
     StockOut,
+    StockTransactionResponse,
 )
 
 
@@ -789,5 +790,19 @@ def execute_adjustment_mutation(
 
 def get_stock_history_service(
     stock_repo: StockRepository,
-) -> list[StockTransaction]:
-    return stock_repo.get_history()
+    current_user: User,
+) -> list[StockTransactionResponse]:
+    """Phase 14C: same rows and order as before; an adjustment remark the
+    viewer may not see is replaced on a response copy, never on the ORM row."""
+    from app.services import adjustment_visibility as visibility
+
+    transactions = stock_repo.get_history()
+    requests = visibility.requests_for_transactions(stock_repo.db, transactions)
+    items = []
+    for t in transactions:
+        item = StockTransactionResponse.model_validate(t)
+        visible = visibility.transaction_remark(current_user, t, requests)
+        if visible.redacted:
+            item = item.model_copy(update={"remark": visible.remark})
+        items.append(item)
+    return items
