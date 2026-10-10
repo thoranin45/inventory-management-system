@@ -12,7 +12,6 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import event
 
-from app.core.config import settings
 from app.core.pagination import phase8_json
 from app.models import (
     AuditLog,
@@ -276,7 +275,7 @@ def test_transfer_stages_with_and_without_transit_legs(client, admin_headers, tr
 
 
 # --------------------------------------------------------------------------- #
-# Timezone: declared storage zone, never the session
+# Timestamp provenance: per-row recorded_at_utc, never the session or a config
 # --------------------------------------------------------------------------- #
 @pytest.fixture(params=["UTC", "Asia/Bangkok"])
 def session_timezone(request):
@@ -296,67 +295,67 @@ def session_timezone(request):
         test_engine.dispose()
 
 
-@pytest.mark.parametrize("declared, rows, kept, occurred", [
-    # Storage declared UTC: Bangkok 2026-10-10 starts at 2026-10-09 17:00 naive.
-    ("UTC", [datetime(2026, 10, 9, 16, 59, 59), datetime(2026, 10, 9, 17, 0, 0)],
-     datetime(2026, 10, 9, 17, 0, 0), "2026-10-09T17:00:00Z"),
-    # Storage declared Asia/Bangkok: the same business day starts at 00:00 naive.
-    ("Asia/Bangkok", [datetime(2026, 10, 9, 23, 59, 59), datetime(2026, 10, 10, 0, 0, 0)],
-     datetime(2026, 10, 10, 0, 0, 0), "2026-10-09T17:00:00Z"),
-])
-def test_verified_rows_use_exact_boundaries_in_the_declared_zone_under_any_session(
-    client, admin_headers, db_session, monkeypatch, session_timezone, declared, rows, kept, occurred,
+UTC = timezone.utc
+
+
+def _movements_at(db_session, product_id, rows):
+    """rows: (naive created_at, aware recorded_at_utc or None). None simulates
+    pre-ea1a00000004 history. The ORM omits a None value for a server-default
+    column (so the DB default would stamp it), hence an explicit UPDATE to
+    NULL -- the same state the two-step migration leaves old rows in."""
+    warehouse, location = _main_storage(db_session)
+    legacy = []
+    for created, recorded in rows:
+        movement = InventoryMovement(product_id=product_id, warehouse_id=warehouse.id,
+                                     location_id=location.id, movement_type="STOCK_IN",
+                                     quantity=Decimal("1"), balance_before=Decimal("0"),
+                                     balance_after=Decimal("1"), created_at=created,
+                                     recorded_at_utc=recorded)
+        db_session.add(movement)
+        db_session.flush()
+        if recorded is None:
+            legacy.append(movement.id)
+    if legacy:
+        db_session.query(InventoryMovement).filter(InventoryMovement.id.in_(legacy)).update(
+            {InventoryMovement.recorded_at_utc: None}, synchronize_session=False)
+    db_session.commit()
+    db_session.expire_all()
+
+
+def test_verified_rows_use_their_recorded_instant_with_exact_bangkok_days(
+    client, admin_headers, db_session, session_timezone,
 ):
-    """Rows written while the pin was active have a proven zone: exact
-    business-day boundaries and a definitive occurred_at."""
-    monkeypatch.setattr(settings, "db_naive_timezone", declared)
-    monkeypatch.setattr(settings, "db_session_timezone_pin", True)
-    monkeypatch.setattr(settings, "db_timezone_pinned_since", datetime(2026, 1, 1, tzinfo=timezone.utc))
+    """Business day 2026-10-10 (Bangkok) = [2026-10-09T17:00Z, 2026-10-10T17:00Z).
+    The naive created_at is deliberately misleading (as if written by a +07:00
+    session): only recorded_at_utc decides."""
     product = _create_product(client, admin_headers)
-    warehouse, location = _main_storage(db_session)
-    for stamp in rows:
-        db_session.add(InventoryMovement(product_id=product["id"], warehouse_id=warehouse.id,
-                                         location_id=location.id, movement_type="STOCK_IN",
-                                         quantity=Decimal("1"), balance_before=Decimal("0"),
-                                         balance_after=Decimal("1"), created_at=stamp))
-    db_session.commit()
-
+    _movements_at(db_session, product["id"], [
+        (datetime(2026, 10, 10, 0, 0, 0), datetime(2026, 10, 9, 16, 59, 59, tzinfo=UTC)),  # day before
+        (datetime(2026, 10, 10, 0, 0, 1), datetime(2026, 10, 9, 17, 0, 0, tzinfo=UTC)),    # first second
+        (datetime(2026, 10, 11, 0, 0, 0), datetime(2026, 10, 10, 16, 59, 59, tzinfo=UTC)),  # last second
+        (datetime(2026, 10, 11, 0, 0, 1), datetime(2026, 10, 10, 17, 0, 0, tzinfo=UTC)),   # day after
+    ])
     items = _ledger(client, admin_headers, product_id=product["id"], from_date="2026-10-10",
-                    to_date="2026-10-10")["items"]
-    assert [i["created_at"] for i in items] == [kept.isoformat()]  # legacy naive value, untouched
-    assert items[0]["occurred_at"] == occurred
-    assert items[0]["timestamp_verified"] is True
-    # Both rows are within the inclusive range 2026-10-09..2026-10-10.
-    assert _ledger(client, admin_headers, product_id=product["id"], from_date="2026-10-09",
-                   to_date="2026-10-10")["pagination"]["total_items"] == 2
-
-
-def _movements_at(db_session, product_id, stamps):
-    warehouse, location = _main_storage(db_session)
-    for stamp in stamps:
-        db_session.add(InventoryMovement(product_id=product_id, warehouse_id=warehouse.id,
-                                         location_id=location.id, movement_type="STOCK_IN",
-                                         quantity=Decimal("1"), balance_before=Decimal("0"),
-                                         balance_after=Decimal("1"), created_at=stamp))
-    db_session.commit()
+                    to_date="2026-10-10", sort_order="asc")["items"]
+    assert [(i["created_at"], i["occurred_at"], i["timestamp_verified"]) for i in items] == [
+        ("2026-10-10T00:00:01", "2026-10-09T17:00:00Z", True),   # created_at untouched
+        ("2026-10-11T00:00:00", "2026-10-10T16:59:59Z", True),
+    ]
 
 
 def test_unverified_history_gets_no_instant_and_is_matched_conservatively(
-    client, admin_headers, db_session, monkeypatch, session_timezone,
+    client, admin_headers, db_session, session_timezone,
 ):
-    """Default configuration (pin off): no naive timestamp has a proven zone.
-    Business day 2026-10-10 (Bangkok) is [2026-10-09T17:00Z, 2026-10-10T17:00Z);
-    an unverified row is included if ANY offset in UTC-12..UTC+14 could place it
-    there, i.e. naive [2026-10-09 05:00, 2026-10-11 07:00) -- never silently dropped."""
-    monkeypatch.setattr(settings, "db_naive_timezone", "UTC")
-    assert settings.db_session_timezone_pin is False
+    """NULL recorded_at_utc: no instant is claimed, and the row is included if
+    ANY offset in UTC-12..UTC+14 could place it in the day -- naive
+    [2026-10-09 05:00, 2026-10-11 07:00) -- never silently dropped."""
     product = _create_product(client, admin_headers)
     _movements_at(db_session, product["id"], [
-        datetime(2026, 10, 9, 4, 59, 59),   # impossible under any offset -> excluded
-        datetime(2026, 10, 9, 5, 0, 0),     # possible if written at UTC-12 -> included
-        datetime(2026, 10, 10, 12, 0, 0),   # plainly inside -> included
-        datetime(2026, 10, 11, 6, 59, 59),  # possible if written at UTC+14 -> included
-        datetime(2026, 10, 11, 7, 0, 0),    # impossible -> excluded
+        (datetime(2026, 10, 9, 4, 59, 59), None),   # impossible under any offset -> excluded
+        (datetime(2026, 10, 9, 5, 0, 0), None),     # possible if written at UTC-12 -> included
+        (datetime(2026, 10, 10, 12, 0, 0), None),   # plainly inside -> included
+        (datetime(2026, 10, 11, 6, 59, 59), None),  # possible if written at UTC+14 -> included
+        (datetime(2026, 10, 11, 7, 0, 0), None),    # impossible -> excluded
     ])
     items = _ledger(client, admin_headers, product_id=product["id"], from_date="2026-10-10",
                     to_date="2026-10-10", sort_order="asc")["items"]
@@ -368,39 +367,50 @@ def test_unverified_history_gets_no_instant_and_is_matched_conservatively(
                    date_to="2026-10-09T05:00:00")["pagination"]["total_items"] == 1
 
 
-def test_pin_boundary_splits_verified_and_unverified_rows(client, admin_headers, db_session, monkeypatch,
-                                                          session_timezone):
-    monkeypatch.setattr(settings, "db_naive_timezone", "UTC")
-    monkeypatch.setattr(settings, "db_session_timezone_pin", True)
-    monkeypatch.setattr(settings, "db_timezone_pinned_since", datetime(2026, 10, 9, 12, 0, tzinfo=timezone.utc))
+def test_mixed_verified_and_unverified_rows_share_one_predicate_for_count_and_pages(
+    client, admin_headers, db_session, session_timezone,
+):
+    """Pre-cutover rows written by writers in different zones (+07:00 and UTC)
+    sit next to verified rows; count and every page agree on one predicate."""
     product = _create_product(client, admin_headers)
     _movements_at(db_session, product["id"], [
-        datetime(2026, 10, 9, 6, 0, 0),    # before the pin: unverified, possibly in range -> included
-        datetime(2026, 10, 9, 16, 59, 59),  # after the pin: verified, just before the day -> excluded
-        datetime(2026, 10, 9, 17, 0, 0),   # verified, first second of the day -> included
+        (datetime(2026, 10, 10, 8, 0, 0), None),   # legacy, written at +07:00 (instant 01:00Z) -> possible
+        (datetime(2026, 10, 10, 1, 0, 0), None),   # legacy, written at UTC (instant 01:00Z) -> possible
+        (datetime(2026, 10, 9, 3, 0, 0), None),    # legacy, impossible for 2026-10-10 -> excluded
+        (datetime(2026, 10, 10, 9, 0, 0), datetime(2026, 10, 10, 2, 0, tzinfo=UTC)),   # verified, inside
+        (datetime(2026, 10, 10, 9, 30, 0), datetime(2026, 10, 9, 16, 0, tzinfo=UTC)),  # verified, outside
     ])
-    items = _ledger(client, admin_headers, product_id=product["id"], from_date="2026-10-10",
-                    to_date="2026-10-10", sort_order="asc")["items"]
-    assert [(i["created_at"], i["timestamp_verified"], i["occurred_at"]) for i in items] == [
-        ("2026-10-09T06:00:00", False, None),
-        ("2026-10-09T17:00:00", True, "2026-10-09T17:00:00Z"),
-    ]
+    params = dict(product_id=product["id"], from_date="2026-10-10", to_date="2026-10-10", sort_order="asc")
+    full = _ledger(client, admin_headers, page_size=100, **params)
+    assert full["pagination"]["total_items"] == 3
+    assert [(i["created_at"], i["timestamp_verified"]) for i in full["items"]] == [
+        ("2026-10-10T01:00:00", False), ("2026-10-10T08:00:00", False), ("2026-10-10T09:00:00", True)]
+    paged = [i["id"] for page in (1, 2) for i in _ledger(client, admin_headers, page=page, page_size=2,
+                                                          **params)["items"]]
+    assert paged == [i["id"] for i in full["items"]]
 
 
-def test_pin_without_a_declared_start_verifies_nothing(client, admin_headers, db_session, monkeypatch):
-    monkeypatch.setattr(settings, "db_session_timezone_pin", True)
-    monkeypatch.setattr(settings, "db_timezone_pinned_since", None)
+def test_new_rows_are_stamped_by_the_database_and_history_stays_null(client, admin_headers, db_session,
+                                                                   session_timezone):
     product = _create_product(client, admin_headers)
-    _movements_at(db_session, product["id"], [datetime(2026, 10, 9, 17, 0, 0)])
-    item = _ledger(client, admin_headers, product_id=product["id"])["items"][0]
-    assert (item["timestamp_verified"], item["occurred_at"]) == (False, None)
+    _movements_at(db_session, product["id"], [(datetime(2025, 1, 1, 9, 0, 0), None)])  # history
+    _stock_in(client, admin_headers, product["id"], "2.000")  # new row through the real write path
+    rows = db_session.query(InventoryMovement).filter_by(product_id=product["id"]).order_by(
+        InventoryMovement.id).all()
+    assert rows[0].recorded_at_utc is None
+    assert rows[1].recorded_at_utc is not None and rows[1].recorded_at_utc.tzinfo is not None
+    item = next(i for i in _ledger(client, admin_headers, product_id=product["id"])["items"]
+                if i["id"] == rows[1].id)
+    assert item["timestamp_verified"] is True
+    assert item["occurred_at"] == rows[1].recorded_at_utc.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
-def test_pinned_since_must_be_timezone_aware():
+def test_no_configuration_can_mark_naive_rows_verified():
+    """The removed cutover settings must not come back: provenance is per row."""
     from app.core.config import Settings
 
-    with pytest.raises(ValueError):
-        Settings.model_validate({**settings.model_dump(), "db_timezone_pinned_since": datetime(2026, 1, 1)})
+    for removed in ("db_naive_timezone", "db_session_timezone_pin", "db_timezone_pinned_since"):
+        assert removed not in Settings.model_fields
 
 
 # --------------------------------------------------------------------------- #
@@ -497,7 +507,7 @@ def test_adjustment_detail_exposes_the_link_only_to_authorized_viewers(client, a
 
 
 # --------------------------------------------------------------------------- #
-# Warehouse directory + timezone settings
+# Warehouse directory
 # --------------------------------------------------------------------------- #
 def test_warehouse_directory_tolerates_null_location_names(client, admin_headers, db_session):
     warehouse = Warehouse(warehouse_code=f"NUL-{uuid4().hex[:6]}", warehouse_name="Null-named bins")
@@ -509,25 +519,6 @@ def test_warehouse_directory_tolerates_null_location_names(client, admin_headers
     assert response.status_code == 200
     entry = next(w for w in response.json()["data"] if w["id"] == warehouse.id)
     assert entry["locations"][0]["location_name"] is None
-
-
-def test_naive_timezone_setting_rejects_unknown_zones():
-    from zoneinfo import ZoneInfoNotFoundError
-
-    from app.core.config import Settings
-
-    with pytest.raises((ValueError, ZoneInfoNotFoundError)):
-        Settings.model_validate({**settings.model_dump(), "db_naive_timezone": "Mars/Olympus"})
-
-
-def test_session_timezone_pin_is_opt_in(monkeypatch):
-    from app import database
-
-    assert settings.db_session_timezone_pin is False
-    assert "TimeZone" not in database._build_connect_args()["options"]
-    monkeypatch.setattr(settings, "db_session_timezone_pin", True)
-    monkeypatch.setattr(settings, "db_naive_timezone", "Asia/Bangkok")
-    assert database._build_connect_args()["options"].endswith("-c TimeZone=Asia/Bangkok")
 
 
 # --------------------------------------------------------------------------- #

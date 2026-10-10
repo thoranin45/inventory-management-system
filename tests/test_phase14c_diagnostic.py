@@ -263,3 +263,34 @@ def test_database_post_14c_approval_with_broken_link_is_not_mistaken_for_legacy(
     request.stock_transaction_id = None
     db_session.commit()
     assert classification() == "UNRESOLVED"
+
+
+@pytest.mark.parametrize("description, expected", [
+    ("ADJ-000040: PENDING -> APPROVED; stock_transaction_id=5", "CONSISTENT"),       # exact 14C text
+    ("ADJ-000040: PENDING -> APPROVED; stock_transaction_id=6", "UNRESOLVED"),       # names another tx
+    ("ADJ-000040: PENDING -> APPROVED; stock_transaction_id=5 (edited)", "UNRESOLVED"),  # extra suffix
+    ("note ADJ-000040: PENDING -> APPROVED; stock_transaction_id=5", "UNRESOLVED"),  # extra prefix
+    ("ADJ-000099: PENDING -> APPROVED; stock_transaction_id=5", "UNRESOLVED"),       # wrong request ref
+    ("ADJ-000040: PENDING -> APPROVED; stock_transaction_id=abc", "UNRESOLVED"),     # malformed id
+    ("ADJ-000040: PENDING -> APPROVED; stock_transaction_id=05", "UNRESOLVED"),      # non-canonical id
+    ("ADJ-000040: PENDING -> APPROVED stock_transaction_id=5", "UNRESOLVED"),        # malformed separator
+    ("ADJ-000040: PENDING -> APPROVED", "UNRESOLVED"),                               # legacy text, but linked
+])
+def test_linked_approval_requires_the_whole_exact_audit_text(description, expected):
+    results = _link_results(
+        transactions=[_adj(5)],
+        adjustment_requests=[_request(40, tx=5)],
+        adjustment_approval_audits=[_approve_audit(40, text=description)],
+    )
+    assert results[40]["classification"] == expected
+
+
+@pytest.mark.parametrize("description", [
+    "ADJ-000041: PENDING -> APPROVED ",                     # trailing space
+    "ADJ-000041: PENDING -> APPROVED; stock_transaction_id=",  # truncated 14C text
+    "ADJ-000041: pending -> approved",                     # altered case
+])
+def test_unlinked_approval_requires_the_whole_exact_pre_14c_text(description):
+    results = _link_results(adjustment_requests=[_request(41)],
+                            adjustment_approval_audits=[_approve_audit(41, text=description)])
+    assert results[41]["classification"] == "UNRESOLVED"

@@ -117,9 +117,11 @@ class InventoryMovementRepository:
         naive ``date_from``/``date_to`` comparison). Phase 14C adds:
 
         - ``business_days`` (``app.core.timestamps.BusinessDayBounds``):
-          verified rows match the exact half-open range in the declared
-          storage zone; unverified rows match the conservative "possible"
-          range, so a row whose zone is unproven is never silently dropped.
+          a verified row (``recorded_at_utc`` set) matches the exact aware
+          range; an unverified row (``recorded_at_utc`` NULL) matches its
+          naive ``created_at`` against the conservative "possible" range, so
+          a row whose zone is unproven is never silently dropped. Count and
+          page use this same predicate.
         - ``movement_types`` (from ``movement_group``), ``reference_number``
           (exact), ``actor_username`` (exact, current username of
           ``created_by``), ``include_transit`` and ``ascending``.
@@ -162,16 +164,20 @@ class InventoryMovementRepository:
             )
 
         if business_days is not None:
+            recorded = InventoryMovement.recorded_at_utc
             created = InventoryMovement.created_at
-            possible = and_(created >= business_days.possible_start, created < business_days.possible_end)
-            if business_days.verified_since is None:
-                query = query.filter(possible)
-            else:
-                exact = and_(created >= business_days.exact_start, created < business_days.exact_end)
-                query = query.filter(or_(
-                    and_(created >= business_days.verified_since, exact),
-                    and_(created < business_days.verified_since, possible),
-                ))
+            query = query.filter(or_(
+                and_(
+                    recorded.is_not(None),
+                    recorded >= business_days.exact_start,
+                    recorded < business_days.exact_end,
+                ),
+                and_(
+                    recorded.is_(None),
+                    created >= business_days.possible_start,
+                    created < business_days.possible_end,
+                ),
+            ))
 
         if product_id is not None:
             query = query.filter(

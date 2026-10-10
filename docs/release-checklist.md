@@ -27,17 +27,21 @@
       copy off-box. Record filename + size + sha256.
 - [ ] **Preflight**: relevant `scripts/check_phaseN_preflight.py` with its
       explicit `*_PREFLIGHT_DATABASE_URL` → zero findings.
-- [ ] **Timestamp provenance (Phase 14C)**: run
-      `scripts/check_inventory_consistency.py` with
-      `INVENTORY_DIAGNOSTIC_NAIVE_TIMEZONE` = the intended `DB_NAIVE_TIMEZONE`.
-      Every `timestamp_provenance` finding must be `CONSISTENT`, with no
-      `timestamp_provenance_change`. Record any `UNANCHORED` window: those
-      rows' zone is assumed, not proven. Set `DB_SESSION_TIMEZONE_PIN=true`
-      only after this passes, together with `DB_TIMEZONE_PINNED_SINCE` = the
-      aware instant the pinned API started serving. Only rows written after
-      that instant get a definitive `occurred_at`; older history stays
-      `timestamp_verified=false`, and business-day filters include those rows
-      conservatively (up to 14 h past either edge of the range) and flag them.
+- [ ] **Timestamp provenance (Phase 14C)**: understand what `ea1a00000004` does.
+      - It adds `inventory_movements.recorded_at_utc` (TIMESTAMPTZ) in two
+        steps: no default first, then `DEFAULT now()`. Every pre-migration
+        row therefore stays NULL, i.e. `timestamp_verified=false`.
+      - Every new movement is stamped by the database itself; nothing in
+        configuration can mark a row verified.
+      - Unverified history has `occurred_at=null`. Business-day filters
+        include those rows conservatively (up to 14 h past either edge of the
+        range) and flag them.
+      - Optional evidence for those historical windows: run
+        `scripts/check_inventory_consistency.py` with
+        `INVENTORY_DIAGNOSTIC_NAIVE_TIMEZONE` set to the zone you expect.
+        Its `timestamp_provenance` / `UNANCHORED` findings are diagnostic
+        evidence about the historical windows only — never per-row proof, and
+        they do not change what the API reports.
 - [ ] Announce maintenance; stop `api` if tables are large.
 - [ ] **Migrate (one-shot)**:
       `docker compose -f compose.prod.yml --profile migrate run --rm migrate`.

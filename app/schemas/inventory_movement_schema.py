@@ -108,8 +108,9 @@ class InventoryLedgerItem(InventoryMovementResponse):
     """Phase 14C: the legacy item plus display context. Every inherited
     field keeps its pre-14C name and value, except ``remark``, which is
     withheld per the adjustment-visibility policy (``remark_redacted``)."""
-    # Definitive UTC instant ("...Z"), or None when the row's storage zone is
-    # unproven (``timestamp_verified`` false). ``created_at`` is unchanged.
+    # Definitive UTC instant ("...Z") from the row's own database-stamped
+    # recorded_at_utc, or None for unverified history (timestamp_verified
+    # false). created_at is unchanged.
     occurred_at: str | None
     timestamp_verified: bool
     direction: str

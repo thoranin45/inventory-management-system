@@ -10,8 +10,8 @@ from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
 # Phase 14C: ea1a00000003 (ledger indexes + stock_adjustment_requests
-# .stock_transaction_id link)
-EXPECTED_ALEMBIC_HEAD = "ea1a00000003"
+# .stock_transaction_id link) + ea1a00000004 (movement recorded_at_utc)
+EXPECTED_ALEMBIC_HEAD = "ea1a00000004"
 
 
 def current_db_revision(connection: Connection) -> str | None:

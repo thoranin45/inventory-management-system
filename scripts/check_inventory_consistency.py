@@ -16,13 +16,17 @@ from sqlalchemy import create_engine, text
 # config import): overridable via INVENTORY_DIAGNOSTIC_TIMEZONE, default matches
 # the application's Asia/Bangkok business timezone.
 DIAGNOSTIC_TIMEZONE = os.environ.get("INVENTORY_DIAGNOSTIC_TIMEZONE", "Asia/Bangkok")
-# Phase 14C: the zone naive created_at values are *declared* to be stored in
-# (mirror of the API's DB_NAIVE_TIMEZONE). The timestamp_provenance check
-# tests this declaration against same-transaction evidence.
+# Phase 14C: the zone the operator EXPECTS naive created_at values to have
+# been written in. The timestamp_provenance check tests this expectation
+# against same-transaction evidence. Diagnostic evidence only: the API never
+# uses it -- per-row proof is inventory_movements.recorded_at_utc.
 DIAGNOSTIC_NAIVE_TIMEZONE = os.environ.get("INVENTORY_DIAGNOSTIC_NAIVE_TIMEZONE", "UTC")
 
-# Phase 14C approvals always end their APPROVE audit text with this.
-_AUDITED_TRANSACTION_RE = re.compile(r"; stock_transaction_id=(\d+)$")
+# Exact APPROVE_ADJUSTMENT_REQUEST audit texts, per code generation. The
+# whole description must match -- never just a suffix.
+_PRE_14C_APPROVE_AUDIT = "{ref}: PENDING -> APPROVED"
+_14C_APPROVE_AUDIT = "{ref}: PENDING -> APPROVED; stock_transaction_id={tx}"
+_14C_APPROVE_AUDIT_RE = r"{ref}: PENDING -> APPROVED; stock_transaction_id=([1-9][0-9]*)"
 
 # Same-transaction (timestamptz, naive) pairs: both default to now(), which
 # is the transaction's start time, so their difference is the exact session
@@ -36,6 +40,9 @@ _TIMESTAMP_ANCHORS_SQL = (
     "SELECT 'TRANSFER_RECEIPT', r.id, r.received_at AT TIME ZONE 'UTC', min(m.created_at) "
     "FROM inventory_transfer_receipts r JOIN inventory_movements m ON m.transfer_receipt_id = r.id "
     "GROUP BY r.id, r.received_at "
+    "UNION ALL "
+    "SELECT 'MOVEMENT_RECORDED', m.id, m.recorded_at_utc AT TIME ZONE 'UTC', m.created_at "
+    "FROM inventory_movements m WHERE m.recorded_at_utc IS NOT NULL "
     "UNION ALL "
     "SELECT 'ADJUSTMENT_REQUEST', s.id, s.created_at AT TIME ZONE 'UTC', min(a.created_at) "
     "FROM stock_adjustment_requests s JOIN audit_logs a ON a.table_name = 'stock_adjustment_requests' "
@@ -146,15 +153,20 @@ def _analyze_adjustment_links(snapshot, transactions, movements, linked, report)
     Request -> StockTransaction(ADJUST) -> movements is checkable even for a
     zero-difference approval that wrote no movement.
 
-    A NULL link on an approved request is only EXPLAINED when there is
-    deterministic proof the approval predates 14C: its single
-    APPROVE_ADJUSTMENT_REQUEST audit row (written in the approval's own
-    transaction) has exactly the pre-14C text ``"<ref>: PENDING -> APPROVED"``
-    -- 14C code always appends ``"; stock_transaction_id=<id>"`` -- and no
-    movement references the request. Anything else is UNRESOLVED: a missing,
-    duplicated or post-14C-format audit row, a movement pointing at the
-    request, or a link that disagrees with its own audit / movements.
-    Timestamps are never used as evidence here."""
+    Every approval writes exactly one APPROVE_ADJUSTMENT_REQUEST audit row in
+    its own transaction, and its WHOLE description is compared with the
+    exact text the writing code generation produces:
+
+    - pre-14C:  ``"<ref>: PENDING -> APPROVED"``
+    - 14C+:     ``"<ref>: PENDING -> APPROVED; stock_transaction_id=<id>"``
+
+    A NULL link is EXPLAINED only when the audit is exactly the pre-14C text
+    and no movement references the request. A link is CONSISTENT only when
+    the audit is exactly the 14C text naming that same transaction (plus the
+    transaction / movement checks). Anything else -- missing, duplicated,
+    malformed, extra-suffixed or contradictory audit text, or a movement
+    disagreeing with the link -- is UNRESOLVED. Timestamps are never used as
+    evidence here."""
     requests = snapshot.get("adjustment_requests")
     if not requests:
         return
@@ -185,12 +197,13 @@ def _analyze_adjustment_links(snapshot, transactions, movements, linked, report)
             result(request, "UNRESOLVED", "Approved request needs exactly one APPROVE audit row",
                    approve_audits=len(own_audits))
             continue
-        audited = _AUDITED_TRANSACTION_RE.search(own_audits[0])
+        audit_text = own_audits[0]
+        reference = request["reference_number"] or ""
+        audited = re.fullmatch(_14C_APPROVE_AUDIT_RE.format(ref=re.escape(reference)), audit_text)
         audited_id = int(audited.group(1)) if audited else None
 
         if transaction_id is None:
-            legacy_text = f"{request['reference_number']}: PENDING -> APPROVED"
-            if own_audits[0] == legacy_text and not own_moves:
+            if audit_text == _PRE_14C_APPROVE_AUDIT.format(ref=reference) and not own_moves:
                 result(request, "EXPLAINED",
                        "Approved before Phase 14C linkage (pre-14C audit format); no backfill (D2)")
             else:
@@ -205,7 +218,7 @@ def _analyze_adjustment_links(snapshot, transactions, movements, linked, report)
             transaction is not None
             and transaction["transaction_type"] == "ADJUST"
             and transaction["product_id"] == request["product_id"]
-            and audited_id == transaction_id
+            and audit_text == _14C_APPROVE_AUDIT.format(ref=reference, tx=transaction_id)
             and all(m["reference_type"] == "STOCK_ADJUSTMENT_REQUEST"
                     and m["reference_id"] == request["id"] for m in moves)
             and all(m.get("stock_transaction_id") == transaction_id for m in own_moves)

@@ -1456,6 +1456,16 @@ class InventoryMovement(Base):
         server_default=func.now(),
     )
 
+    # Phase 14C (ea1a00000004): explicit instant stamped by the DATABASE on
+    # every new row (server default now()), so a row's time never depends on
+    # the writer's session TimeZone. Never set by application code. NULL for
+    # all history recorded before the revision = provenance unverified.
+    recorded_at_utc = Column(
+        DateTime(timezone=True),
+        nullable=True,
+        server_default=func.now(),
+    )
+
     product = relationship(
         "Product",
     )

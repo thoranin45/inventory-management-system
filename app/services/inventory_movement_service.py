@@ -92,7 +92,7 @@ def _ledger_items(
     """Bounded lookups for the whole page: adjustment requests, their
     requesters, and PO / transfer receipt numbers -- at most four queries,
     whatever the page size."""
-    from app.core.timestamps import is_verified, verified_occurred_at
+    from app.core.timestamps import utc_iso
 
     db = repo.db
     requests = visibility.requests_for_movements(db, movements)
@@ -153,8 +153,9 @@ def _ledger_items(
         base["remark"] = visible.remark
         items.append(InventoryLedgerItem(
             **base,
-            occurred_at=verified_occurred_at(m.created_at),
-            timestamp_verified=is_verified(m.created_at),
+            # Row-level provenance only: never derived from naive created_at.
+            occurred_at=utc_iso(m.recorded_at_utc),
+            timestamp_verified=m.recorded_at_utc is not None,
             direction="IN" if m.quantity > 0 else "OUT",
             is_transit_leg=_is_transit(m.warehouse),
             product=LedgerProductRef(
@@ -213,10 +214,10 @@ def search_inventory_movements_service(
     """Validation of the new parameters lives in the router; this layer
     trusts it. ``actor`` is already restricted to Admin there.
 
-    ``occurred_at`` is only given for rows whose storage zone is proven
-    (written while the session-timezone pin was active); unverified rows get
-    ``occurred_at=None`` and are matched conservatively by business-day
-    filters. Never inferred from the current session (app/core/timestamps.py)."""
+    ``occurred_at`` is only given for rows the database stamped with an
+    explicit ``recorded_at_utc`` instant; unverified history gets
+    ``occurred_at=None`` and is matched conservatively by business-day
+    filters (app/core/timestamps.py)."""
     from app.core.timestamps import business_day_range
 
     business_days = business_day_range(from_date, to_date) if from_date and to_date else None

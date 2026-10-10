@@ -9,7 +9,6 @@ Secret values are never logged or echoed by this module.
 """
 from __future__ import annotations
 
-from datetime import datetime
 from enum import Enum
 
 from pydantic import Field, field_validator, model_validator
@@ -125,47 +124,9 @@ class Settings(BaseSettings):
     db_lock_timeout_ms: int = 10000
     db_idle_in_transaction_timeout_ms: int = 30000
 
-    # ---- Naive timestamp provenance (Phase 14C) -------------------------
-    # inventory_movements / stock_transactions / audit_logs ``created_at``
-    # are timezone-naive ``now()`` values, i.e. wall-clock time in whatever
-    # PostgreSQL session TimeZone was active when each row was written.
-    # ``db_naive_timezone`` is the *declared* zone the API uses to interpret
-    # them (``occurred_at``, business-day filters). It is an assumption, not
-    # a detected fact: verify it per environment with the
-    # ``timestamp_provenance`` check in scripts/check_inventory_consistency.py
-    # before relying on it.
-    db_naive_timezone: str = "UTC"
-    # Pin every application connection's session TimeZone to
-    # ``db_naive_timezone`` so future naive writes are deterministic. Off by
-    # default: enable only after the provenance check shows historical rows
-    # were written in that same zone (pinning a different zone would shift
-    # every new row relative to the old ones).
-    db_session_timezone_pin: bool = False
-    # The aware instant the pin above was switched on. Only rows written at
-    # or after it -- while the pin is still enabled -- have a PROVEN storage
-    # zone; every other naive timestamp is "unverified": the ledger then
-    # gives no definitive ``occurred_at`` and matches business-day filters
-    # conservatively. Unset (the default) => all naive history is unverified.
-    db_timezone_pinned_since: datetime | None = None
-
     # ------------------------------------------------------------------
     # Normalisation
     # ------------------------------------------------------------------
-    @field_validator("db_naive_timezone")
-    @classmethod
-    def _validate_naive_timezone(cls, value: str) -> str:
-        from zoneinfo import ZoneInfo
-
-        ZoneInfo(value)  # unknown zone -> ZoneInfoNotFoundError at startup
-        return value
-
-    @field_validator("db_timezone_pinned_since")
-    @classmethod
-    def _require_aware_pin_instant(cls, value: datetime | None) -> datetime | None:
-        if value is not None and value.tzinfo is None:
-            raise ValueError("DB_TIMEZONE_PINNED_SINCE must include a UTC offset, e.g. 2026-11-01T00:00:00+00:00")
-        return value
-
     @field_validator("env", mode="before")
     @classmethod
     def _normalize_env(cls, value):
