@@ -49,6 +49,7 @@ export function LedgerFilters({
   onChange,
   onClear,
   showDateHint,
+  sortOrder,
 }: {
   values: Partial<Record<ReportParamKey, string>>;
   rows: LedgerItem[];
@@ -56,6 +57,7 @@ export function LedgerFilters({
   onChange: (patch: Patch) => void;
   onClear: () => void;
   showDateHint: boolean;
+  sortOrder: "asc" | "desc";
 }) {
   const [term, setTerm] = React.useState("");
   const productQ = useProducts(term.trim().length >= 2 ? { page: 1, page_size: 20, search: term.trim() } : { page: 1, page_size: 20 });
@@ -181,6 +183,18 @@ export function LedgerFilters({
           min={values.from_date ?? undefined}
           onChange={(e) => onChange({ to_date: e.currentTarget.value || null })}
         />
+      </Labeled>
+
+      <Labeled label="Order" htmlFor="lf-order">
+        <select
+          id="lf-order"
+          className={fieldCls}
+          value={sortOrder}
+          onChange={(e) => onChange({ sort_order: e.currentTarget.value === "asc" ? "asc" : null })}
+        >
+          <option value="desc">Newest first</option>
+          <option value="asc">Oldest first</option>
+        </select>
       </Labeled>
 
       {admin ? (

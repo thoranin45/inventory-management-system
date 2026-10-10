@@ -90,6 +90,16 @@ const BUSINESS_DATE_TIME = new Intl.DateTimeFormat("en-CA", {
 });
 
 /**
+ * Phase 14C — the stored wall-clock value of an UNVERIFIED naive timestamp
+ * ("2026-10-09T17:30:00" → "2026-10-09 17:30"). Shown as-is, never converted:
+ * its zone is unproven, so no Bangkok conversion would be honest.
+ */
+export function formatStoredWallClock(naive: string | null | undefined): string {
+  if (!naive || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(naive)) return "—";
+  return `${naive.slice(0, 10)} ${naive.slice(11, 16)}`;
+}
+
+/**
  * Phase 14C — an explicit instant (ISO-8601 WITH `Z` or an offset) shown on
  * the Asia/Bangkok business clock as "YYYY-MM-DD HH:mm". A timestamp without
  * an offset is ambiguous, so it is refused ("—") rather than guessed.

@@ -9,6 +9,7 @@ Secret values are never logged or echoed by this module.
 """
 from __future__ import annotations
 
+from datetime import datetime
 from enum import Enum
 
 from pydantic import Field, field_validator, model_validator
@@ -140,6 +141,12 @@ class Settings(BaseSettings):
     # were written in that same zone (pinning a different zone would shift
     # every new row relative to the old ones).
     db_session_timezone_pin: bool = False
+    # The aware instant the pin above was switched on. Only rows written at
+    # or after it -- while the pin is still enabled -- have a PROVEN storage
+    # zone; every other naive timestamp is "unverified": the ledger then
+    # gives no definitive ``occurred_at`` and matches business-day filters
+    # conservatively. Unset (the default) => all naive history is unverified.
+    db_timezone_pinned_since: datetime | None = None
 
     # ------------------------------------------------------------------
     # Normalisation
@@ -150,6 +157,13 @@ class Settings(BaseSettings):
         from zoneinfo import ZoneInfo
 
         ZoneInfo(value)  # unknown zone -> ZoneInfoNotFoundError at startup
+        return value
+
+    @field_validator("db_timezone_pinned_since")
+    @classmethod
+    def _require_aware_pin_instant(cls, value: datetime | None) -> datetime | None:
+        if value is not None and value.tzinfo is None:
+            raise ValueError("DB_TIMEZONE_PINNED_SINCE must include a UTC offset, e.g. 2026-11-01T00:00:00+00:00")
         return value
 
     @field_validator("env", mode="before")

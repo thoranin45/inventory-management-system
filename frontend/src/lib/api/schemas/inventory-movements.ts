@@ -63,7 +63,9 @@ export const ledgerItemSchema = z.object({
   created_by_user_id: z.number().nullable(),
   created_at: z.string(),
   // Phase 14C additions
-  occurred_at: z.string(),
+  /** Definitive instant ("…Z"); null when the row's storage zone is unproven. */
+  occurred_at: z.string().nullable(),
+  timestamp_verified: z.boolean(),
   direction: z.enum(["IN", "OUT"]),
   is_transit_leg: z.boolean(),
   product: z.object({

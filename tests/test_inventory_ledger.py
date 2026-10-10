@@ -5,7 +5,7 @@ bounded query counts, inactive history, transfer stage expectations, the
 declared-timezone policy, and Request -> Transaction -> AuditLog
 traceability (including zero-difference approvals that write no movement).
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import uuid4
 
@@ -304,10 +304,14 @@ def session_timezone(request):
     ("Asia/Bangkok", [datetime(2026, 10, 9, 23, 59, 59), datetime(2026, 10, 10, 0, 0, 0)],
      datetime(2026, 10, 10, 0, 0, 0), "2026-10-09T17:00:00Z"),
 ])
-def test_business_day_boundaries_follow_the_declared_zone_under_any_session(
+def test_verified_rows_use_exact_boundaries_in_the_declared_zone_under_any_session(
     client, admin_headers, db_session, monkeypatch, session_timezone, declared, rows, kept, occurred,
 ):
+    """Rows written while the pin was active have a proven zone: exact
+    business-day boundaries and a definitive occurred_at."""
     monkeypatch.setattr(settings, "db_naive_timezone", declared)
+    monkeypatch.setattr(settings, "db_session_timezone_pin", True)
+    monkeypatch.setattr(settings, "db_timezone_pinned_since", datetime(2026, 1, 1, tzinfo=timezone.utc))
     product = _create_product(client, admin_headers)
     warehouse, location = _main_storage(db_session)
     for stamp in rows:
@@ -321,9 +325,82 @@ def test_business_day_boundaries_follow_the_declared_zone_under_any_session(
                     to_date="2026-10-10")["items"]
     assert [i["created_at"] for i in items] == [kept.isoformat()]  # legacy naive value, untouched
     assert items[0]["occurred_at"] == occurred
+    assert items[0]["timestamp_verified"] is True
     # Both rows are within the inclusive range 2026-10-09..2026-10-10.
     assert _ledger(client, admin_headers, product_id=product["id"], from_date="2026-10-09",
                    to_date="2026-10-10")["pagination"]["total_items"] == 2
+
+
+def _movements_at(db_session, product_id, stamps):
+    warehouse, location = _main_storage(db_session)
+    for stamp in stamps:
+        db_session.add(InventoryMovement(product_id=product_id, warehouse_id=warehouse.id,
+                                         location_id=location.id, movement_type="STOCK_IN",
+                                         quantity=Decimal("1"), balance_before=Decimal("0"),
+                                         balance_after=Decimal("1"), created_at=stamp))
+    db_session.commit()
+
+
+def test_unverified_history_gets_no_instant_and_is_matched_conservatively(
+    client, admin_headers, db_session, monkeypatch, session_timezone,
+):
+    """Default configuration (pin off): no naive timestamp has a proven zone.
+    Business day 2026-10-10 (Bangkok) is [2026-10-09T17:00Z, 2026-10-10T17:00Z);
+    an unverified row is included if ANY offset in UTC-12..UTC+14 could place it
+    there, i.e. naive [2026-10-09 05:00, 2026-10-11 07:00) -- never silently dropped."""
+    monkeypatch.setattr(settings, "db_naive_timezone", "UTC")
+    assert settings.db_session_timezone_pin is False
+    product = _create_product(client, admin_headers)
+    _movements_at(db_session, product["id"], [
+        datetime(2026, 10, 9, 4, 59, 59),   # impossible under any offset -> excluded
+        datetime(2026, 10, 9, 5, 0, 0),     # possible if written at UTC-12 -> included
+        datetime(2026, 10, 10, 12, 0, 0),   # plainly inside -> included
+        datetime(2026, 10, 11, 6, 59, 59),  # possible if written at UTC+14 -> included
+        datetime(2026, 10, 11, 7, 0, 0),    # impossible -> excluded
+    ])
+    items = _ledger(client, admin_headers, product_id=product["id"], from_date="2026-10-10",
+                    to_date="2026-10-10", sort_order="asc")["items"]
+    assert [i["created_at"] for i in items] == [
+        "2026-10-09T05:00:00", "2026-10-10T12:00:00", "2026-10-11T06:59:59"]
+    assert all(i["timestamp_verified"] is False and i["occurred_at"] is None for i in items)
+    # Legacy semantics are untouched.
+    assert _ledger(client, admin_headers, product_id=product["id"], date_from="2026-10-09T05:00:00",
+                   date_to="2026-10-09T05:00:00")["pagination"]["total_items"] == 1
+
+
+def test_pin_boundary_splits_verified_and_unverified_rows(client, admin_headers, db_session, monkeypatch,
+                                                          session_timezone):
+    monkeypatch.setattr(settings, "db_naive_timezone", "UTC")
+    monkeypatch.setattr(settings, "db_session_timezone_pin", True)
+    monkeypatch.setattr(settings, "db_timezone_pinned_since", datetime(2026, 10, 9, 12, 0, tzinfo=timezone.utc))
+    product = _create_product(client, admin_headers)
+    _movements_at(db_session, product["id"], [
+        datetime(2026, 10, 9, 6, 0, 0),    # before the pin: unverified, possibly in range -> included
+        datetime(2026, 10, 9, 16, 59, 59),  # after the pin: verified, just before the day -> excluded
+        datetime(2026, 10, 9, 17, 0, 0),   # verified, first second of the day -> included
+    ])
+    items = _ledger(client, admin_headers, product_id=product["id"], from_date="2026-10-10",
+                    to_date="2026-10-10", sort_order="asc")["items"]
+    assert [(i["created_at"], i["timestamp_verified"], i["occurred_at"]) for i in items] == [
+        ("2026-10-09T06:00:00", False, None),
+        ("2026-10-09T17:00:00", True, "2026-10-09T17:00:00Z"),
+    ]
+
+
+def test_pin_without_a_declared_start_verifies_nothing(client, admin_headers, db_session, monkeypatch):
+    monkeypatch.setattr(settings, "db_session_timezone_pin", True)
+    monkeypatch.setattr(settings, "db_timezone_pinned_since", None)
+    product = _create_product(client, admin_headers)
+    _movements_at(db_session, product["id"], [datetime(2026, 10, 9, 17, 0, 0)])
+    item = _ledger(client, admin_headers, product_id=product["id"])["items"][0]
+    assert (item["timestamp_verified"], item["occurred_at"]) == (False, None)
+
+
+def test_pinned_since_must_be_timezone_aware():
+    from app.core.config import Settings
+
+    with pytest.raises(ValueError):
+        Settings.model_validate({**settings.model_dump(), "db_timezone_pinned_since": datetime(2026, 1, 1)})
 
 
 # --------------------------------------------------------------------------- #
@@ -451,3 +528,56 @@ def test_session_timezone_pin_is_opt_in(monkeypatch):
     monkeypatch.setattr(settings, "db_session_timezone_pin", True)
     monkeypatch.setattr(settings, "db_naive_timezone", "Asia/Bangkok")
     assert database._build_connect_args()["options"].endswith("-c TimeZone=Asia/Bangkok")
+
+
+# --------------------------------------------------------------------------- #
+# STOCK_TRANSACTION reference lookups follow the stock_transaction_id FK
+# --------------------------------------------------------------------------- #
+def test_stock_transaction_lookups_cover_legacy_and_linked_adjustments(
+    client, admin_headers, admin_user, warehouse_headers, db_session,
+):
+    product = _create_product(client, admin_headers)
+    # New (post-14C) adjustment: references the request, FK holds the transaction.
+    created = _create_request(client, warehouse_headers, product_id=product["id"], observed="0.000",
+                              requested="4.000", notes="private").json()["data"]
+    assert _approve(client, admin_headers, created["id"]).status_code == 200
+    new_tx = db_session.query(StockAdjustmentRequest).filter_by(id=created["id"]).one().stock_transaction_id
+    new_move = db_session.query(InventoryMovement).filter_by(stock_transaction_id=new_tx).one()
+    # Legacy (pre-14C) adjustment: references the transaction, no FK.
+    legacy_tx, legacy_move = _adjust_rows(db_session, product_id=product["id"], actor_id=admin_user.id,
+                                          remark="legacy note")
+    # A row carrying BOTH equivalent links must still be returned once.
+    both_tx = StockTransaction(product_id=product["id"], transaction_type="ADJUST", quantity=Decimal("1"))
+    db_session.add(both_tx)
+    db_session.flush()
+    warehouse, location = _main_storage(db_session)
+    both = InventoryMovement(product_id=product["id"], warehouse_id=warehouse.id, location_id=location.id,
+                             movement_type="STOCK_ADJUST", quantity=Decimal("1"), balance_before=Decimal("0"),
+                             balance_after=Decimal("1"), reference_type="STOCK_TRANSACTION",
+                             reference_id=both_tx.id, stock_transaction_id=both_tx.id)
+    db_session.add(both)
+    db_session.commit()
+
+    for tx, move in ((new_tx, new_move), (legacy_tx.id, legacy_move), (both_tx.id, both)):
+        bare = client.get(f"{URL}/reference/STOCK_TRANSACTION/{tx}", headers=admin_headers)
+        assert bare.status_code == 200
+        assert [r["id"] for r in bare.json()] == [move.id]  # bare array, one row, no duplicate
+        listed = _ledger(client, admin_headers, reference_type="STOCK_TRANSACTION", reference_id=tx)
+        assert [r["id"] for r in listed["items"]] == [move.id]
+        assert listed["pagination"]["total_items"] == 1
+
+    # Redaction is unchanged on the widened lookup.
+    other = _mint(db_session, "ref_other")
+    row = client.get(f"{URL}/reference/STOCK_TRANSACTION/{new_tx}", headers=_headers(other)).json()[0]
+    assert row["remark"] == f"{created['reference_number']}: CYCLE_COUNT_VARIANCE"
+    assert "legacy note" not in client.get(f"{URL}/reference/STOCK_TRANSACTION/{legacy_tx.id}",
+                                           headers=_headers(other)).text
+
+    # Other reference types keep their exact legacy semantics (no FK widening).
+    assert _ledger(client, admin_headers, reference_type="STOCK_ADJUSTMENT_REQUEST",
+                   reference_id=created["id"])["pagination"]["total_items"] == 1
+    assert client.get(f"{URL}/reference/PURCHASE_ORDER/{new_tx}", headers=admin_headers).json() == []
+    # reference_type alone is unchanged too: the new linked row is not a STOCK_TRANSACTION reference.
+    ids = {r["id"] for r in _ledger(client, admin_headers, product_id=product["id"],
+                                    reference_type="STOCK_TRANSACTION")["items"]}
+    assert ids == {legacy_move.id, both.id}

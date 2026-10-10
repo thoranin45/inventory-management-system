@@ -5,6 +5,7 @@ variable. No .env files are opened, and connection errors never expose credentia
 """
 import json
 import os
+import re
 from collections import defaultdict
 from datetime import date
 from decimal import Decimal
@@ -19,6 +20,9 @@ DIAGNOSTIC_TIMEZONE = os.environ.get("INVENTORY_DIAGNOSTIC_TIMEZONE", "Asia/Bang
 # (mirror of the API's DB_NAIVE_TIMEZONE). The timestamp_provenance check
 # tests this declaration against same-transaction evidence.
 DIAGNOSTIC_NAIVE_TIMEZONE = os.environ.get("INVENTORY_DIAGNOSTIC_NAIVE_TIMEZONE", "UTC")
+
+# Phase 14C approvals always end their APPROVE audit text with this.
+_AUDITED_TRANSACTION_RE = re.compile(r"; stock_transaction_id=(\d+)$")
 
 # Same-transaction (timestamptz, naive) pairs: both default to now(), which
 # is the transaction's start time, so their difference is the exact session
@@ -132,45 +136,85 @@ def analyze_inventory(snapshot: dict, today: date | None = None) -> list[dict]:
 
     _analyze_transfers(snapshot, balances, movements, report)
     _analyze_expiry(snapshot, balances, today, report)
-    _analyze_adjustment_links(snapshot, transactions, linked, report)
+    _analyze_adjustment_links(snapshot, transactions, movements, linked, report)
     _analyze_timestamp_provenance(snapshot, movements, report)
     return findings
 
 
-def _analyze_adjustment_links(snapshot, transactions, linked, report):
+def _analyze_adjustment_links(snapshot, transactions, movements, linked, report):
     """Phase 14C (D7): every approval records stock_transaction_id, so
     Request -> StockTransaction(ADJUST) -> movements is checkable even for a
-    zero-difference approval that wrote no movement."""
+    zero-difference approval that wrote no movement.
+
+    A NULL link on an approved request is only EXPLAINED when there is
+    deterministic proof the approval predates 14C: its single
+    APPROVE_ADJUSTMENT_REQUEST audit row (written in the approval's own
+    transaction) has exactly the pre-14C text ``"<ref>: PENDING -> APPROVED"``
+    -- 14C code always appends ``"; stock_transaction_id=<id>"`` -- and no
+    movement references the request. Anything else is UNRESOLVED: a missing,
+    duplicated or post-14C-format audit row, a movement pointing at the
+    request, or a link that disagrees with its own audit / movements.
+    Timestamps are never used as evidence here."""
     requests = snapshot.get("adjustment_requests")
     if not requests:
         return
     transactions_by_id = {t["id"]: t for t in transactions}
+    audits = defaultdict(list)
+    for row in snapshot.get("adjustment_approval_audits", []):
+        audits[row["record_id"]].append(row["description"] or "")
+    request_moves = defaultdict(list)
+    for m in movements:
+        if m["reference_type"] == "STOCK_ADJUSTMENT_REQUEST":
+            request_moves[m["reference_id"]].append(m)
+
+    def result(request, classification, reason, **evidence):
+        report("adjustment_request_transaction_link", classification, request_id=request["id"],
+               stock_transaction_id=request["stock_transaction_id"], reason=reason, **evidence)
+
     for request in requests:
         transaction_id = request["stock_transaction_id"]
+        own_moves = request_moves.get(request["id"], [])
+        own_audits = audits.get(request["id"], [])
         if request["status"] != "APPROVED":
-            report("adjustment_request_transaction_link",
-                   "UNRESOLVED" if transaction_id is not None else "CONSISTENT",
-                   request_id=request["id"], status=request["status"],
-                   reason="Only an approved request may link a stock transaction")
+            clean = transaction_id is None and not own_moves and not own_audits
+            result(request, "CONSISTENT" if clean else "UNRESOLVED",
+                   "Not approved: no transaction, movement or approval audit expected",
+                   status=request["status"])
             continue
+        if len(own_audits) != 1:
+            result(request, "UNRESOLVED", "Approved request needs exactly one APPROVE audit row",
+                   approve_audits=len(own_audits))
+            continue
+        audited = _AUDITED_TRANSACTION_RE.search(own_audits[0])
+        audited_id = int(audited.group(1)) if audited else None
+
         if transaction_id is None:
-            report("adjustment_request_transaction_link", "EXPLAINED", request_id=request["id"],
-                   reason="Approved before Phase 14C linkage; no heuristic backfill (D2)")
+            legacy_text = f"{request['reference_number']}: PENDING -> APPROVED"
+            if own_audits[0] == legacy_text and not own_moves:
+                result(request, "EXPLAINED",
+                       "Approved before Phase 14C linkage (pre-14C audit format); no backfill (D2)")
+            else:
+                result(request, "UNRESOLVED",
+                       "Approved without a stock_transaction_id link and no proof it predates Phase 14C",
+                       audited_stock_transaction_id=audited_id, movement_ids=[m["id"] for m in own_moves])
             continue
+
         transaction = transactions_by_id.get(transaction_id)
         moves = linked.get(transaction_id, [])
         valid = (
             transaction is not None
             and transaction["transaction_type"] == "ADJUST"
             and transaction["product_id"] == request["product_id"]
+            and audited_id == transaction_id
             and all(m["reference_type"] == "STOCK_ADJUSTMENT_REQUEST"
                     and m["reference_id"] == request["id"] for m in moves)
+            and all(m.get("stock_transaction_id") == transaction_id for m in own_moves)
             and len(moves) <= 1
+            and len(own_moves) <= 1
         )
-        report("adjustment_request_transaction_link", "CONSISTENT" if valid else "UNRESOLVED",
-               request_id=request["id"], stock_transaction_id=transaction_id,
-               movement_ids=[m["id"] for m in moves],
-               reason="Zero-difference approval: transaction without movement" if valid and not moves else "")
+        result(request, "CONSISTENT" if valid else "UNRESOLVED",
+               "Zero-difference approval: transaction without movement" if valid and not moves else "",
+               movement_ids=[m["id"] for m in moves], audited_stock_transaction_id=audited_id)
 
 
 def _analyze_timestamp_provenance(snapshot, movements, report):
@@ -375,7 +419,12 @@ def diagnose_inventory(engine, today: date | None = None) -> list[dict]:
             "stock_transaction_id, created_at FROM inventory_movements"
         ),
         "adjustment_requests": (
-            "SELECT id, status, product_id, stock_transaction_id FROM stock_adjustment_requests"
+            "SELECT id, reference_number, status, product_id, stock_transaction_id "
+            "FROM stock_adjustment_requests"
+        ),
+        "adjustment_approval_audits": (
+            "SELECT record_id, description FROM audit_logs "
+            "WHERE table_name = 'stock_adjustment_requests' AND action = 'APPROVE_ADJUSTMENT_REQUEST'"
         ),
         "timestamp_anchors": _TIMESTAMP_ANCHORS_SQL,
         "transactions": "SELECT id, product_id, transaction_type, quantity FROM stock_transactions",

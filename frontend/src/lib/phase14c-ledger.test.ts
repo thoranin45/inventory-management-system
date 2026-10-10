@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatBusinessDateTime, formatSignedQty } from "./format";
+import { formatBusinessDateTime, formatSignedQty, formatStoredWallClock } from "./format";
 import { isRedacted, ledgerEnvelope, ledgerTypeMeta, sourceLink, type LedgerItem } from "./api/schemas/inventory-movements";
 import { MOVEMENT_TYPES } from "./api/schemas/reports";
 import { warehouseListEnvelope } from "./api/schemas/warehouses";
@@ -45,6 +45,15 @@ const row = (over: Partial<LedgerItem>): LedgerItem =>
     ...over,
   }) as LedgerItem;
 
+describe("formatStoredWallClock — unverified rows are shown as recorded", () => {
+  it("never converts a naive value", () => {
+    expect(formatStoredWallClock("2026-10-09T17:30:00")).toBe("2026-10-09 17:30");
+    expect(formatStoredWallClock("2026-10-09T17:30:00.123456")).toBe("2026-10-09 17:30");
+    expect(formatStoredWallClock(null)).toBe("—");
+    expect(formatStoredWallClock("garbage")).toBe("—");
+  });
+});
+
 describe("sourceLink (D6)", () => {
   it("links PO / SO / transfer numbers to their existing filtered list pages", () => {
     expect(sourceLink(row({ source: { type: "PURCHASE_ORDER", id: 1, number: "PO-000001", receipt_number: null } })))
@@ -87,7 +96,7 @@ describe("schemas", () => {
             id: 1, product_id: 1, batch_id: null, warehouse_id: 1, location_id: 1, movement_type: "STOCK_ADJUST",
             quantity: "-2.000", balance_before: "5.000", balance_after: "3.000",
             reference_type: "STOCK_TRANSACTION", reference_id: 4, reference_number: null, remark: null,
-            created_by_user_id: 1, created_at: "2026-01-01T00:00:00", occurred_at: "2026-01-01T00:00:00Z",
+            created_by_user_id: 1, created_at: "2026-01-01T00:00:00", occurred_at: null, timestamp_verified: false,
             direction: "OUT", is_transit_leg: false,
             product: { id: 1, sku: null, product_name: "P", is_active: false },
             batch: null,

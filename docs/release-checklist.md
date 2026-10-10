@@ -33,7 +33,11 @@
       Every `timestamp_provenance` finding must be `CONSISTENT`, with no
       `timestamp_provenance_change`. Record any `UNANCHORED` window: those
       rows' zone is assumed, not proven. Set `DB_SESSION_TIMEZONE_PIN=true`
-      only after this passes.
+      only after this passes, together with `DB_TIMEZONE_PINNED_SINCE` = the
+      aware instant the pinned API started serving. Only rows written after
+      that instant get a definitive `occurred_at`; older history stays
+      `timestamp_verified=false`, and business-day filters include those rows
+      conservatively (up to 14 h past either edge of the range) and flag them.
 - [ ] Announce maintenance; stop `api` if tables are large.
 - [ ] **Migrate (one-shot)**:
       `docker compose -f compose.prod.yml --profile migrate run --rm migrate`.

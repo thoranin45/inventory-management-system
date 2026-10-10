@@ -13,7 +13,7 @@ import { EmptyState } from "@/components/ui/states";
 import { useSession } from "@/components/session-provider";
 import { StockAdjustmentRequestDetailBody } from "@/components/stock-adjustments/request-detail";
 import { isAdmin } from "@/lib/auth/permissions";
-import { formatBusinessDateTime, formatSignedQty } from "@/lib/format";
+import { formatBusinessDateTime, formatSignedQty, formatStoredWallClock } from "@/lib/format";
 import { useMediaQuery } from "@/lib/hooks/use-viewport";
 import { useInventoryLedger } from "@/lib/query/inventory-movements";
 import { useReportParams, type ReportParamKey } from "@/lib/reports/use-report-params";
@@ -52,6 +52,26 @@ export function SignedQuantity({ value, className }: { value: string; className?
       title={value}
     >
       {formatSignedQty(value)}
+    </span>
+  );
+}
+
+/**
+ * Business time of a movement. Only a VERIFIED row (storage zone proven) is
+ * converted to Asia/Bangkok; an unverified row shows its stored wall-clock
+ * value as-is, labelled, because no conversion of it would be honest.
+ */
+export function When({ row }: { row: LedgerItem }) {
+  if (row.timestamp_verified && row.occurred_at) {
+    return <span className="mono whitespace-nowrap text-[var(--muted)]">{formatBusinessDateTime(row.occurred_at)}</span>;
+  }
+  return (
+    <span
+      className="mono whitespace-nowrap text-[var(--muted)]"
+      title="Stored time whose time zone is not verified — shown as recorded, not converted to Bangkok time"
+    >
+      {formatStoredWallClock(row.created_at)}
+      <span className="ml-1 text-[10.5px] font-semibold uppercase text-[var(--warning)]">zone unverified</span>
     </span>
   );
 }
@@ -163,7 +183,7 @@ export function InventoryLedgerView() {
     {
       key: "when",
       header: "When (Bangkok)",
-      cell: (r) => <span className="mono whitespace-nowrap text-[var(--muted)]">{formatBusinessDateTime(r.occurred_at)}</span>,
+      cell: (r) => <When row={r} />,
     },
     { key: "type", header: "Type", cell: (r) => <TypeBadge row={r} /> },
     {
@@ -211,6 +231,7 @@ export function InventoryLedgerView() {
       onChange={rp.setParams}
       onClear={rp.clearFilters}
       showDateHint={Boolean(v.from_date) !== Boolean(v.to_date)}
+      sortOrder={rp.sortOrder}
     />
   );
 
@@ -218,7 +239,11 @@ export function InventoryLedgerView() {
     <div className="flex flex-col gap-5">
       <PageHeader
         title="Inventory Ledger"
-        subtitle={pg ? `${pg.total_items} movements · physical stock changes, newest first` : "Loading…"}
+        subtitle={
+          pg
+            ? `${pg.total_items} movements · physical stock changes, ${rp.sortOrder === "asc" ? "oldest first" : "newest first"}`
+            : "Loading…"
+        }
         actions={
           isMobile ? (
             <Button
@@ -238,6 +263,14 @@ export function InventoryLedgerView() {
         <div id="ledger-filters" className="flex flex-wrap items-end gap-3">
           {filters}
         </div>
+      ) : null}
+
+      {bothDates && rows.some((r) => !r.timestamp_verified) ? (
+        <p role="note" className="rounded-[var(--r-sm)] bg-[var(--surface-sunken)] p-2 text-[12px] text-[var(--muted)]">
+          Some rows have a stored time whose time zone is not verified (“zone unverified”). They are included when
+          they could fall on the selected business days under any time zone, so the date filter may show up to 14
+          hours of extra unverified rows at either edge. Verified rows match the selected days exactly.
+        </p>
       ) : null}
 
       <DataTable<LedgerItem>
@@ -277,7 +310,7 @@ export function InventoryLedgerView() {
               </span>
               <SourceCell row={r} onOpenRequest={setRequestId} />
               <span className="mono text-[var(--muted)]">
-                {formatBusinessDateTime(r.occurred_at)} · {r.created_by?.username ?? "system"}
+                <When row={r} /> · {r.created_by?.username ?? "system"}
               </span>
             </>
           ),
@@ -344,7 +377,9 @@ export function LedgerRowDetail({
         <SignedQuantity value={row.quantity} className="text-[18px]" />
       </div>
       <div>
-        <Row label="When (Bangkok)">{formatBusinessDateTime(row.occurred_at)}</Row>
+        <Row label="When (Bangkok)">
+          <When row={row} />
+        </Row>
         <Row label="Product">
           {row.product.product_name} <span className="mono text-[var(--faint)]">{row.product.sku}</span>
           {row.product.is_active ? null : <Inactive />}

@@ -39,7 +39,8 @@ vi.mock("@/components/stock-adjustments/request-detail", () => ({
 const base = {
   product_id: 5, batch_id: null, warehouse_id: 1, location_id: 11,
   balance_before: "10.000", balance_after: "9.995", remark: null, created_by_user_id: 3,
-  created_at: "2026-10-09T17:30:00", occurred_at: "2026-10-09T17:30:00Z", is_transit_leg: false,
+  created_at: "2026-10-09T17:30:00", occurred_at: "2026-10-09T17:30:00Z", timestamp_verified: true,
+  is_transit_leg: false,
   product: { id: 5, sku: "SKU-5", product_name: "Arabica 1kg", is_active: true },
   batch: null,
   warehouse: { id: 1, warehouse_code: "MAIN", warehouse_name: "Main", is_active: true },
@@ -75,6 +76,13 @@ const ROWS = [
     adjustment: { linked: true, request_id: 42, reference_number: "ADJ-000042", reason_code: "DAMAGE",
       status: "APPROVED", requested_by: { id: 7, username: "me" }, notes: "my note",
       can_view_detail: true, redacted: false },
+  },
+  {
+    ...base, id: 5, movement_type: "STOCK_IN", quantity: "1.000", direction: "IN",
+    created_at: "2025-03-02T09:15:00", occurred_at: null, timestamp_verified: false,
+    product: { id: 5, sku: "SKU-5", product_name: "Arabica 1kg", is_active: true },
+    reference_type: "STOCK_TRANSACTION", reference_id: 91, reference_number: null,
+    source: { type: "STOCK_TRANSACTION", id: 91, number: null, receipt_number: null }, adjustment: null,
   },
 ];
 
@@ -199,6 +207,43 @@ describe("InventoryLedgerView — desktop", () => {
     search = "actor=alice";
     render(<InventoryLedgerView />);
     expect(ledgerQueries.at(-1)?.actor).toBeUndefined();
+  });
+});
+
+describe("InventoryLedgerView — unverified history and sort order", () => {
+  it("shows an unverified row's stored time as recorded, labelled, never converted", () => {
+    render(<InventoryLedgerView />);
+    expect(screen.getByText("2025-03-02 09:15")).toBeInTheDocument();
+    expect(screen.getByText("zone unverified")).toBeInTheDocument();
+  });
+
+  it("explains conservative date matching only when a range is active and unverified rows are present", () => {
+    render(<InventoryLedgerView />);
+    expect(screen.queryByRole("note")).not.toBeInTheDocument();
+    search = "from_date=2025-03-02&to_date=2025-03-02";
+    render(<InventoryLedgerView />);
+    expect(screen.getByRole("note")).toHaveTextContent(/not verified/i);
+  });
+
+  it("labels the order from sort_order instead of always saying newest first", () => {
+    render(<InventoryLedgerView />);
+    expect(screen.getByText(/newest first$/)).toBeInTheDocument();
+    search = "sort_order=asc";
+    render(<InventoryLedgerView />);
+    expect(screen.getByText(/oldest first$/)).toBeInTheDocument();
+    expect(ledgerQueries.at(-1)?.sort_order).toBe("asc");
+    expect((screen.getAllByLabelText("Order").at(-1) as HTMLSelectElement).value).toBe("asc");
+  });
+
+  it("writes the chosen order to the URL and returns to the default", () => {
+    render(<InventoryLedgerView />);
+    fireEvent.change(screen.getByLabelText("Order"), { target: { value: "asc" } });
+    expect(lastReplaceQuery().get("sort_order")).toBe("asc");
+    search = "sort_order=asc";
+    window.history.replaceState(null, "", "/inventory/ledger?sort_order=asc");
+    render(<InventoryLedgerView />);
+    fireEvent.change(screen.getAllByLabelText("Order").at(-1)!, { target: { value: "desc" } });
+    expect(lastReplaceQuery().get("sort_order")).toBeNull();
   });
 });
 

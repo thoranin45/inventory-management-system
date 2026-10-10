@@ -92,7 +92,7 @@ def _ledger_items(
     """Bounded lookups for the whole page: adjustment requests, their
     requesters, and PO / transfer receipt numbers -- at most four queries,
     whatever the page size."""
-    from app.core.timestamps import utc_iso
+    from app.core.timestamps import is_verified, verified_occurred_at
 
     db = repo.db
     requests = visibility.requests_for_movements(db, movements)
@@ -153,7 +153,8 @@ def _ledger_items(
         base["remark"] = visible.remark
         items.append(InventoryLedgerItem(
             **base,
-            occurred_at=utc_iso(m.created_at),
+            occurred_at=verified_occurred_at(m.created_at),
+            timestamp_verified=is_verified(m.created_at),
             direction="IN" if m.quantity > 0 else "OUT",
             is_transit_leg=_is_transit(m.warehouse),
             product=LedgerProductRef(
@@ -212,13 +213,13 @@ def search_inventory_movements_service(
     """Validation of the new parameters lives in the router; this layer
     trusts it. ``actor`` is already restricted to Admin there.
 
-    ``occurred_at`` and the business-day bounds interpret naive
-    ``created_at`` in the declared ``settings.db_naive_timezone`` -- an
-    explicit, verified-per-environment assumption, never inferred from the
-    current session (see app/core/timestamps.py)."""
-    from app.core.timestamps import business_date_range_to_naive
+    ``occurred_at`` is only given for rows whose storage zone is proven
+    (written while the session-timezone pin was active); unverified rows get
+    ``occurred_at=None`` and are matched conservatively by business-day
+    filters. Never inferred from the current session (app/core/timestamps.py)."""
+    from app.core.timestamps import business_day_range
 
-    naive_start, naive_end = business_date_range_to_naive(from_date, to_date)
+    business_days = business_day_range(from_date, to_date) if from_date and to_date else None
 
     items, total = repo.search(
         page=page,
@@ -232,8 +233,7 @@ def search_inventory_movements_service(
         reference_id=reference_id,
         date_from=date_from,
         date_to=date_to,
-        naive_start=naive_start,
-        naive_end=naive_end,
+        business_days=business_days,
         movement_types=MOVEMENT_GROUPS[movement_group] if movement_group else None,
         reference_number=reference_number,
         actor_username=actor,
