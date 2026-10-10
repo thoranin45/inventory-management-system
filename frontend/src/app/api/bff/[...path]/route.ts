@@ -53,6 +53,11 @@ const ALLOW: { method: string; pattern: RegExp }[] = [
   { method: "POST", pattern: /^stock-adjustment-requests\/\d+\/cancel$/ },
   { method: "GET", pattern: /^warehouses$/ },
 
+  // Phase 14C — Inventory Ledger. Only the bounded, paginated collection;
+  // the unbounded /inventory-movements/product/{id} and /reference/... bare
+  // arrays are deliberately NOT exposed to the browser.
+  { method: "GET", pattern: /^inventory-movements$/ },
+
   // Phase 3 — Sales Orders. Backend enforces role (create/confirm = admin,
   // list/detail/cancel = warehouse+); the BFF only scopes which routes exist.
   { method: "GET", pattern: /^sales-orders$/ },
@@ -170,7 +175,7 @@ export function isAllowed(method: string, path: string): boolean {
   return ALLOW.some((r) => r.method === method && r.pattern.test(path));
 }
 
-async function proxy(req: Request, ctx: RouteContext<"/api/bff/[...path]">) {
+async function forward(req: Request, ctx: RouteContext<"/api/bff/[...path]">) {
   const { path: segments } = await ctx.params;
   const path = (segments ?? []).join("/");
   const method = req.method.toUpperCase();
@@ -266,6 +271,22 @@ async function proxy(req: Request, ctx: RouteContext<"/api/bff/[...path]">) {
     }
     return NextResponse.json({ success: false, message: "Upstream request failed." }, { status: 502 });
   }
+}
+
+/**
+ * Phase 14C (D9): BFF responses are per-user (role- and ownership-scoped,
+ * e.g. redacted adjustment notes), so neither the browser nor any proxy may
+ * store one and replay it to someone else. Product images (`uploads/…`)
+ * are identical for every user and stay cacheable. Exported for tests.
+ */
+export function applyCachePolicy(path: string, res: Response): Response {
+  if (!path.startsWith("uploads/")) res.headers.set("cache-control", "private, no-store");
+  return res;
+}
+
+async function proxy(req: Request, ctx: RouteContext<"/api/bff/[...path]">) {
+  const { path: segments } = await ctx.params;
+  return applyCachePolicy((segments ?? []).join("/"), await forward(req, ctx));
 }
 
 export { proxy as GET, proxy as POST, proxy as PUT, proxy as PATCH, proxy as DELETE };

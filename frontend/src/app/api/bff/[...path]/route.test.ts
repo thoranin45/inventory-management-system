@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import { isAllowed } from "./route";
+import { applyCachePolicy, isAllowed } from "./route";
 
 /**
  * Phase 14A — the BFF allow-list is the second gate (after backend role
@@ -60,5 +60,29 @@ describe("BFF allow-list", () => {
     expect(isAllowed("GET", "stock-adjustment-requests/42/approve")).toBe(false);
     expect(isAllowed("POST", "stock-adjustment-requests/abc/approve")).toBe(false);
     expect(isAllowed("POST", "stock-adjustment-requests/42/approve/extra")).toBe(false);
+  });
+
+  it("Phase 14C: exposes only the paginated ledger collection", () => {
+    expect(isAllowed("GET", "inventory-movements")).toBe(true);
+    // Unbounded bare-array sub-routes stay unreachable from the browser.
+    expect(isAllowed("GET", "inventory-movements/product/1")).toBe(false);
+    expect(isAllowed("GET", "inventory-movements/reference/STOCK_ADJUSTMENT_REQUEST/1")).toBe(false);
+    expect(isAllowed("POST", "inventory-movements")).toBe(false);
+    // Not exposed before 14C either: unbounded stock history.
+    expect(isAllowed("GET", "stock/history")).toBe(false);
+  });
+});
+
+describe("BFF cache policy (Phase 14C, D9)", () => {
+  it("marks every proxied API response private, no-store", () => {
+    for (const path of ["inventory-movements", "dashboard/recent-transactions", "stock-adjustment-requests/1"]) {
+      const res = applyCachePolicy(path, new Response("{}", { headers: { "cache-control": "max-age=60" } }));
+      expect(res.headers.get("cache-control")).toBe("private, no-store");
+    }
+  });
+
+  it("leaves shared product images cacheable", () => {
+    const res = applyCachePolicy("uploads/products/a.png", new Response("x"));
+    expect(res.headers.get("cache-control")).toBeNull();
   });
 });

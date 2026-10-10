@@ -12,10 +12,11 @@ import { Drawer, DrawerContent } from "@/components/ui/drawer";
 import { QuantityDisplay } from "@/components/ui/quantity-display";
 import { isApiError } from "@/lib/api/errors";
 import { compareDecimals } from "@/lib/decimal";
-import { useGlobalSearch, useProductStock, useStockBalances } from "@/lib/query/hooks";
-import { useCreateTransfer, useWarehouseNames } from "@/lib/query/transfers";
+import { useGlobalSearch, useProductStock } from "@/lib/query/hooks";
+import { useCreateTransfer } from "@/lib/query/transfers";
+import { useWarehouses } from "@/lib/query/warehouses";
 import { createTransferInput, type CreateTransferInput, type TransferDetail } from "@/lib/api/schemas/transfers";
-import type { StockBalanceRow } from "@/lib/api/schemas/stock";
+import type { Warehouse } from "@/lib/api/schemas/warehouses";
 import { cn } from "@/lib/utils";
 
 type FormValues = CreateTransferInput;
@@ -34,8 +35,7 @@ function Field({ label, error, children, htmlFor }: { label: string; error?: str
   );
 }
 
-/** A `(warehouse, location)` pair — no /warehouses or /locations endpoint exists,
- *  so we compose these from non-transit stock balances. */
+/** A `(warehouse, location)` pair a new transfer may use. */
 export interface StoragePair {
   key: string;
   warehouse_id: number;
@@ -43,23 +43,27 @@ export interface StoragePair {
   label: string;
 }
 
-function pairsFromBalances(balances: StockBalanceRow[], names: Record<number, string>): StoragePair[] {
-  const seen = new Map<string, StoragePair>();
-  for (const b of balances) {
-    if (b.is_transit || b.warehouse_id == null || b.location_id == null) continue;
-    const wid = b.warehouse_id;
-    const lid = b.location_id;
-    const key = `${wid}:${lid}`;
-    if (!seen.has(key)) {
-      seen.set(key, {
-        key,
-        warehouse_id: wid,
-        location_id: lid,
-        label: `${names[wid] ?? `Warehouse #${wid}`} · Location #${lid}`,
+/**
+ * Phase 14C: options come from the warehouse directory (GET /warehouses),
+ * not from existing stock balances — so an empty destination location is
+ * selectable. A NEW transfer may only use an active warehouse AND an active
+ * location; the directory already excludes system transit (__TRANSIT__).
+ */
+export function pairsFromDirectory(warehouses: Warehouse[]): StoragePair[] {
+  const pairs: StoragePair[] = [];
+  for (const w of warehouses) {
+    if (!w.is_active) continue;
+    for (const l of w.locations) {
+      if (!l.is_active) continue;
+      pairs.push({
+        key: `${w.id}:${l.id}`,
+        warehouse_id: w.id,
+        location_id: l.id,
+        label: `${w.warehouse_name} (${w.warehouse_code}) · ${l.location_name ?? l.location_code}`,
       });
     }
   }
-  return [...seen.values()].sort((a, b) => a.label.localeCompare(b.label));
+  return pairs.sort((a, b) => a.label.localeCompare(b.label));
 }
 
 /* ---------------- one transfer line ---------------- */
@@ -199,12 +203,8 @@ function TransferLine({
 
 /* ---------------- form ---------------- */
 function CreateForm({ onClose, onCreated }: { onClose: () => void; onCreated: (d: TransferDetail) => void }) {
-  const balancesQ = useStockBalances({ page: 1, page_size: 100 });
-  const namesQ = useWarehouseNames();
-  const pairs = React.useMemo(
-    () => pairsFromBalances(balancesQ.data?.items ?? [], namesQ.data ?? {}),
-    [balancesQ.data, namesQ.data],
-  );
+  const directoryQ = useWarehouses(true);
+  const pairs = React.useMemo(() => pairsFromDirectory(directoryQ.data ?? []), [directoryQ.data]);
 
   const [source, setSource] = React.useState<StoragePair | null>(null);
   const [dest, setDest] = React.useState<StoragePair | null>(null);
@@ -274,8 +274,8 @@ function CreateForm({ onClose, onCreated }: { onClose: () => void; onCreated: (d
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
       <p className="rounded-[var(--r-sm)] bg-[var(--surface-sunken)] p-2 text-[11px] text-[var(--muted)]">
-        Source and destination are chosen from operational locations that currently hold inventory (there is no
-        warehouse / location directory API). System transit is never listed.
+        Source and destination list every active warehouse location, including empty ones. Inactive locations and
+        system transit are never offered for a new transfer.
       </p>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

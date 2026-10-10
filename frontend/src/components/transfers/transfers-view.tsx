@@ -11,7 +11,7 @@ import { QuantityDisplay } from "@/components/ui/quantity-display";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
 import { useListParams } from "@/lib/list-params";
-import { useTransfers } from "@/lib/query/transfers";
+import { useTransfers, useWarehouseNames } from "@/lib/query/transfers";
 import { formatIsoDate } from "@/lib/format";
 import { TRANSFER_FILTER_TABS, type TransferDetail, type TransferRow } from "@/lib/api/schemas/transfers";
 import { TransferDetailDrawer } from "./transfer-detail";
@@ -80,7 +80,9 @@ export function TransfersView() {
     setDrawerOpen(true);
   };
 
-  const wh = (id: number, name: string | null) => name ?? `Warehouse #${id}`;
+  // Directory names first (inactive ones labelled), then the row's own name.
+  const whNames = useWarehouseNames().data ?? {};
+  const wh = (id: number, name: string | null) => whNames[id] ?? name ?? `Warehouse #${id}`;
 
   const columns: Column<TransferRow>[] = [
     {

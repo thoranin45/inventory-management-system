@@ -23,7 +23,18 @@ export type ReportParamKey =
   | "sort_order"
   | "days"
   | "threshold"
-  | "limit";
+  | "limit"
+  // Phase 14C — Inventory Ledger (/inventory/ledger)
+  | "product_id"
+  | "warehouse_id"
+  | "location_id"
+  | "batch_id"
+  | "movement_group"
+  | "reference_number"
+  | "from_date"
+  | "to_date"
+  | "include_transit"
+  | "actor";
 
 const PAGE_KEYS = new Set<ReportParamKey>(["page", "page_size"]);
 

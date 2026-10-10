@@ -40,6 +40,20 @@ export function SessionProvider({ user, children }: { user: UserMe; children: Re
     }
   }, [router, queryClient]);
 
+  // Phase 14C (D10): if the authenticated identity changes under a live
+  // client (account switched in another tab, then this layout re-rendered
+  // with the new /auth/me), drop every cached response before paint — the
+  // previous user's data, possibly less redacted, must never show for the
+  // new one. Children are also keyed by user id (below), so local UI state
+  // such as an open drawer cannot survive the switch either.
+  const seenUserId = React.useRef(user.id);
+  React.useLayoutEffect(() => {
+    if (seenUserId.current !== user.id) {
+      seenUserId.current = user.id;
+      queryClient.clear();
+    }
+  }, [user.id, queryClient]);
+
   // Any BFF 401 anywhere → return to login (token expiry; no refresh in V1).
   React.useEffect(() => {
     setUnauthorizedHandler(() => signOut("expired"));
@@ -48,7 +62,11 @@ export function SessionProvider({ user, children }: { user: UserMe; children: Re
 
   const value = React.useMemo<SessionContextValue>(() => ({ user, logout, signOut }), [user, logout, signOut]);
 
-  return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
+  return (
+    <SessionContext.Provider value={value}>
+      <React.Fragment key={user.id}>{children}</React.Fragment>
+    </SessionContext.Provider>
+  );
 }
 
 export function useSession(): SessionContextValue {
