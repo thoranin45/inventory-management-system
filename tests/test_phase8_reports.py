@@ -42,17 +42,100 @@ def test_operational_stock_report_categories(client, admin_headers, db_session):
     assert row["expired_quantity"] == "4.000"
 
 
-def test_stock_movement_report_is_bounded_and_paginated(client, admin_headers):
+def test_stock_movement_report_is_bounded_and_paginated(client, admin_headers, db_session):
+    """The report is GLOBAL (every product), ordered created_at DESC, id DESC.
+
+    So this test never assumes the newest row in the database is its own: in a
+    shared test schema, other tests may write StockTransactions whose naive
+    created_at sorts later (e.g. ones written under a different session
+    TimeZone, which shifts naive now() by hours). Instead it bounds the report
+    to the window its own five rows were written in -- still unfiltered by
+    product, so unrelated rows in that window appear too -- and checks its own
+    rows, the global ordering and deterministic pagination."""
+    from app.models import StockTransaction
+
     p = _product(client, admin_headers)
     for _ in range(5):
-        client.post("/api/v1/stock/in", headers=admin_headers,
-                    json={"product_id": p["id"], "quantity": "1.000", "remark": "rpt"})
-    body = client.get("/api/v1/reports/stock-movement?page=1&page_size=2", headers=admin_headers).json()
-    assert body["success"] is True
-    assert len(body["data"]["items"]) == 2
-    assert body["data"]["pagination"]["page_size"] == 2
+        response = client.post("/api/v1/stock/in", headers=admin_headers,
+                               json={"product_id": p["id"], "quantity": "1.000", "remark": "rpt"})
+        assert response.status_code == 200, response.text
+    own = (db_session.query(StockTransaction).filter_by(product_id=p["id"])
+           .order_by(StockTransaction.id).all())
+    assert len(own) == 5
+    window = {"date_from": min(t.created_at for t in own).isoformat(),
+              "date_to": max(t.created_at for t in own).isoformat()}
+
+    def page(number):
+        body = client.get("/api/v1/reports/stock-movement", headers=admin_headers,
+                          params={"page": number, "page_size": 2, **window}).json()
+        assert body["success"] is True
+        return body["data"]
+
+    first = page(1)
+    assert first["pagination"]["page_size"] == 2
+    assert len(first["items"]) == 2  # bounded: never more than page_size
+    total, pages = first["pagination"]["total_items"], first["pagination"]["total_pages"]
+    assert total >= 5 and pages == -(-total // 2)
+
+    rows = list(first["items"])
+    for number in range(2, pages + 1):
+        data = page(number)
+        assert data["pagination"]["total_items"] == total  # stable across pages
+        rows += data["items"]
+    ids = [r["id"] for r in rows]
+    assert len(ids) == len(set(ids)) == total  # disjoint pages, no gaps
+    # Global ordering: created_at DESC, then id DESC.
+    keys = [(r["created_at"], r["id"]) for r in rows]
+    assert keys == sorted(keys, reverse=True)
+
+    mine = [r for r in rows if r["product_id"] == p["id"]]
+    assert [r["id"] for r in mine] == [t.id for t in reversed(own)]
     # quantity is a scale-3 string (Decimal fidelity preserved)
-    assert body["data"]["items"][0]["quantity"] == "1.000"
+    assert [r["quantity"] for r in mine] == ["1.000"] * 5
+
+
+def test_stock_movement_report_stays_global_with_an_unrelated_future_dated_row(client, admin_headers,
+                                                                              db_session):
+    """Regression for the CI failure on PR #4: an unrelated 2.000 transaction
+    whose naive created_at sorts hours later (as a +07:00-session writer would
+    produce on a UTC server) is correctly the global first row -- the endpoint
+    is right to put it there -- and must not break checks on this test's rows."""
+    from datetime import datetime as dt
+
+    from app.models import StockTransaction
+
+    other = _product(client, admin_headers)
+    future = StockTransaction(product_id=other["id"], transaction_type="IN", quantity=Decimal("2.000"),
+                              remark="unrelated", created_at=dt.now() + timedelta(hours=7))
+    db_session.add(future)
+    db_session.commit()
+
+    p = _product(client, admin_headers)
+    for _ in range(5):
+        assert client.post("/api/v1/stock/in", headers=admin_headers, json={
+            "product_id": p["id"], "quantity": "1.000", "remark": "rpt"}).status_code == 200
+
+    unbounded = client.get("/api/v1/reports/stock-movement", headers=admin_headers,
+                           params={"page": 1, "page_size": 2}).json()["data"]["items"]
+    first_ids = [r["id"] for r in unbounded]
+    head = db_session.query(StockTransaction).order_by(
+        StockTransaction.created_at.desc(), StockTransaction.id.desc()).limit(2).all()
+    assert first_ids == [t.id for t in head]  # global created_at DESC, id DESC -- unchanged
+    assert future.id in first_ids
+
+    own = db_session.query(StockTransaction).filter_by(product_id=p["id"]).order_by(StockTransaction.id).all()
+    window = {"date_from": min(t.created_at for t in own).isoformat(),
+              "date_to": max(t.created_at for t in own).isoformat()}
+    rows, number = [], 1
+    while True:
+        data = client.get("/api/v1/reports/stock-movement", headers=admin_headers,
+                          params={"page": number, "page_size": 2, **window}).json()["data"]
+        rows += data["items"]
+        if number >= data["pagination"]["total_pages"]:
+            break
+        number += 1
+    assert future.id not in [r["id"] for r in rows]
+    assert [r["quantity"] for r in rows if r["product_id"] == p["id"]] == ["1.000"] * 5
 
 
 def test_expired_and_near_expiry_reports(client, admin_headers):
