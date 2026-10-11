@@ -17,6 +17,7 @@ Run commands from the repository root with a Python 3.12 virtual environment act
 - `python -m pytest tests/test_stock.py`: run focused stock tests.
 - `python -m pytest --cov=app --cov-report=term-missing --cov-fail-under=90`: enforce CI's 90% coverage threshold.
 - `docker compose up --build`: build and start PostgreSQL, the API, and Nginx after configuring `.env.api` and `.env.db` from their example files.
+- `cd frontend && npm ci && npm run check`: install the frontend's locked dependencies and run its CI gates (Node 22).
 
 ## Coding Style & Naming Conventions
 
@@ -44,9 +45,11 @@ All schema changes require Alembic migrations. Review foreign keys, unique const
 
 ## Testing Guidelines
 
-Recorded baseline: **167 passed, 7 warnings on Python 3.12.10**. Run relevant tests after each change and the full suite before declaring a phase complete. Never delete tests or weaken assertions just to make tests pass. Add regression tests for bugs.
+Recorded baseline (11 October 2026): backend **1224 passed, 93.02% coverage** on Python 3.12 (CI on `605ce23`); frontend **TypeScript 0 errors, ESLint 0 problems, Vitest 782 passed and 49 skipped, `next build` passing**. Run relevant tests after each change and the full suite before declaring a phase complete. Never delete tests or weaken assertions just to make tests pass. Add regression tests for bugs.
 
 Tests use pytest, FastAPI `TestClient`, and shared fixtures in `tests/conftest.py`. Name files `test_*.py` and functions `test_*`. Cover successful operations, validation, authorization, and inventory integrity when relevant. CI runs against PostgreSQL 18 with a 90% coverage threshold. Use a dedicated test database through `TEST_DATABASE_URL`: fixtures drop and recreate its tables. Follow the secret-handling rules below.
+
+Frontend tests use Vitest, Testing Library and jsdom (`frontend/src/**/*.test.ts(x)`). From `frontend/`, `npm run check` runs the same gates as the **Frontend checks** CI job: typecheck, lint, Vitest and `next build`, on Node 22. The 49 live contract tests are opt-in (`npm run test:live`) and guarded by `frontend/src/test/live-guard.ts`; run them only against a disposable backend seeded for that run, never a development, demo or production one.
 
 ## Commit & Pull Request Guidelines
 

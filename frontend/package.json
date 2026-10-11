@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:live": "LIVE_BACKEND=1 vitest run src/lib/api/schemas/live-contract.test.ts"
+    "test:live": "vitest run --config vitest.live.config.mts",
+    "check": "npm run typecheck && npm run lint && npm test && npm run build"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",

@@ -20,6 +20,14 @@
 - [ ] `.env.production` present on host, `chmod 600`, `ENV=production`,
       strong `SECRET_KEY` (≥32, not placeholder), `CORS_ORIGINS` = real
       `https://` origins.
+- [ ] Frontend CI job **Frontend checks** green on the release commit:
+      `npm ci`, `npm run typecheck`, `npm run lint`, `npm test`,
+      `npm run build` (locally: `npm run check` in `frontend/`, Node 22).
+- [ ] `main` branch protection requires `Frontend checks` and
+      `Pytest on Python 3.12`; no `[skip ci]` commits on the release PR.
+- [ ] Live contract tests are only ever run with `npm run test:live` against a
+      disposable backend accepted by `frontend/src/test/live-guard.ts`,
+      never against development, demo or production.
 
 ## Deploy window
 
