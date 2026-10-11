@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
@@ -24,14 +24,15 @@ ReasonCode = Literal[
 
 
 class StockAdjustmentRequestCreate(BaseModel):
-    """Phase 14B create payload. No ``batch_id`` field at all -- 14B is
-    product-level only; Phase 14D adds the batch-level variant on its own
-    schema rather than this one growing an optional field nobody can use
-    yet."""
+    """Create payload. Phase 14D adds an optional ``batch_id``: required for
+    a batch-tracked product, forbidden otherwise (enforced in the service,
+    which knows the product). Omitting it -- or sending null -- keeps the
+    exact Phase 14B/14C non-batch behavior."""
 
     product_id: int = Field(..., gt=0)
     warehouse_id: int | None = Field(default=None, gt=0)
     location_id: int | None = Field(default=None, gt=0)
+    batch_id: int | None = Field(default=None, gt=0)
 
     observed_quantity: Decimal = Field(
         ..., ge=0, max_digits=18, decimal_places=3, allow_inf_nan=False,
@@ -47,11 +48,9 @@ class StockAdjustmentRequestCreate(BaseModel):
     def validate_reason(self):
         if self.reason_code == "OTHER" and not (self.notes and self.notes.strip()):
             raise ValueError("notes is required when reason_code is OTHER")
-        if self.reason_code == "EXPIRY_WRITE_OFF":
-            raise ValueError(
-                "EXPIRY_WRITE_OFF requires a batch-level request "
-                "(Phase 14D, not yet supported)"
-            )
+        if self.reason_code == "EXPIRY_WRITE_OFF" and self.batch_id is None:
+            # Phase 14D (D4): an expiry write-off always names the expired batch.
+            raise ValueError("EXPIRY_WRITE_OFF requires a batch-level request (batch_id)")
         return self
 
 
@@ -94,6 +93,23 @@ class UserRef(_Ref):
     username: str
 
 
+class AdjustmentBatchRef(BaseModel):
+    """Phase 14D: the exact batch a batch-level request targets."""
+    id: int
+    lot_no: str | None
+    expiry_date: date | None
+    is_expired: bool
+
+
+class AdjustmentBalanceRef(BaseModel):
+    """Phase 14D: the exact (product, warehouse, location, batch) balance as
+    read when the response was built -- display context only; approval
+    re-reads it under lock. ``available = on_hand - reserved``."""
+    on_hand: Decimal
+    reserved: Decimal
+    available: Decimal
+
+
 class AdjustmentRequestHistoryEntry(BaseModel):
     action: str
     actor: str
@@ -113,6 +129,7 @@ class StockAdjustmentRequestListItem(BaseModel):
     reason_code: str
     requested_by_user_id: int
     created_at: datetime
+    batch_id: int | None = None
 
 
 class StockAdjustmentRequestDetail(BaseModel):
@@ -136,3 +153,7 @@ class StockAdjustmentRequestDetail(BaseModel):
     # Phase 14C (D7). Defaulted so replay snapshots stored before 14C still
     # validate; this detail is only ever served to the requester or Admin.
     stock_transaction_id: int | None = None
+    # Phase 14D. Defaulted so pre-14D replay snapshots still validate.
+    # Served only to the requester or Admin (the detail's existing rule).
+    batch: AdjustmentBatchRef | None = None
+    current_balance: AdjustmentBalanceRef | None = None

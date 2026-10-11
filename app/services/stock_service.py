@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session
 
 from app.core import batch_eligibility
 from app.core.exceptions import (
+    AdjustmentBalanceNotFoundException,
+    AdjustmentRequestBatchNotSupportedException,
     BatchStockAdjustmentException,
     BatchTrackedAdjustmentException,
     BatchTrackedStockInException,
@@ -631,6 +633,7 @@ def execute_adjustment_mutation(
     reference_type: str,
     reference_id: int,
     reference_number: str,
+    batch_id: int | None = None,
 ) -> tuple[StockOperationResponse, StockTransaction]:
     """The tested stock-mutation core, shared by every caller that is
     allowed to actually move stock for an adjustment.
@@ -650,6 +653,12 @@ def execute_adjustment_mutation(
     the transaction is returned so the caller can record it too. ``remark``
     lands in broadly readable StockTransaction / InventoryMovement rows, so
     callers must never pass private request notes here.
+
+    Phase 14D: ``batch_id`` selects the batch branch. It writes ONLY the
+    existing exact (product, warehouse, location, batch) balance -- never
+    ``get_or_create``, never another batch, location or the unbatched row --
+    and requires a batch-tracked product. ``batch_id=None`` is the unchanged
+    Phase 13/14B/14C non-batch path.
     """
     product = (
         stock_repo
@@ -669,35 +678,50 @@ def execute_adjustment_mutation(
     # /batches; frontend routing is not the only guard. Re-run at approval
     # time too (not just at request-creation time), in case track_batch
     # flipped in between — Phase 14D must extend this guard, never loosen it.
-    if product.track_batch:
-        raise BatchTrackedAdjustmentException()
+    if batch_id is None:
+        if product.track_batch:
+            raise BatchTrackedAdjustmentException()
 
-    # Kept as a safety net for pre-existing data: product_service.py
-    # already blocks flipping track_batch off while a product carries
-    # stock/inventory evidence, so this should be unreachable for data
-    # created under that guard — but it still catches anything that
-    # predates it or was written directly to the database.
-    batch_stock_total = stock_repo.get_batch_stock_total(product_id)
+        # Kept as a safety net for pre-existing data: product_service.py
+        # already blocks flipping track_batch off while a product carries
+        # stock/inventory evidence, so this should be unreachable for data
+        # created under that guard — but it still catches anything that
+        # predates it or was written directly to the database.
+        batch_stock_total = stock_repo.get_batch_stock_total(product_id)
 
-    if batch_stock_total > 0:
-        raise BatchStockAdjustmentException()
+        if batch_stock_total > 0:
+            raise BatchStockAdjustmentException()
 
-    previous_stock = balance_repo.product_quantity(product.id)
+        previous_stock = balance_repo.product_quantity(product.id)
 
-    balance = (
-        balance_repo
-        .get_balance_for_update(
-            product_id=product.id, warehouse_id=warehouse.id, location_id=location.id, batch_id=None,
-        )
-    )
-
-    if balance is None:
         balance = (
             balance_repo
-            .get_or_create_balance(
+            .get_balance_for_update(
                 product_id=product.id, warehouse_id=warehouse.id, location_id=location.id, batch_id=None,
             )
         )
+
+        if balance is None:
+            balance = (
+                balance_repo
+                .get_or_create_balance(
+                    product_id=product.id, warehouse_id=warehouse.id, location_id=location.id, batch_id=None,
+                )
+            )
+    else:
+        # Phase 14D batch branch: the guard is extended, never loosened --
+        # a batch target requires a batch-tracked product, and only the
+        # existing exact balance may change.
+        if not product.track_batch:
+            raise AdjustmentRequestBatchNotSupportedException()
+
+        previous_stock = balance_repo.product_quantity(product.id)
+
+        balance = balance_repo.get_balance_for_update(
+            product_id=product.id, warehouse_id=warehouse.id, location_id=location.id, batch_id=batch_id,
+        )
+        if balance is None:
+            raise AdjustmentBalanceNotFoundException()
 
     if (
         new_quantity
@@ -740,7 +764,8 @@ def execute_adjustment_mutation(
         record_id=transaction.id,
         description=(
             f"Product {product.id}; actor_id={actor.id}; "
-            f"before={balance_before}; after={new_quantity}; "
+            + (f"batch={batch_id}; " if batch_id is not None else "")
+            + f"before={balance_before}; after={new_quantity}; "
             f"reason={remark}"
         ),
     ))
@@ -748,7 +773,7 @@ def execute_adjustment_mutation(
     if difference != Decimal("0"):
         movement = InventoryMovement(
             product_id=product.id,
-            batch_id=None,
+            batch_id=balance.batch_id,
             warehouse_id=(
                 balance.warehouse_id
             ),

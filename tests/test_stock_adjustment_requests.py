@@ -92,10 +92,13 @@ def test_create_is_pending_and_never_mutates_stock(client, admin_headers, wareho
 
 
 def test_create_rejects_batch_tracked_product(client, admin_headers, warehouse_headers):
+    """Phase 14D (D1/D8): a batch-tracked product can still never be adjusted
+    at product level -- it now needs an exact batch_id, and omitting it is a
+    422 validation error (was 409 before batch-level requests existed)."""
     product = _make_product(client, admin_headers, track_batch=True, track_expiry=True)
     response = _create_request(client, warehouse_headers, product_id=product["id"], observed="0.000", requested="5.000")
-    assert response.status_code == 409
-    assert "Batch-tracked" in response.json()["message"]
+    assert response.status_code == 422
+    assert "batch_id is required" in response.json()["message"]
 
 
 def test_create_cannot_target_transit(client, admin_headers, warehouse_headers, transit_ids):

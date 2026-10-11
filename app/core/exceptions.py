@@ -575,15 +575,64 @@ class StaleQuantityConflictException(AppException):
 
 
 class AdjustmentRequestBatchNotSupportedException(AppException):
-    """Phase 14B is product-level only -- batch_id must be null. Phase 14D
-    adds batch-level requests; this guard is not a backend limitation to
-    "fix" here, it's the deliberate phase boundary."""
+    """Phase 14D (D1/D8): a non-null batch_id was sent for a product that is
+    NOT batch-tracked. Such stock lives only on the unbatched balance, so a
+    batch can never be the adjustment's target."""
+
+    def __init__(self):
+        super().__init__(
+            message="batch_id must be omitted for a product that is not batch-tracked",
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        )
+
+
+class AdjustmentBatchRequiredException(AppException):
+    """Phase 14D (D1/D8): a batch-tracked product is only ever adjusted per
+    exact batch balance -- never at product level or on an unbatched row."""
+
+    def __init__(self):
+        super().__init__(
+            message="batch_id is required for a batch-tracked product",
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        )
+
+
+class AdjustmentBalanceNotFoundException(AppException):
+    """Phase 14D (D3/D8): no StockBalance exists for this exact
+    (product, warehouse, location, batch). An adjustment never creates one
+    and never falls back to another batch, location or the unbatched row.
+    Names no quantities, so it discloses nothing beyond what was asked."""
 
     def __init__(self):
         super().__init__(
             message=(
-                "Batch-level adjustment requests are not supported in this "
-                "phase (Phase 14D)"
+                "No stock balance exists for this batch at this warehouse/location. "
+                "Receive the batch there (POST /batches or a purchase-order receipt) "
+                "or move it with a transfer first."
             ),
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_409_CONFLICT,
+        )
+
+
+class AdjustmentRuleViolationException(AppException):
+    """Phase 14D (D4/D5): a batch adjustment breaks a reason rule
+    (direction, or EXPIRY_WRITE_OFF eligibility). 422 when the request is
+    created; 409 when a pending request is no longer eligible at approval."""
+
+    def __init__(self, message: str, status_code: int):
+        super().__init__(message=message, status_code=status_code)
+
+
+class AdjustmentBelowReservedException(AppException):
+    """Phase 14D (D6): the requested on-hand quantity would fall below what
+    open sales orders have reserved on this exact balance. Reservations are
+    never released or changed to make room."""
+
+    def __init__(self, reserved_quantity):
+        super().__init__(
+            message=(
+                f"Requested quantity is below the {reserved_quantity} reserved by open "
+                "orders on this balance. Reservations are never released automatically."
+            ),
+            status_code=status.HTTP_409_CONFLICT,
         )

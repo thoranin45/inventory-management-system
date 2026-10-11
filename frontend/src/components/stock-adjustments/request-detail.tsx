@@ -205,6 +205,28 @@ export function StockAdjustmentRequestDetailBody({ id, role, onDone }: { id: num
         <Row label="Warehouse / location">
           {request.warehouse.warehouse_code} / {request.location.location_code}
         </Row>
+        {request.batch ? (
+          <Row label="Lot">
+            <span className="mono">{request.batch.lot_no ?? `Batch #${request.batch.id}`}</span>
+            {request.batch.expiry_date ? (
+              <span className="text-[var(--muted)]"> · exp {request.batch.expiry_date}</span>
+            ) : null}
+            {request.batch.is_expired ? (
+              <span className="ml-2 rounded-[var(--r-full)] bg-[var(--danger-subtle)] px-2 py-[1px] text-[10.5px] font-semibold uppercase text-[var(--danger)]">
+                Expired
+              </span>
+            ) : null}
+          </Row>
+        ) : null}
+        {request.current_balance ? (
+          <Row label="Current balance">
+            <span className="tabular-nums">
+              On hand <QuantityDisplay value={request.current_balance.on_hand} className="font-semibold" /> · Reserved{" "}
+              <QuantityDisplay value={request.current_balance.reserved} /> · Available{" "}
+              <QuantityDisplay value={request.current_balance.available} />
+            </span>
+          </Row>
+        ) : null}
         <Row label="Reason">{REASON_LABELS[request.reason_code as ReasonCode]?.label ?? request.reason_code}</Row>
         {request.notes ? <Row label="Note">{request.notes}</Row> : null}
         <Row label="Requested by">{request.requested_by.username}</Row>

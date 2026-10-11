@@ -277,8 +277,10 @@ def test_database_post_14c_approval_with_broken_link_is_not_mistaken_for_legacy(
     ("ADJ-000040: PENDING -> APPROVED", "UNRESOLVED"),                               # legacy text, but linked
 ])
 def test_linked_approval_requires_the_whole_exact_audit_text(description, expected):
+    # A zero-difference approval (transaction 0, no movement) isolates the
+    # audit-text rule; Phase 14D requires a non-zero one to carry a movement.
     results = _link_results(
-        transactions=[_adj(5)],
+        transactions=[_adj(5, "0")],
         adjustment_requests=[_request(40, tx=5)],
         adjustment_approval_audits=[_approve_audit(40, text=description)],
     )
@@ -294,3 +296,49 @@ def test_unlinked_approval_requires_the_whole_exact_pre_14c_text(description):
     results = _link_results(adjustment_requests=[_request(41)],
                             adjustment_approval_audits=[_approve_audit(41, text=description)])
     assert results[41]["classification"] == "UNRESOLVED"
+
+
+# --------------------------------------------------------------------------- #
+# Phase 14D: exact movement scope and quantity for approved adjustments
+# --------------------------------------------------------------------------- #
+def _scoped_request(rid=50, tx=8, *, warehouse=1, location=1, batch=7):
+    return dict(_request(rid, tx=tx), warehouse_id=warehouse, location_id=location, batch_id=batch)
+
+
+def _scoped_move(mid=60, *, quantity="-4", before="10", after="6", warehouse=1, location=1, batch=7, tx=8,
+                 ref_id=50):
+    return dict(id=mid, product_id=1, warehouse_id=warehouse, location_id=location, batch_id=batch,
+                quantity=Decimal(quantity), balance_before=Decimal(before), balance_after=Decimal(after),
+                reference_type="STOCK_ADJUSTMENT_REQUEST", reference_id=ref_id, stock_transaction_id=tx,
+                movement_type="STOCK_ADJUST")
+
+
+@pytest.mark.parametrize("move, tx_quantity, expected", [
+    (_scoped_move(), "-4", "CONSISTENT"),                         # exact scope, matching delta
+    (_scoped_move(batch=99), "-4", "UNRESOLVED"),                 # wrong batch
+    (_scoped_move(location=99), "-4", "UNRESOLVED"),              # wrong location
+    (_scoped_move(warehouse=99), "-4", "UNRESOLVED"),             # wrong warehouse
+    (_scoped_move(), "-3", "UNRESOLVED"),                         # transaction != movement delta
+    (_scoped_move(after="7"), "-4", "UNRESOLVED"),                # broken before/delta/after
+    (None, "-4", "UNRESOLVED"),                                   # non-zero but no movement
+    (_scoped_move(quantity="-4"), "0", "UNRESOLVED"),             # zero delta with a fabricated movement
+    (None, "0", "CONSISTENT"),                                    # zero delta, no movement
+])
+def test_approved_adjustment_movement_must_match_exact_scope_and_delta(move, tx_quantity, expected):
+    results = _link_results(
+        transactions=[dict(id=8, product_id=1, transaction_type="ADJUST", quantity=Decimal(tx_quantity))],
+        movements=[move] if move else [],
+        adjustment_requests=[_scoped_request()],
+        adjustment_approval_audits=[_approve_audit(50, 8)],
+    )
+    assert results[50]["classification"] == expected
+
+
+def test_two_movements_for_one_approval_are_unresolved():
+    results = _link_results(
+        transactions=[dict(id=8, product_id=1, transaction_type="ADJUST", quantity=Decimal("-4"))],
+        movements=[_scoped_move(60), _scoped_move(61)],
+        adjustment_requests=[_scoped_request()],
+        adjustment_approval_audits=[_approve_audit(50, 8)],
+    )
+    assert results[50]["classification"] == "UNRESOLVED"
