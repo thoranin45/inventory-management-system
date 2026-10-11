@@ -19,7 +19,7 @@ Run from `frontend/`:
 |---|---|
 | `npm ci` | Install the exact locked dependencies |
 | `npm run dev` | Start the development server on port 3000 |
-| `npm run typecheck` | TypeScript check, no output files |
+| `npm run typecheck` | Generate Next.js route types with `next typegen` (git-ignored output), then run the TypeScript check |
 | `npm run lint` | ESLint |
 | `npm test` | Vitest unit and component tests (jsdom); never contacts a backend |
 | `npm run build` | Production build with standalone output |
