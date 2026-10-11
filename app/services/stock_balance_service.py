@@ -41,13 +41,15 @@ def _enrich_balances(db: Session, rows, today, *, is_transit: bool) -> list[dict
 
     batch_ids = {r.batch_id for r in rows if r.batch_id is not None}
     expiry = {}
+    lots = {}
     if batch_ids:
-        for bid, exp in (
-            db.query(ProductBatch.id, ProductBatch.expiry_date)
+        for bid, exp, lot in (
+            db.query(ProductBatch.id, ProductBatch.expiry_date, ProductBatch.lot_no)
             .filter(ProductBatch.id.in_(batch_ids))
             .all()
         ):
             expiry[bid] = exp
+            lots[bid] = lot
     out = []
     for r in rows:
         exp = expiry.get(r.batch_id)
@@ -64,6 +66,8 @@ def _enrich_balances(db: Session, rows, today, *, is_transit: bool) -> list[dict
             "updated_at": r.updated_at,
             "is_transit": is_transit,
             "batch_expiry_date": exp,
+            # Phase 14D (additive): lets an exact-balance picker name the lot.
+            "batch_lot_no": lots.get(r.batch_id),
             "days_to_expiry": batch_eligibility.days_to_expiry(exp, today) if exp is not None else None,
             "is_expired": batch_eligibility.is_expired(exp, today) if exp is not None else False,
             "as_of_date": today,

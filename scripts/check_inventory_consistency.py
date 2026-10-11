@@ -224,10 +224,34 @@ def _analyze_adjustment_links(snapshot, transactions, movements, linked, report)
             and all(m.get("stock_transaction_id") == transaction_id for m in own_moves)
             and len(moves) <= 1
             and len(own_moves) <= 1
+            and _movement_matches_request(request, transaction, moves, own_moves)
         )
         result(request, "CONSISTENT" if valid else "UNRESOLVED",
                "Zero-difference approval: transaction without movement" if valid and not moves else "",
                movement_ids=[m["id"] for m in moves], audited_stock_transaction_id=audited_id)
+
+
+def _movement_matches_request(request, transaction, moves, own_moves):
+    """Phase 14D: a non-zero approval has EXACTLY one movement -- linked by
+    the transaction FK and referencing the request -- on the request's exact
+    (product, warehouse, location, batch) scope, carrying the transaction's
+    signed quantity with consistent before/after arithmetic. A zero-difference
+    approval has none. Scope keys are compared when the snapshot carries
+    them (the live diagnostic always does)."""
+    if transaction is None:
+        return False
+    quantity = transaction["quantity"]
+    if quantity == 0:
+        return not moves and not own_moves
+    if len(moves) != 1 or len(own_moves) != 1 or moves[0]["id"] != own_moves[0]["id"]:
+        return False
+    movement = moves[0]
+    if movement["product_id"] != request["product_id"] or movement["quantity"] != quantity:
+        return False
+    if movement["balance_before"] + movement["quantity"] != movement["balance_after"]:
+        return False
+    return all(movement[key] == request[key] for key in ("warehouse_id", "location_id", "batch_id")
+               if key in request)
 
 
 def _analyze_timestamp_provenance(snapshot, movements, report):
@@ -432,8 +456,8 @@ def diagnose_inventory(engine, today: date | None = None) -> list[dict]:
             "stock_transaction_id, created_at FROM inventory_movements"
         ),
         "adjustment_requests": (
-            "SELECT id, reference_number, status, product_id, stock_transaction_id "
-            "FROM stock_adjustment_requests"
+            "SELECT id, reference_number, status, product_id, warehouse_id, location_id, batch_id, "
+            "stock_transaction_id FROM stock_adjustment_requests"
         ),
         "adjustment_approval_audits": (
             "SELECT record_id, description FROM audit_logs "

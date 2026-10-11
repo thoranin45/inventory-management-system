@@ -5,11 +5,17 @@ from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
+from app.core import batch_eligibility
 from app.core.exceptions import (
+    AdjustmentBalanceNotFoundException,
+    AdjustmentBatchRequiredException,
+    AdjustmentBelowReservedException,
+    AdjustmentRequestBatchNotSupportedException,
     AdjustmentRequestForbiddenException,
     AdjustmentRequestNotFoundException,
     AdjustmentRequestNotPendingException,
-    BatchTrackedAdjustmentException,
+    AdjustmentRuleViolationException,
+    BatchNotFoundException,
     IdempotencyKeyConflictException,
     ProductNotFoundException,
     SelfApprovalNotAllowedException,
@@ -19,7 +25,9 @@ from app.core.unit_of_work import UnitOfWork
 from app.models import (
     AuditLog,
     Product,
+    ProductBatch,
     StockAdjustmentRequest,
+    StockBalance,
     StockOperationReceipt,
     User,
     Warehouse,
@@ -32,6 +40,8 @@ from app.repositories.stock_adjustment_request_repository import (
 from app.repositories.stock_balance_repository import StockBalanceRepository
 from app.repositories.stock_repository import StockRepository
 from app.schemas.stock_adjustment_request_schema import (
+    AdjustmentBalanceRef,
+    AdjustmentBatchRef,
     AdjustmentRequestHistoryEntry,
     LocationRef,
     ProductRef,
@@ -61,9 +71,53 @@ def _create_fingerprint(data: StockAdjustmentRequestCreate) -> str:
         "reason_code": data.reason_code,
         "notes": data.notes or None,
     }
+    # Phase 14D (D7): only when non-null, so every omitted/null-batch
+    # fingerprint stays byte-identical to Phase 14B/14C.
+    if data.batch_id is not None:
+        payload["batch_id"] = data.batch_id
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     ).hexdigest()
+
+
+# Phase 14D (D5/B1): reasons that may only REDUCE a batch balance. Applies to
+# batch-level requests only -- non-batch requests keep their 14B/14C rules.
+_BATCH_DECREASE_ONLY_REASONS = frozenset({"DAMAGE", "LOSS_THEFT", "EXPIRY_WRITE_OFF"})
+
+
+def _resolve_batch(db: Session, product: Product, batch_id: int | None) -> ProductBatch | None:
+    """D1/D8 batch identity. A batch-tracked product needs a batch, any other
+    product must not name one; a missing batch and another product's batch
+    answer identically (404), so the response never reveals which exists."""
+    if product.track_batch and batch_id is None:
+        raise AdjustmentBatchRequiredException()
+    if not product.track_batch and batch_id is not None:
+        raise AdjustmentRequestBatchNotSupportedException()
+    if batch_id is None:
+        return None
+    batch = db.get(ProductBatch, batch_id)
+    if batch is None or batch.product_id != product.id:
+        raise BatchNotFoundException()
+    return batch
+
+
+def _check_batch_rules(
+    reason_code: str, observed: Decimal, requested: Decimal, batch: ProductBatch, status_code: int,
+) -> None:
+    """D4/D5 for a BATCH request. 422 when creating, 409 when an existing
+    pending request is no longer eligible at approval."""
+    if reason_code in _BATCH_DECREASE_ONLY_REASONS and not requested < observed:
+        raise AdjustmentRuleViolationException(
+            f"{reason_code} on a batch must reduce the quantity "
+            "(requested quantity below observed quantity)",
+            status_code,
+        )
+    if reason_code == "EXPIRY_WRITE_OFF" and not batch_eligibility.is_expired(batch):
+        raise AdjustmentRuleViolationException(
+            "EXPIRY_WRITE_OFF requires a batch whose expiry date is before today's "
+            "business date (Asia/Bangkok); a batch expiring today is still usable",
+            status_code,
+        )
 
 
 def _approve_fingerprint(request_id: int) -> str:
@@ -86,6 +140,18 @@ def _build_detail_response(
     location = location or db.get(WarehouseLocation, request.location_id)
     requested_by = db.get(User, request.requested_by_user_id)
     reviewed_by = db.get(User, request.reviewed_by_user_id) if request.reviewed_by_user_id else None
+    batch = db.get(ProductBatch, request.batch_id) if request.batch_id is not None else None
+    balance = (
+        db.query(StockBalance)
+        .filter(
+            StockBalance.product_id == request.product_id,
+            StockBalance.warehouse_id == request.warehouse_id,
+            StockBalance.location_id == request.location_id,
+            StockBalance.batch_id.is_(None) if request.batch_id is None
+            else StockBalance.batch_id == request.batch_id,
+        )
+        .first()
+    )
 
     history_rows = (
         db.query(AuditLog)
@@ -112,6 +178,20 @@ def _build_detail_response(
         reviewed_at=request.reviewed_at,
         completed_at=request.completed_at,
         stock_transaction_id=request.stock_transaction_id,
+        batch=(
+            AdjustmentBatchRef(
+                id=batch.id, lot_no=batch.lot_no, expiry_date=batch.expiry_date,
+                is_expired=batch_eligibility.is_expired(batch),
+            )
+            if batch is not None else None
+        ),
+        current_balance=(
+            AdjustmentBalanceRef(
+                on_hand=balance.on_hand_qty, reserved=balance.reserved_qty,
+                available=balance.on_hand_qty - balance.reserved_qty,
+            )
+            if balance is not None else None
+        ),
         history=[
             AdjustmentRequestHistoryEntry(
                 action=row.action, actor=row.username or "system",
@@ -173,10 +253,25 @@ def create_adjustment_request_service(
         if product is None:
             raise ProductNotFoundException()
 
-        # Fail fast at create time; approve re-checks this too (track_batch
-        # could flip in between) -- never weakened, see execute_adjustment_mutation.
-        if product.track_batch:
-            raise BatchTrackedAdjustmentException()
+        # Phase 14D (D1-D6): batch identity, then -- for a batch request --
+        # the EXACT (product, warehouse, location, batch) balance, reason
+        # rules and an early reserved-floor check. Never a fallback to
+        # another batch, location or the unbatched row, and never creating a
+        # balance. Approve re-checks all of it under lock. A non-batch request
+        # keeps its Phase 14B/14C behavior exactly.
+        batch = _resolve_batch(db, product, data.batch_id)
+        if batch is not None:
+            balance = balance_repo.get_exact(
+                product_id=product.id, warehouse_id=warehouse.id, location_id=location.id,
+                batch_id=batch.id,
+            )
+            if balance is None:
+                raise AdjustmentBalanceNotFoundException()
+            _check_batch_rules(
+                data.reason_code, data.observed_quantity, data.requested_quantity, batch, 422,
+            )
+            if data.requested_quantity < balance.reserved_qty:
+                raise AdjustmentBelowReservedException(balance.reserved_qty)
 
         # CREATE takes no row lock (it never touches StockBalance, unlike
         # every mutating endpoint whose lock_inventory() already serialises
@@ -196,7 +291,7 @@ def create_adjustment_request_service(
                     product_id=product.id,
                     warehouse_id=warehouse.id,
                     location_id=location.id,
-                    batch_id=None,
+                    batch_id=batch.id if batch is not None else None,
                     observed_quantity=data.observed_quantity,
                     requested_quantity=data.requested_quantity,
                     reason_code=data.reason_code,
@@ -305,12 +400,41 @@ def approve_adjustment_request_service(
         # consistency) -- could have changed since the request was created.
         warehouse, location = balance_repo.resolve_storage(request.warehouse_id, request.location_id)
 
-        current_balance = balance_repo.get_balance_for_update(
-            product_id=request.product_id, warehouse_id=warehouse.id, location_id=location.id, batch_id=None,
-        )
-        actual_quantity = current_balance.on_hand_qty if current_balance is not None else Decimal("0")
-        if actual_quantity != Decimal(str(request.observed_quantity)):
-            raise StaleQuantityConflictException(actual_quantity)
+        if request.batch_id is None:
+            # Non-batch: exactly the Phase 14B/14C check (an absent unbatched
+            # balance reads as 0 and may still be initialised by the core).
+            current_balance = balance_repo.get_balance_for_update(
+                product_id=request.product_id, warehouse_id=warehouse.id, location_id=location.id,
+                batch_id=None,
+            )
+            actual_quantity = current_balance.on_hand_qty if current_balance is not None else Decimal("0")
+            if actual_quantity != Decimal(str(request.observed_quantity)):
+                raise StaleQuantityConflictException(actual_quantity)
+        else:
+            # Phase 14D batch request, re-validated AFTER the inventory locks
+            # (product -> batches -> balances, taken by lock_inventory above):
+            # identity, the exact balance, stale count, reason rules and the
+            # reserved floor. Anything no longer eligible is a 409.
+            product = db.get(Product, request.product_id)
+            batch = db.get(ProductBatch, request.batch_id)
+            if product is None or not product.track_batch or batch is None or batch.product_id != product.id:
+                raise AdjustmentRuleViolationException(
+                    "This batch request is no longer valid for the product", 409,
+                )
+            current_balance = balance_repo.get_balance_for_update(
+                product_id=request.product_id, warehouse_id=warehouse.id, location_id=location.id,
+                batch_id=request.batch_id,
+            )
+            if current_balance is None:
+                raise AdjustmentBalanceNotFoundException()
+            if current_balance.on_hand_qty != Decimal(str(request.observed_quantity)):
+                raise StaleQuantityConflictException(current_balance.on_hand_qty)
+            _check_batch_rules(
+                request.reason_code, Decimal(str(request.observed_quantity)),
+                Decimal(str(request.requested_quantity)), batch, 409,
+            )
+            if Decimal(str(request.requested_quantity)) < current_balance.reserved_qty:
+                raise AdjustmentBelowReservedException(current_balance.reserved_qty)
 
         # Phase 14C: the StockTransaction / InventoryMovement / STOCK_ADJUST
         # audit remark is readable far more broadly than the request itself
@@ -331,6 +455,7 @@ def approve_adjustment_request_service(
             reference_type=ADJUSTMENT_REFERENCE_TYPE,
             reference_id=request.id,
             reference_number=request.reference_number,
+            batch_id=request.batch_id,
         )
 
         now = datetime.now(timezone.utc)
@@ -478,7 +603,7 @@ def list_adjustment_requests_service(
             "product_id": r.product_id, "warehouse_id": r.warehouse_id, "location_id": r.location_id,
             "observed_quantity": r.observed_quantity, "requested_quantity": r.requested_quantity,
             "reason_code": r.reason_code, "requested_by_user_id": r.requested_by_user_id,
-            "created_at": r.created_at,
+            "created_at": r.created_at, "batch_id": r.batch_id,
         }
         for r in items
     ]
