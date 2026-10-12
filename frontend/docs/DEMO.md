@@ -61,11 +61,17 @@ request reaches them.
 
 | Account | Username | Password | Role |
 |---|---|---|---|
-| Admin | `wc_admin` | `Admin123!` | `admin` |
-| Warehouse | `wc_wh` | `Warehouse123!` | `warehouse` |
+| Admin | `wc_admin` | set when seeding (never committed) | `admin` |
+| Warehouse | `wc_wh` | set when seeding (never committed) | `warehouse` |
 
-Credentials live **only** in the seed helper / this document — never in frontend
-source. Rotate them for any shared demo deployment.
+Passwords are not written down in this repository. They are whatever the seed
+helper you ran set: `scripts/seed_demo.py` reads `DEMO_ADMIN_PASSWORD` and
+`DEMO_WH_PASSWORD` from its environment; for the LAN setup, check your local
+helper. Use long, unique values and rotate them for any shared demo deployment.
+
+The opt-in live contract tests never run against these accounts or this
+database. They need a disposable backend seeded for one run; see
+[`../README.md`](../README.md#live-contract-tests-opt-in-guarded).
 
 ### Capabilities
 

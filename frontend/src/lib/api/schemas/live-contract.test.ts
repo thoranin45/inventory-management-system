@@ -1,14 +1,22 @@
 /**
  * Step 0 — LIVE backend contract gate.
  *
- * Opt-in: only runs with `LIVE_BACKEND=1` and a reachable FastAPI on
- * $API_BASE_URL (default http://localhost:8081). It fetches the REAL response
- * bodies and validates them with the production Zod schemas — proving the
- * frontend contracts match the running backend. Not part of `npm test`.
+ * Opt-in and fail-closed. `npm test` skips every block in this file and
+ * contacts nothing. `npm run test:live` (vitest.live.config.mts) enables it,
+ * and src/test/live-guard.ts then refuses to start unless the LIVE_* variables
+ * describe a disposable backend seeded for this run: a loopback origin on the
+ * E2E port, a per-run id, consent bound to both, and per-run warehouse and
+ * admin accounts. Every request goes through `liveFetch`, which first attests
+ * the target (health, readiness, both accounts). The suite fetches the REAL
+ * response bodies and validates them with the production Zod schemas, proving
+ * the frontend contracts match the running backend.
  *
- *   LIVE_BACKEND=1 LIVE_USER=wc_wh LIVE_PASS='Warehouse123!' npm run test:live
+ * Never point it at a development, demo or production backend. Until R0b
+ * provides a verified disposable environment it is not expected to run; see
+ * frontend/README.md for the variables.
  */
 import { describe, expect, it, beforeAll } from "vitest";
+import { createLiveClient, liveEnabled, resolveLiveConfig } from "@/test/live-guard";
 
 import { userMeSchema, tokenResponseSchema } from "./auth";
 import {
@@ -71,15 +79,25 @@ import { salesReturnEnvelope } from "./sales";
 import { auditLogListSchema } from "./audit";
 import { errorResponseSchema } from "../errors";
 
-const LIVE = process.env.LIVE_BACKEND === "1";
-const BASE = (process.env.API_BASE_URL ?? "http://localhost:8081").replace(/\/+$/, "");
-const USER = process.env.LIVE_USER ?? "wc_wh";
-const PASS = process.env.LIVE_PASS ?? "Warehouse123!";
+// Built only when LIVE_BACKEND=1. An incomplete or unsafe environment throws
+// here and fails the file before any request is made.
+const LIVE = liveEnabled(process.env);
+const client = LIVE ? createLiveClient(resolveLiveConfig(process.env)) : null;
+const USER = client?.config.warehouse.username ?? "";
+const PASS = client?.config.warehouse.password ?? "";
+const ADMIN_USER = client?.config.admin.username ?? "";
+const ADMIN_PASS = client?.config.admin.password ?? "";
+
+/** This file's only way to reach the backend: attested, origin-locked, with a timeout. */
+function liveFetch(path: string, init?: RequestInit): Promise<Response> {
+  if (!client) throw new Error("The live contract suite is disabled (LIVE_BACKEND is not 1).");
+  return client.request(path, init);
+}
 
 let token = "";
 
 async function api(path: string, init: RequestInit = {}) {
-  return fetch(BASE + path, {
+  return liveFetch(path, {
     ...init,
     headers: { accept: "application/json", authorization: `Bearer ${token}`, ...(init.headers ?? {}) },
   });
@@ -87,7 +105,7 @@ async function api(path: string, init: RequestInit = {}) {
 
 describe.skipIf(!LIVE)("live backend contract (Step 0)", () => {
   beforeAll(async () => {
-    const res = await fetch(BASE + "/api/v1/auth/token", {
+    const res = await liveFetch("/api/v1/auth/token", {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ username: USER, password: PASS, grant_type: "password" }),
@@ -166,7 +184,7 @@ describe.skipIf(!LIVE)("live backend contract (Step 0)", () => {
   });
 
   it("10 · error envelope carries request_id (401 + 422)", async () => {
-    const noAuth = await fetch(BASE + "/api/v1/products");
+    const noAuth = await liveFetch("/api/v1/products");
     expect(noAuth.status).toBe(401);
     const e401 = errorResponseSchema.parse(await noAuth.json());
     expect(e401.request_id ?? noAuth.headers.get("x-request-id")).toBeTruthy();
@@ -183,20 +201,17 @@ describe.skipIf(!LIVE)("live backend contract (Step 0)", () => {
  *
  * Read checks run whenever LIVE_BACKEND=1. The state-changing checks
  * (create → confirm → cancel) only run with LIVE_SALES_MUTATE=1 and operate on
- * a brand-new throwaway draft on the local dev DB — never an existing record.
+ * a brand-new throwaway draft on the disposable target — never an existing record.
  *
- *   LIVE_BACKEND=1 LIVE_SALES_MUTATE=1 \
- *   LIVE_ADMIN_USER=wc_admin LIVE_ADMIN_PASS='Admin123!' npm run test:live
+ *   LIVE_SALES_MUTATE=1 npm run test:live
  */
 const MUTATE = process.env.LIVE_SALES_MUTATE === "1";
-const ADMIN_USER = process.env.LIVE_ADMIN_USER ?? "wc_admin";
-const ADMIN_PASS = process.env.LIVE_ADMIN_PASS ?? "Admin123!";
 
 describe.skipIf(!LIVE)("live Sales Order contract (Phase 3)", () => {
   let adminToken = "";
 
   async function adminApi(path: string, init: RequestInit = {}) {
-    return fetch(BASE + path, {
+    return liveFetch(path, {
       ...init,
       headers: {
         accept: "application/json",
@@ -207,7 +222,7 @@ describe.skipIf(!LIVE)("live Sales Order contract (Phase 3)", () => {
   }
 
   beforeAll(async () => {
-    const res = await fetch(BASE + "/api/v1/auth/token", {
+    const res = await liveFetch("/api/v1/auth/token", {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ username: ADMIN_USER, password: ADMIN_PASS, grant_type: "password" }),
@@ -307,15 +322,14 @@ describe.skipIf(!LIVE)("live Sales Order contract (Phase 3)", () => {
  * runs only with LIVE_PICKPACK_MUTATE=1 on a brand-new throwaway order it
  * creates and drives all the way to READY_TO_SHIP.
  *
- *   LIVE_BACKEND=1 LIVE_PICKPACK_MUTATE=1 LIVE_ADMIN_USER=wc_admin \
- *   LIVE_ADMIN_PASS='Admin123!' npm run test:live
+ *   LIVE_PICKPACK_MUTATE=1 npm run test:live
  */
 const PP_MUTATE = process.env.LIVE_PICKPACK_MUTATE === "1";
 
 describe.skipIf(!LIVE)("live Picking / Packing contract (Phase 4)", () => {
   let adminToken = "";
   async function adminApi(path: string, init: RequestInit = {}) {
-    return fetch(BASE + path, {
+    return liveFetch(path, {
       ...init,
       headers: { accept: "application/json", authorization: `Bearer ${adminToken}`, ...(init.headers ?? {}) },
     });
@@ -323,7 +337,7 @@ describe.skipIf(!LIVE)("live Picking / Packing contract (Phase 4)", () => {
   const jsonHeaders = { "content-type": "application/json" };
 
   beforeAll(async () => {
-    const res = await fetch(BASE + "/api/v1/auth/token", {
+    const res = await liveFetch("/api/v1/auth/token", {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ username: ADMIN_USER, password: ADMIN_PASS, grant_type: "password" }),
@@ -480,8 +494,7 @@ describe.skipIf(!LIVE)("live Picking / Packing contract (Phase 4)", () => {
  * separate draft PO it cancels) runs only with LIVE_PO_MUTATE=1 on brand-new
  * throwaway POs it creates.
  *
- *   LIVE_BACKEND=1 LIVE_PO_MUTATE=1 LIVE_ADMIN_USER=wc_admin \
- *   LIVE_ADMIN_PASS='Admin123!' npm run test:live
+ *   LIVE_PO_MUTATE=1 npm run test:live
  */
 const PO_MUTATE = process.env.LIVE_PO_MUTATE === "1";
 
@@ -489,7 +502,7 @@ describe.skipIf(!LIVE)("live Purchase Order + Receiving contract (Phase 5)", () 
   let adminToken = "";
   const jsonHeaders = { "content-type": "application/json" };
   async function adminApi(path: string, init: RequestInit = {}) {
-    return fetch(BASE + path, {
+    return liveFetch(path, {
       ...init,
       headers: { accept: "application/json", authorization: `Bearer ${adminToken}`, ...(init.headers ?? {}) },
     });
@@ -498,7 +511,7 @@ describe.skipIf(!LIVE)("live Purchase Order + Receiving contract (Phase 5)", () 
     (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`);
 
   beforeAll(async () => {
-    const res = await fetch(BASE + "/api/v1/auth/token", {
+    const res = await liveFetch("/api/v1/auth/token", {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ username: ADMIN_USER, password: ADMIN_PASS, grant_type: "password" }),
@@ -644,7 +657,7 @@ describe.skipIf(!LIVE)("live Purchase Order + Receiving contract (Phase 5)", () 
  * operational warehouse+location with stock at the destination (dev seed
  * `scratchpad/qa/seed_transfer_dest.py`).
  *
- *   LIVE_BACKEND=1 LIVE_TRANSFER_MUTATE=1 npm run test:live
+ *   LIVE_TRANSFER_MUTATE=1 npm run test:live
  */
 const TR_MUTATE = process.env.LIVE_TRANSFER_MUTATE === "1";
 const trUuid = () =>
@@ -655,7 +668,7 @@ describe.skipIf(!LIVE)("live Inventory Transfer contract (Phase 6)", () => {
 
   beforeAll(async () => {
     if (token) return;
-    const res = await fetch(BASE + "/api/v1/auth/token", {
+    const res = await liveFetch("/api/v1/auth/token", {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ username: USER, password: PASS, grant_type: "password" }),
@@ -843,7 +856,7 @@ describe.skipIf(!LIVE)("live Inventory Transfer contract (Phase 6)", () => {
  * LIVE_MASTER_MUTATE=1, using QA-P7-<uuid> throwaway records it cleans up
  * (products soft-delete; category/customer/supplier hard-delete).
  *
- *   LIVE_BACKEND=1 LIVE_MASTER_MUTATE=1 npm run test:live
+ *   LIVE_MASTER_MUTATE=1 npm run test:live
  * ==========================================================================*/
 const MD_MUTATE = process.env.LIVE_MASTER_MUTATE === "1";
 
@@ -879,14 +892,14 @@ describe.skipIf(!LIVE)("live Product / Master-Data contract (Phase 7)", () => {
 
   beforeAll(async () => {
     if (!token) {
-      const res = await fetch(`${BASE}/api/v1/auth/token`, {
+      const res = await liveFetch(`/api/v1/auth/token`, {
         method: "POST",
         headers: { "content-type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({ username: USER, password: PASS, grant_type: "password" }),
       });
       token = tokenResponseSchema.parse(await res.json()).access_token;
     }
-    const res = await fetch(`${BASE}/api/v1/auth/token`, {
+    const res = await liveFetch(`/api/v1/auth/token`, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ username: ADMIN_USER, password: ADMIN_PASS, grant_type: "password" }),
@@ -895,7 +908,7 @@ describe.skipIf(!LIVE)("live Product / Master-Data contract (Phase 7)", () => {
   });
 
   const admin = (path: string, init: RequestInit = {}) =>
-    fetch(BASE + path, {
+    liveFetch(path, {
       ...init,
       headers: { accept: "application/json", authorization: `Bearer ${adminToken}`, ...(init.headers ?? {}) },
     });
@@ -1058,12 +1071,12 @@ describe.skipIf(!LIVE)("live Product / Master-Data contract (Phase 7)", () => {
 
 /* ============================================================================
  * Phase 8 — Reports. Read-only; no mutation needed. Runs with LIVE_BACKEND=1.
- *   LIVE_BACKEND=1 npm run test:live
+ *   npm run test:live
  * ==========================================================================*/
 describe.skipIf(!LIVE)("live Reports contract (Phase 8)", () => {
   beforeAll(async () => {
     if (token) return;
-    const res = await fetch(`${BASE}/api/v1/auth/token`, {
+    const res = await liveFetch(`/api/v1/auth/token`, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ username: USER, password: PASS, grant_type: "password" }),
@@ -1125,7 +1138,7 @@ describe.skipIf(!LIVE)("live Reports contract (Phase 8)", () => {
 
   it("R8-6: reports are require_warehouse — the warehouse token reads them; no token → 401", async () => {
     expect((await api("/api/v1/reports/operational-stock?page_size=1")).status).toBe(200);
-    expect((await fetch(`${BASE}/api/v1/reports/sales`)).status).toBe(401);
+    expect((await liveFetch(`/api/v1/reports/sales`)).status).toBe(401);
   });
 });
 
@@ -1136,7 +1149,7 @@ describe.skipIf(!LIVE)("live Reports contract (Phase 8)", () => {
  * complete flow runs only with LIVE_SHIP_MUTATE=1 on a brand-new throwaway QA
  * order and is net-stock-neutral (ships qty N, returns qty N).
  *
- *   LIVE_BACKEND=1 LIVE_SHIP_MUTATE=1 npm run test:live
+ *   LIVE_SHIP_MUTATE=1 npm run test:live
  * ==========================================================================*/
 const SHIP_MUTATE = process.env.LIVE_SHIP_MUTATE === "1";
 
@@ -1146,14 +1159,14 @@ describe.skipIf(!LIVE)("live Shipping / Return / Complete / Audit contract (Phas
 
   beforeAll(async () => {
     if (!token) {
-      const res = await fetch(`${BASE}/api/v1/auth/token`, {
+      const res = await liveFetch(`/api/v1/auth/token`, {
         method: "POST",
         headers: { "content-type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({ username: USER, password: PASS, grant_type: "password" }),
       });
       token = tokenResponseSchema.parse(await res.json()).access_token;
     }
-    const res = await fetch(`${BASE}/api/v1/auth/token`, {
+    const res = await liveFetch(`/api/v1/auth/token`, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ username: ADMIN_USER, password: ADMIN_PASS, grant_type: "password" }),
@@ -1162,7 +1175,7 @@ describe.skipIf(!LIVE)("live Shipping / Return / Complete / Audit contract (Phas
   });
 
   const admin = (path: string, init: RequestInit = {}) =>
-    fetch(BASE + path, { ...init, headers: { accept: "application/json", authorization: `Bearer ${adminToken}`, ...(init.headers ?? {}) } });
+    liveFetch(path, { ...init, headers: { accept: "application/json", authorization: `Bearer ${adminToken}`, ...(init.headers ?? {}) } });
 
   it("P9-1: GET /audit-logs/ is a BARE ARRAY for an admin; a warehouse user is 403", async () => {
     const a = await admin("/api/v1/audit-logs/");
@@ -1181,7 +1194,7 @@ describe.skipIf(!LIVE)("live Shipping / Return / Complete / Audit contract (Phas
   });
 
   it("P9-2: ship/complete/return reject a non-eligible order with the right code", async () => {
-    const list = salesReportEnvelope.parse(await (await api("/api/v1/sales-orders?page=1&page_size=50")).json());
+    const list = salesReportEnvelope.parse(await (await api("/api/v1/sales-orders/?page=1&page_size=50")).json());
     const draft = list.data.items.find((r) => r.status === "DRAFT");
     if (!draft) return;
     const s = await api(`/api/v1/sales-orders/${draft.id}/ship`, { method: "POST" });
@@ -1200,7 +1213,7 @@ describe.skipIf(!LIVE)("live Shipping / Return / Complete / Audit contract (Phas
   });
 
   it("P9-3: return body validation — empty items is rejected", async () => {
-    const list = salesReportEnvelope.parse(await (await api("/api/v1/sales-orders?page=1&page_size=50")).json());
+    const list = salesReportEnvelope.parse(await (await api("/api/v1/sales-orders/?page=1&page_size=50")).json());
     const any = list.data.items[0];
     if (!any) return;
     const r = await api(`/api/v1/sales-orders/${any.id}/return`, { method: "POST", headers: jh, body: JSON.stringify({ items: [] }) });
