@@ -1,7 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
+import { DEFAULT_SCANNER_TIMING } from "@/components/work/use-scanner";
 import { ApiError } from "@/lib/api/errors";
 
 /* ------------------------------- mocks -------------------------------- */
@@ -63,7 +64,24 @@ async function startScanning(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: /start scanning/i }));
 }
 
+/*
+ * Deterministic scanner clock. useScanner ignores a repeat of the same code
+ * inside DEFAULT_SCANNER_TIMING.dedupeMs, measured with Date.now(). On a fast
+ * runner two back-to-back scans of the same barcode can land inside that
+ * window, so a deliberate second scan was silently de-duplicated (a CI-only
+ * failure). Date.now() is pinned per test and only moves when a test says so.
+ */
+let clock = 0;
+let nowSpy: MockInstance<() => number>;
+
+/** A deliberate new scan: step the clock well past the dedupe window first. */
 async function scan(user: ReturnType<typeof userEvent.setup>, code: string) {
+  clock += DEFAULT_SCANNER_TIMING.dedupeMs + 1_000;
+  await typeScan(user, code);
+}
+
+/** Type a scan at the current clock (no time passes — used for bounce tests). */
+async function typeScan(user: ReturnType<typeof userEvent.setup>, code: string) {
   const input = screen.getByLabelText("Barcode scan input");
   await user.click(input);
   await user.type(input, `${code}{Enter}`);
@@ -77,12 +95,18 @@ beforeEach(() => {
   // — a left-over queued value from one test would otherwise silently shift
   // which response the NEXT test's resolveBarcode call receives.
   vi.resetAllMocks();
+  clock = 1_700_000_000_000;
+  nowSpy = vi.spyOn(Date, "now").mockImplementation(() => clock);
   try {
     window.sessionStorage.clear();
   } catch {
     /* ignore */
   }
   saveState = { isPending: false, isError: false, error: null, reset: vi.fn() };
+});
+
+afterEach(() => {
+  nowSpy.mockRestore();
 });
 
 /* ------------------------------- tests ------------------------------- */
@@ -178,8 +202,11 @@ describe("StockOutConsole — scan session", () => {
 
     resolveBarcode.mockResolvedValueOnce(lookupResult(PRODUCT));
     await scan(user, "880000000005");
+    expect(await screen.findByText(/Matched — ready to issue 1/i)).toBeInTheDocument();
     resolveBarcode.mockResolvedValueOnce(lookupResult(PRODUCT));
     await scan(user, "880000000005");
+    expect(await screen.findByText(/Matched — ready to issue 2/i)).toBeInTheDocument();
+    expect(resolveBarcode).toHaveBeenCalledTimes(3); // availability lookup + 2 scans
     expect(screen.getByText("2", { selector: "span.font-bold" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /undo last scan/i }));
@@ -198,11 +225,49 @@ describe("StockOutConsole — scan session", () => {
 
     resolveBarcode.mockResolvedValueOnce(lookupResult(PRODUCT, "1.000"));
     await scan(user, "880000000005");
+    expect(await screen.findByText(/Matched — ready to issue 1/i)).toBeInTheDocument();
     resolveBarcode.mockResolvedValueOnce(lookupResult(PRODUCT, "1.000"));
     await scan(user, "880000000005");
+    expect(await screen.findByText(/Matched — ready to issue 2/i)).toBeInTheDocument();
 
     expect(await screen.findByText(/Over the last-known available quantity/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /issue 2 items/i })).toBeEnabled();
+  });
+
+  it("ignores a bounced repeat of the same barcode inside the dedupe window", async () => {
+    const user = userEvent.setup();
+    render(<StockOutConsole />);
+    await pick(user, /Coffee 1kg/);
+    await startScanning(user);
+
+    resolveBarcode.mockResolvedValueOnce(lookupResult(PRODUCT));
+    await scan(user, "880000000005");
+    expect(await screen.findByText(/Matched — ready to issue 1/i)).toBeInTheDocument();
+
+    clock += DEFAULT_SCANNER_TIMING.dedupeMs - 1; // still inside the window
+    await typeScan(user, "880000000005");
+
+    expect(resolveBarcode).toHaveBeenCalledTimes(2); // availability lookup + 1 scan
+    expect(screen.getByText("1", { selector: "span.font-bold" })).toBeInTheDocument();
+  });
+
+  it("counts a repeat of the same barcode once the dedupe window has passed", async () => {
+    const user = userEvent.setup();
+    render(<StockOutConsole />);
+    await pick(user, /Coffee 1kg/);
+    await startScanning(user);
+
+    resolveBarcode.mockResolvedValueOnce(lookupResult(PRODUCT));
+    await scan(user, "880000000005");
+    expect(await screen.findByText(/Matched — ready to issue 1/i)).toBeInTheDocument();
+
+    clock += DEFAULT_SCANNER_TIMING.dedupeMs; // exactly at the edge: a new scan
+    resolveBarcode.mockResolvedValueOnce(lookupResult(PRODUCT));
+    await typeScan(user, "880000000005");
+
+    expect(await screen.findByText(/Matched — ready to issue 2/i)).toBeInTheDocument();
+    expect(resolveBarcode).toHaveBeenCalledTimes(3);
+    expect(screen.getByText("2", { selector: "span.font-bold" })).toBeInTheDocument();
   });
 });
 

@@ -1,8 +1,9 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi, beforeEach, type MockInstance } from "vitest";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { ApiError } from "@/lib/api/errors";
+import { DEFAULT_SCANNER_TIMING } from "./use-scanner";
 
 /* ------------------------------ mocks ------------------------------ */
 const push = vi.fn();
@@ -96,6 +97,16 @@ vi.mock("@/lib/query/sales", () => ({
 
 import { FulfillmentConsole } from "./fulfillment-console";
 
+/*
+ * Deterministic scanner clock. useScanner ignores a repeat of the same code
+ * inside DEFAULT_SCANNER_TIMING.dedupeMs, measured with Date.now(). On a fast
+ * runner two back-to-back scans of the same barcode can land inside that
+ * window, so a deliberate second scan was silently de-duplicated (a CI-only
+ * failure). Date.now() is pinned per test and only moves when a test says so.
+ */
+let clock = 0;
+let nowSpy: MockInstance<() => number>;
+
 beforeEach(() => {
   push.mockReset();
   scanMutate.mockReset();
@@ -103,9 +114,17 @@ beforeEach(() => {
   completeMutate.mockReset();
   undoMutate.mockReset();
   detail = makeDetail("PICKING");
+  clock = 1_700_000_000_000;
+  nowSpy = vi.spyOn(Date, "now").mockImplementation(() => clock);
 });
 
+afterEach(() => {
+  nowSpy.mockRestore();
+});
+
+/** A deliberate new scan: step the clock well past the dedupe window first. */
 async function scan(user: ReturnType<typeof userEvent.setup>, code: string) {
+  clock += DEFAULT_SCANNER_TIMING.dedupeMs + 1_000;
   const input = screen.getByLabelText("Barcode scan input");
   await user.click(input);
   await user.type(input, `${code}{Enter}`);
@@ -234,6 +253,7 @@ describe("FulfillmentConsole — complete gating", () => {
     });
 
     await scan(user, "885000000009"); // sugar done
+    expect(await screen.findByText("✓ Picked +2.000 / 2.000")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /complete picking/i })).toBeDisabled();
 
     // coffee is ambiguous — a scan opens the allocation picker (no guessing).
@@ -241,10 +261,17 @@ describe("FulfillmentConsole — complete gating", () => {
     await scan(user, "885000000001");
     let dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByText("LOT-B").closest("button")!);
-    // second pick → alloc 7 (3.000)
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(await screen.findByText("✓ Picked +1.000 / 1.000")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /complete picking/i })).toBeDisabled();
+    // second pick → alloc 7 (3.000) — the same barcode again, a deliberate new scan
     await scan(user, "885000000001");
     dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByText("LOT-A").closest("button")!);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(await screen.findByText("✓ Picked +3.000 / 3.000")).toBeInTheDocument();
+    // 1 sugar + 2 × (ambiguous coffee scan + explicit allocation re-submit)
+    expect(scanMutate).toHaveBeenCalledTimes(5);
 
     const completeBtn = screen.getByRole("button", { name: /complete picking/i });
     expect(completeBtn).toBeEnabled();

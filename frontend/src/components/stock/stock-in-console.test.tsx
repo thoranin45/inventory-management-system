@@ -1,7 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
+import { DEFAULT_SCANNER_TIMING } from "@/components/work/use-scanner";
 import { ApiError } from "@/lib/api/errors";
 
 /* ------------------------------- mocks -------------------------------- */
@@ -76,7 +77,24 @@ async function startScanning(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: /start scanning/i }));
 }
 
+/*
+ * Deterministic scanner clock. useScanner ignores a repeat of the same code
+ * inside DEFAULT_SCANNER_TIMING.dedupeMs, measured with Date.now(). On a fast
+ * runner two back-to-back scans of the same barcode can land inside that
+ * window, so a deliberate second scan was silently de-duplicated (a CI-only
+ * failure). Date.now() is pinned per test and only moves when a test says so.
+ */
+let clock = 0;
+let nowSpy: MockInstance<() => number>;
+
+/** A deliberate new scan: step the clock well past the dedupe window first. */
 async function scan(user: ReturnType<typeof userEvent.setup>, code: string) {
+  clock += DEFAULT_SCANNER_TIMING.dedupeMs + 1_000;
+  await typeScan(user, code);
+}
+
+/** Type a scan at the current clock (no time passes — used for bounce tests). */
+async function typeScan(user: ReturnType<typeof userEvent.setup>, code: string) {
   const input = screen.getByLabelText("Barcode scan input");
   await user.click(input);
   await user.type(input, `${code}{Enter}`);
@@ -88,6 +106,11 @@ function resolvesTo(product: { id: number; product_name: string }) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // clearAllMocks keeps queued mockResolvedValueOnce values; a response queued
+  // for a scan that never reached the backend must not leak into the next test.
+  resolveBarcode.mockReset();
+  clock = 1_700_000_000_000;
+  nowSpy = vi.spyOn(Date, "now").mockImplementation(() => clock);
   try {
     window.sessionStorage.clear();
   } catch {
@@ -96,6 +119,10 @@ beforeEach(() => {
   saveState = { isPending: false, isError: false, error: null, reset: vi.fn() };
   searchParams = new URLSearchParams();
   preselectData = undefined;
+});
+
+afterEach(() => {
+  nowSpy.mockRestore();
 });
 
 /* ------------------------------- tests ------------------------------- */
@@ -169,8 +196,11 @@ describe("StockInConsole — scan session", () => {
 
     resolvesTo({ id: 5, product_name: "Sea Salt 500g" });
     await scan(user, "880000000005");
+    expect(await screen.findByText(/Matched — scanned 1/i)).toBeInTheDocument();
     resolvesTo({ id: 5, product_name: "Sea Salt 500g" });
     await scan(user, "880000000005");
+    expect(await screen.findByText(/Matched — scanned 2/i)).toBeInTheDocument();
+    expect(resolveBarcode).toHaveBeenCalledTimes(2);
     expect(screen.getByText("2", { selector: "span.font-bold" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /undo last scan/i }));
@@ -188,11 +218,49 @@ describe("StockInConsole — scan session", () => {
 
     resolvesTo({ id: 5, product_name: "Sea Salt 500g" });
     await scan(user, "880000000005");
+    expect(await screen.findByText(/Matched — scanned 1/i)).toBeInTheDocument();
     resolvesTo({ id: 5, product_name: "Sea Salt 500g" });
     await scan(user, "880000000005");
+    expect(await screen.findByText(/Matched — scanned 2/i)).toBeInTheDocument();
 
     expect(await screen.findByText(/Over expected quantity/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /save 2 items/i })).toBeEnabled();
+  });
+
+  it("ignores a bounced repeat of the same barcode inside the dedupe window", async () => {
+    const user = userEvent.setup();
+    render(<StockInConsole />);
+    await pick(user, /Sea Salt 500g/);
+    await startScanning(user);
+
+    resolvesTo({ id: 5, product_name: "Sea Salt 500g" });
+    await scan(user, "880000000005");
+    expect(await screen.findByText(/Matched — scanned 1/i)).toBeInTheDocument();
+
+    clock += DEFAULT_SCANNER_TIMING.dedupeMs - 1; // still inside the window
+    await typeScan(user, "880000000005");
+
+    expect(resolveBarcode).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("1", { selector: "span.font-bold" })).toBeInTheDocument();
+  });
+
+  it("counts a repeat of the same barcode once the dedupe window has passed", async () => {
+    const user = userEvent.setup();
+    render(<StockInConsole />);
+    await pick(user, /Sea Salt 500g/);
+    await startScanning(user);
+
+    resolvesTo({ id: 5, product_name: "Sea Salt 500g" });
+    await scan(user, "880000000005");
+    expect(await screen.findByText(/Matched — scanned 1/i)).toBeInTheDocument();
+
+    clock += DEFAULT_SCANNER_TIMING.dedupeMs; // exactly at the edge: a new scan
+    resolvesTo({ id: 5, product_name: "Sea Salt 500g" });
+    await typeScan(user, "880000000005");
+
+    expect(await screen.findByText(/Matched — scanned 2/i)).toBeInTheDocument();
+    expect(resolveBarcode).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("2", { selector: "span.font-bold" })).toBeInTheDocument();
   });
 });
 

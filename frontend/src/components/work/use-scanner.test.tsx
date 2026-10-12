@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import { useScanner } from "./use-scanner";
+import { DEFAULT_SCANNER_TIMING, useScanner } from "./use-scanner";
 
 // The dedupe window is measured against a real `Date.now()`. Under parallel
 // Vitest worker load the wall-clock gap between two `user.type()` bursts can
@@ -46,6 +46,63 @@ describe("useScanner", () => {
     await user.type(input, "ABCDEF{Enter}");
     await user.type(input, "ABCDEF{Enter}"); // Date.now() frozen → within dedupeMs
     expect(onScan).toHaveBeenCalledTimes(1);
+  });
+
+  describe("default 120 ms dedupe window (controlled clock)", () => {
+    // The consoles use DEFAULT_SCANNER_TIMING, so exercise the real default
+    // window. Date.now() only moves when the test advances `clock`.
+    let clock = 0;
+    function DefaultHarness({ onScan }: { onScan: (c: string) => void }) {
+      const s = useScanner({ onScan });
+      return <input aria-label="scan" {...s.inputProps} />;
+    }
+    function setup() {
+      clock = 1_700_000_000_000;
+      vi.spyOn(Date, "now").mockImplementation(() => clock);
+      const user = userEvent.setup();
+      const onScan = vi.fn();
+      render(<DefaultHarness onScan={onScan} />);
+      return { user, onScan, input: screen.getByLabelText("scan") };
+    }
+
+    it("is 120 ms", () => {
+      expect(DEFAULT_SCANNER_TIMING.dedupeMs).toBe(120);
+    });
+
+    it("drops a repeat of the same code 1 ms inside the window", async () => {
+      const { user, onScan, input } = setup();
+      await user.type(input, "ABCDEF{Enter}");
+      clock += DEFAULT_SCANNER_TIMING.dedupeMs - 1;
+      await user.type(input, "ABCDEF{Enter}");
+      expect(onScan).toHaveBeenCalledExactlyOnceWith("ABCDEF");
+    });
+
+    it("accepts a repeat of the same code once the window has elapsed", async () => {
+      const { user, onScan, input } = setup();
+      await user.type(input, "ABCDEF{Enter}");
+      clock += DEFAULT_SCANNER_TIMING.dedupeMs;
+      await user.type(input, "ABCDEF{Enter}");
+      expect(onScan).toHaveBeenCalledTimes(2);
+      expect(onScan).toHaveBeenNthCalledWith(2, "ABCDEF");
+    });
+
+    it("measures the window from the last accepted scan, not from a dropped bounce", async () => {
+      const { user, onScan, input } = setup();
+      await user.type(input, "ABCDEF{Enter}"); // t0 accepted
+      clock += 100;
+      await user.type(input, "ABCDEF{Enter}"); // t0+100 dropped
+      clock += 30;
+      await user.type(input, "ABCDEF{Enter}"); // t0+130 ≥ 120 from t0 → accepted
+      expect(onScan).toHaveBeenCalledTimes(2);
+    });
+
+    it("never de-dupes a different code, even at the same instant", async () => {
+      const { user, onScan, input } = setup();
+      await user.type(input, "ABCDEF{Enter}");
+      await user.type(input, "GHIJKL{Enter}");
+      expect(onScan).toHaveBeenNthCalledWith(1, "ABCDEF");
+      expect(onScan).toHaveBeenNthCalledWith(2, "GHIJKL");
+    });
   });
 
   it("does not submit strings shorter than minChars", async () => {
