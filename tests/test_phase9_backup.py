@@ -1,5 +1,6 @@
 """Phase 9: backup / restore / revision-check tooling behaviour."""
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -111,13 +112,59 @@ def test_backup_requires_encryption_when_policy_set(tmp_path):
     assert "Refusing" in (out.stdout + out.stderr)
 
 
-def test_no_hardcoded_credentials_in_scripts():
-    for path in (ROOT / "scripts").glob("*"):
-        if path.suffix in {".sh", ".py"} and path.is_file():
+# V1-H5C: detect ANY hardcoded credential instead of one historical value (no
+# credential-derived data is kept in the repository). Documentation examples
+# must use an obvious placeholder or an environment reference.
+SYNTHETIC_PASSWORD = "synthetic-fixture-not-a-secret-0000"
+# "postgres" is the stock image default used by .env.*.example templates and CI.
+_PLACEHOLDER_PASSWORDS = {"p", "x", "pass", "password", "...", "change_me", "changeme", "secret", "postgres"}
+_URL_CREDENTIAL = re.compile(r"[a-z][a-z0-9+.-]*://[^\s/:@'\"]+:([^\s/@'\"]+)@", re.IGNORECASE)
+_PGPASSWORD_LITERAL = re.compile(r"PGPASSWORD\s*=\s*['\"]?([^\s'\"]+)")
+
+
+def _is_placeholder(value: str) -> bool:
+    return value.lower() in _PLACEHOLDER_PASSWORDS or value[:1] in "$<{"
+
+
+def _hardcoded_credentials(text: str) -> list[str]:
+    found = _URL_CREDENTIAL.findall(text) + _PGPASSWORD_LITERAL.findall(text)
+    return [value for value in found if not _is_placeholder(value)]
+
+
+def _scripts_with_hardcoded_credentials(scripts_dir: Path) -> list[str]:
+    offenders = []
+    for path in sorted(scripts_dir.rglob("*")):
+        if path.suffix in {".sh", ".py", ".ps1"} and path.is_file():
             text = path.read_text(encoding="utf-8", errors="ignore")
-            assert "01072545" not in text  # the previously committed DB password
-            assert "PGPASSWORD =" not in text
-            assert 'PGPASSWORD="' not in text
+            if _hardcoded_credentials(text) or "PGPASSWORD =" in text or 'PGPASSWORD="' in text:
+                offenders.append(path.relative_to(scripts_dir).as_posix())
+    return offenders
+
+
+def test_no_hardcoded_credentials_in_scripts():
+    assert _scripts_with_hardcoded_credentials(ROOT / "scripts") == []
+
+
+@pytest.mark.parametrize("planted", [
+    f"BACKUP_DATABASE_URL=postgresql://app:{SYNTHETIC_PASSWORD}@db:5432/inventory\n",
+    f"url = 'postgresql+psycopg2://app:{SYNTHETIC_PASSWORD}@localhost/inventory'\n",
+    f"export PGPASSWORD={SYNTHETIC_PASSWORD}\n",
+    f'$env:PGPASSWORD = "{SYNTHETIC_PASSWORD}"\n',
+])
+def test_credential_scan_rejects_a_planted_synthetic_credential(tmp_path, planted):
+    (tmp_path / "nested").mkdir()
+    (tmp_path / "nested" / "leak.sh").write_text(f"#!/bin/sh\n{planted}", encoding="utf-8")
+    assert _scripts_with_hardcoded_credentials(tmp_path) == ["nested/leak.sh"]
+
+
+@pytest.mark.parametrize("documented", [
+    "#   BACKUP_DATABASE_URL   postgresql://user:pass@host:5432/dbname\n",
+    "DATABASE_URL=postgresql+psycopg2://inventory_demo:...@db:5432/inventory_demo\n",
+    "export PGPASSWORD=$DB_PASSWORD\n",
+])
+def test_credential_scan_accepts_documented_placeholders(tmp_path, documented):
+    (tmp_path / "ok.sh").write_text(documented, encoding="utf-8")
+    assert _scripts_with_hardcoded_credentials(tmp_path) == []
 
 
 def test_db_revision_check_requires_explicit_url():

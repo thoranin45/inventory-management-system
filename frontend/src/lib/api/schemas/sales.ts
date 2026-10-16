@@ -342,11 +342,17 @@ export const SHIP_STARTABLE_STATUS = "READY_TO_SHIP";
 export const COMPLETE_STARTABLE_STATUS = "SHIPPED";
 export const RETURNABLE_STATUSES = ["SHIPPED", "COMPLETED"] as const;
 
+/** V1-H1: backend message for a reused Idempotency-Key with a different payload (409). */
+export const RETURN_KEY_CONFLICT = "Idempotency-Key already used with a different payload";
+
 export const SALES_SHIP_ERROR_COPY: Record<string, string> = {
   "Insufficient reserved or on-hand stock":
     "Stock moved since packing — the reserved quantity is no longer on hand. Refresh and re-check the allocation.",
   "Only completed Sales Order can be returned":
     "Only a shipped or completed order can be returned.",
+  // V1-H1: same Idempotency-Key, different items — the earlier submit may already be recorded.
+  [RETURN_KEY_CONFLICT]:
+    "This return was already submitted with different quantities and may already be recorded. Refresh the order to check before starting a new return.",
 };
 
 export function shipErrorCopy(message: string | undefined): string | undefined {

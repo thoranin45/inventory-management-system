@@ -40,3 +40,38 @@ app/static/invoices/*.pdf
 # node_modules / .next / out / coverage / .turbo / test-results out of the
 # root build context (was the ~2.5GB pathological API image).
 frontend/
+
+# ---- V1-H5A hardening ---------------------------------------------------
+# Patterns without **/ only match at the context root; these cover nested
+# copies too. tests/test_v1h5a_build_safety.py checks the effective context.
+**/.env
+**/.env.*
+**/__pycache__/
+**/*.py[cod]
+.coverage.*
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/*.sql
+**/*.dump
+**/*.backup
+**/*.bak
+**/*.sqlite
+**/*.sqlite3
+**/*.tsbuildinfo
+.mypy_cache/
+.ruff_cache/
+.claude/
+# Generated at runtime (barcodes/QR codes/labels/invoices from local data); the
+# Dockerfile recreates the empty directories.
+app/static/
+# Not used at runtime by the API image.
+docs/
+frontend-prototype/
+# R0b-A e2e harness artefacts: protected evidence, never part of a demo image.
+scripts/e2e/
+compose.e2e.yml
+.gitattributes
+# Keep the committed, placeholder-only templates (must stay last).
+!.env.*.example

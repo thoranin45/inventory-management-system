@@ -1207,7 +1207,7 @@ describe.skipIf(!LIVE)("live Shipping / Return / Complete / Audit contract (Phas
     expect(cA.status).toBe(409);
     expect(errorResponseSchema.parse(await cA.json()).message).toMatch(/state conflict.*requires SHIPPED/i);
 
-    const r = await api(`/api/v1/sales-orders/${draft.id}/return`, { method: "POST", headers: jh, body: JSON.stringify({ items: [{ product_id: 1, quantity: "1.000" }] }) });
+    const r = await api(`/api/v1/sales-orders/${draft.id}/return`, { method: "POST", headers: { ...jh, "Idempotency-Key": `so-ret-${trUuid()}` }, body: JSON.stringify({ items: [{ product_id: 1, quantity: "1.000" }] }) });
     expect(r.status).toBe(409);
     expect(errorResponseSchema.parse(await r.json()).message).toMatch(/only completed sales order can be returned/i);
   });
@@ -1216,7 +1216,7 @@ describe.skipIf(!LIVE)("live Shipping / Return / Complete / Audit contract (Phas
     const list = salesReportEnvelope.parse(await (await api("/api/v1/sales-orders/?page=1&page_size=50")).json());
     const any = list.data.items[0];
     if (!any) return;
-    const r = await api(`/api/v1/sales-orders/${any.id}/return`, { method: "POST", headers: jh, body: JSON.stringify({ items: [] }) });
+    const r = await api(`/api/v1/sales-orders/${any.id}/return`, { method: "POST", headers: { ...jh, "Idempotency-Key": `so-ret-${trUuid()}` }, body: JSON.stringify({ items: [] }) });
     expect([409, 422]).toContain(r.status);
   });
 
@@ -1259,13 +1259,21 @@ describe.skipIf(!LIVE)("live Shipping / Return / Complete / Audit contract (Phas
     expect(inv.status).toBe(200);
     expect(inv.headers.get("content-type")).toMatch(/application\/pdf/);
 
-    const ret = await api(`/api/v1/sales-orders/${id}/return`, { method: "POST", headers: jh, body: JSON.stringify({ items: [{ product_id: line.id, quantity: "2.000", reason: "QA net-neutral" }] }) });
+    // V1-H1: the return carries an Idempotency-Key; resubmitting the same return with it replays.
+    const retKey = `so-ret-${trUuid()}`;
+    const retBody = JSON.stringify({ items: [{ product_id: line.id, quantity: "2.000", reason: "QA net-neutral" }] });
+    const ret = await api(`/api/v1/sales-orders/${id}/return`, { method: "POST", headers: { ...jh, "Idempotency-Key": retKey }, body: retBody });
     expect(ret.status).toBe(200);
     const rr = salesReturnEnvelope.parse(await ret.json());
     expect(Number(rr.data.returned_items[0].total_returned)).toBe(2);
     expect(Number(rr.data.returned_items[0].remaining_returnable)).toBe(0);
+    const replay = await api(`/api/v1/sales-orders/${id}/return`, { method: "POST", headers: { ...jh, "Idempotency-Key": retKey }, body: retBody });
+    expect(replay.status).toBe(200);
+    expect(salesReturnEnvelope.parse(await replay.json()).data).toEqual(rr.data); // replayed, not applied again
+    const noKey = await api(`/api/v1/sales-orders/${id}/return`, { method: "POST", headers: jh, body: retBody });
+    expect(noKey.status).toBe(422);
 
-    const over = await api(`/api/v1/sales-orders/${id}/return`, { method: "POST", headers: jh, body: JSON.stringify({ items: [{ product_id: line.id, quantity: "1.000" }] }) });
+    const over = await api(`/api/v1/sales-orders/${id}/return`, { method: "POST", headers: { ...jh, "Idempotency-Key": `so-ret-${trUuid()}` }, body: JSON.stringify({ items: [{ product_id: line.id, quantity: "1.000" }] }) });
     expect(over.status).toBe(409);
     expect(errorResponseSchema.parse(await over.json()).message).toMatch(/exceeds remaining returnable.*Remaining: 0/i);
 

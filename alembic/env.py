@@ -72,16 +72,19 @@ def run_migrations_online() -> None:
         return
 
     from app.core.config import settings
+    from app.core.db_revision import describe_migration_target, migration_target
 
-    config.set_main_option(
-        "sqlalchemy.url",
-        settings.database_url
-    )
-   
+    # V1-H5A: connect only to DATABASE_URL (validated, fail-closed), announce the
+    # target without credentials, and never write the URL into the ini parser
+    # (its %-interpolation errors would echo the password).
+    environment = getattr(settings, "env", "development")  # Settings' own default
+    url = migration_target(settings.database_url, environment)
+    print(f"alembic: migrating {describe_migration_target(url)} (ENV={environment})", file=sys.stderr)
     connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
+        {"sqlalchemy.url": url.render_as_string(hide_password=False)},
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        hide_parameters=True,
     )
 
     try:

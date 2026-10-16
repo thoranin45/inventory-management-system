@@ -102,7 +102,7 @@ See `runbook-incident.md`. Short version:
 
 ## ⚠️ Credential rotation (required before first production deploy)
 
-The database password `01072545` was committed to git history in the original
+A database password was committed to git history in the original
 `scripts/backup_db.ps1` (since removed). **Rotate the PostgreSQL password**
 (and any environment that reused it) before this system holds real data. Git
 history is intentionally not rewritten here.

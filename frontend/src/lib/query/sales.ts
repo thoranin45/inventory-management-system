@@ -175,17 +175,30 @@ export function useCompleteSalesOrder() {
   });
 }
 
+export interface ReturnArgs {
+  id: number;
+  input: SalesReturnInput;
+  /** V1-H1: one key per return intent — reused verbatim when the SAME return is resubmitted */
+  idempotencyKey: string;
+}
+
 /**
  * POST /sales-orders/{id}/return — SHIPPED|COMPLETED only. Per-product (no
- * batch id); the order status is NOT changed. `retry: false` — a retry would
- * add stock again (no idempotency support).
+ * batch id); the order status is NOT changed. V1-H1: the backend requires an
+ * `Idempotency-Key`; the same key + same items replays the recorded return,
+ * the same key + different items is a 409. `retry: false` — an automatic retry
+ * must not invent a new request identity; the caller resubmits with the SAME key.
  */
 export function useReturnSalesOrder() {
   const invalidate = useSalesInvalidation();
-  return useMutation<SalesReturnResult, unknown, { id: number; input: SalesReturnInput }>({
-    mutationFn: async ({ id, input }) => {
+  return useMutation<SalesReturnResult, unknown, ReturnArgs>({
+    mutationFn: async ({ id, input, idempotencyKey }) => {
       const json = salesReturnInput.parse(input);
-      const env = await bffJson(`/api/bff/sales-orders/${id}/return`, salesReturnEnvelope, { method: "POST", json });
+      const env = await bffJson(`/api/bff/sales-orders/${id}/return`, salesReturnEnvelope, {
+        method: "POST",
+        json,
+        headers: { "Idempotency-Key": idempotencyKey },
+      });
       return env.data;
     },
     retry: false,

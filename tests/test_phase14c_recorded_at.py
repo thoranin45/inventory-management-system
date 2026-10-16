@@ -80,7 +80,7 @@ def test_every_movement_write_path_records_an_aware_instant(client, admin_header
     sales._confirm_sales_order(client, admin_headers, so["sales_order_id"])
     sales._ready_sales_order(client, admin_headers, so["sales_order_id"])
     sales._ship_sales_order(client, admin_headers, so["sales_order_id"])
-    _ok(client.post(f"/api/v1/sales-orders/{so['sales_order_id']}/return", headers=admin_headers,
+    _ok(client.post(f"/api/v1/sales-orders/{so['sales_order_id']}/return", headers={**admin_headers, "Idempotency-Key": uuid4().hex},
                     json={"items": [{"product_id": lotted["id"], "quantity": 1, "reason": "write-path"}]}))
 
     db_session.expire_all()

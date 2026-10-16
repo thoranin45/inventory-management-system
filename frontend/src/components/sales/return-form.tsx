@@ -8,14 +8,20 @@ import { Drawer, DrawerContent } from "@/components/ui/drawer";
 import { QuantityDisplay } from "@/components/ui/quantity-display";
 import { isApiError } from "@/lib/api/errors";
 import { compareDecimals, subtractDecimals, sumDecimals } from "@/lib/decimal";
+import { useIdempotentDraft } from "@/lib/idempotent-draft";
 import { useReturnSalesOrder, useSalesOrder } from "@/lib/query/sales";
 import { useProductLookup } from "@/lib/query/sales";
 import {
+  RETURN_KEY_CONFLICT,
   salesReturnLineInput,
   shipErrorCopy,
   type SalesReturnItemResult,
   type SalesReturnLineInput,
 } from "@/lib/api/schemas/sales";
+
+// The draft hook is used only for its persisted per-intent Idempotency-Key; the
+// drawer keeps its own line state, so there is no draft payload.
+const noDraftPayload = () => null;
 
 const inputCls =
   "min-h-11 w-28 rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-[13px] tabular-nums outline-none focus-visible:outline-2 focus-visible:outline-[var(--focus)]";
@@ -32,6 +38,16 @@ function ReturnBody({ id, onClose }: { id: number; onClose: () => void }) {
   const detailQ = useSalesOrder(id);
   const detail = detailQ.data;
   const ret = useReturnSalesOrder();
+  // V1-H1: one Idempotency-Key per return intent, kept (sessionStorage) across
+  // errors, timeouts and reloads so resubmitting the same return replays it
+  // instead of restocking twice; rotated only after a confirmed success or an
+  // explicit "Start a new return".
+  const draft = useIdempotentDraft<never, null>({
+    scope: `sales-return:${id}`,
+    keyPrefix: "so-ret-",
+    buildPayload: noDraftPayload,
+  });
+  const [keyConflict, setKeyConflict] = React.useState(false);
 
   const productIds = React.useMemo(() => (detail?.items ?? []).map((it) => it.product_id), [detail]);
   const lookup = useProductLookup(productIds);
@@ -93,9 +109,11 @@ function ReturnBody({ id, onClose }: { id: number; onClose: () => void }) {
     if (bad) return;
 
     ret.mutate(
-      { id, input: { items: payloadItems } },
+      { id, input: { items: payloadItems }, idempotencyKey: draft.idempotencyKey },
       {
         onSuccess: (data) => {
+          draft.commitSuccess(); // recorded: the next return is a new intent with a new key
+          setKeyConflict(false);
           setResults(data.returned_items);
           setAlreadyReturned((s) => {
             const next = { ...s };
@@ -111,8 +129,10 @@ function ReturnBody({ id, onClose }: { id: number; onClose: () => void }) {
           toast.success("Return recorded", { description: `${data.returned_items.length} line${data.returned_items.length === 1 ? "" : "s"} returned to stock` });
         },
         onError: (error) => {
-          // draft quantities are preserved — we do not clear `lines` on error
+          // draft quantities and the Idempotency-Key are preserved — resubmitting the
+          // same return reuses the key, so an already-recorded return is replayed
           if (isApiError(error)) {
+            if (error.status === 409 && error.message === RETURN_KEY_CONFLICT) setKeyConflict(true);
             setFormError({ message: shipErrorCopy(error.message) ?? error.userMessage, requestId: error.requestId });
           } else {
             setFormError({ message: "The return was rejected. Your entries are kept." });
@@ -210,6 +230,21 @@ function ReturnBody({ id, onClose }: { id: number; onClose: () => void }) {
         </p>
       ) : null}
 
+      {keyConflict ? (
+        <div className="flex justify-end">
+          <Button
+            variant="secondary"
+            onClick={() => {
+              draft.startNewDraft();
+              setKeyConflict(false);
+              setFormError(null);
+            }}
+          >
+            Start a new return
+          </Button>
+        </div>
+      ) : null}
+
       <div className="sticky bottom-0 -mx-4 flex items-center justify-between gap-2 border-t border-[var(--border)] bg-[var(--surface)] px-4 pt-3">
         <span className="text-[12px] text-[var(--muted)]">
           Returning <QuantityDisplay value={total} className="font-semibold text-[var(--foreground)]" />
@@ -218,7 +253,7 @@ function ReturnBody({ id, onClose }: { id: number; onClose: () => void }) {
           <Button variant="ghost" onClick={onClose}>
             Close
           </Button>
-          <Button variant="primary" onClick={submit} disabled={ret.isPending || activeLines.length === 0}>
+          <Button variant="primary" onClick={submit} disabled={ret.isPending || keyConflict || activeLines.length === 0}>
             {ret.isPending ? "Submitting…" : "Record return"}
           </Button>
         </span>

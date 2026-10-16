@@ -4,6 +4,7 @@ import os
 from fastapi import (
     APIRouter,
     Depends,
+    Header,
 )
 from fastapi.responses import FileResponse
 from reportlab.lib import colors
@@ -371,6 +372,9 @@ def return_sales_order_items(
     sales_order_repo: SalesOrderRepositoryDependency,
     balance_repo: StockBalanceRepositoryDependency,
     movement_repo: InventoryMovementRepositoryDependency,
+    # V1-H1: required, same rules as PO/transfer receiving. Missing/invalid -> 422.
+    operation_key: str = Header(..., alias="Idempotency-Key", min_length=1, max_length=128,
+                                pattern=r"^[A-Za-z0-9._:-]+$"),
     current_user: User = Depends(require_warehouse),
 ):
     result = return_sales_order_items_service(
@@ -381,6 +385,7 @@ def return_sales_order_items(
         sales_order_id=sales_order_id,
         data=data,
         current_user=current_user,
+        operation_key=operation_key,
     )
 
     return success_response(

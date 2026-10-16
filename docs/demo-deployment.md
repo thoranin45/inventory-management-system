@@ -211,11 +211,19 @@ did not complete.
 docker compose -f compose.demo.yml --profile seed run --rm seed
 ```
 
-Reads `.env.demo` + `DEMO_API=http://api:8081/api/v1`. Creates the foundation
-warehouses/locations, `wc_admin` / `wc_wh`, products and stock in every state
-(healthy / low / expired / near-expiry / reserved), and drives Sales, Purchase
-Order and Transfer lifecycles through the public API. It refuses to run without
-`SEED_CONFIRM=1` and refuses production-like database targets.
+Reads `.env.demo` + `DEMO_API=http://api:8081/api/v1`. Creates `wc_admin` /
+`wc_wh`, the WEST store, products and stock in every state (healthy / low /
+expired / near-expiry / reserved), and drives Sales, Purchase Order and Transfer
+lifecycles through the public API. It refuses to run without `SEED_CONFIRM=1`
+and refuses production-like database targets.
+
+V1-H5: the target must be a **freshly migrated, never-used** database (expected
+Alembic head, no users or business rows, only the migration-created
+MAIN/DEFAULT and `__TRANSIT__` storage) — otherwise it refuses. It never
+modifies an existing user. All stock enters through the ledgered
+`POST /batches` / `POST /stock/in` with Idempotency-Keys; every API call is
+status-checked and any failure aborts the run. A failed or completed seed is
+**not re-runnable**: reset the data (step 23) and seed again.
 
 The script ends with a **REQUIRED-STATE check**: it reads the data back and, if
 any condition the demo depends on is missing (a demo account, each stock state,

@@ -10,6 +10,7 @@ from app.models import (
     SalesOrder,
     SalesOrderBatchAllocation,
     SalesOrderItem,
+    SalesReturnReceipt,
     StockTransaction,
 )
 
@@ -273,6 +274,16 @@ class SalesOrderRepository:
         self.db.add(transaction)
 
         return transaction
+
+    # V1-H1: sales-return idempotency receipts (parent-scoped, like PO receipts)
+    def get_return_receipt(self, sales_order_id: int, operation_key: str) -> SalesReturnReceipt | None:
+        return (self.db.query(SalesReturnReceipt)
+                .filter_by(sales_order_id=sales_order_id, operation_key=operation_key).first())
+
+    def create_return_receipt(self, receipt: SalesReturnReceipt) -> SalesReturnReceipt:
+        self.db.add(receipt)
+        self.db.flush()  # the unique constraint is checked here, before any stock moves
+        return receipt
 
     def get_returned_quantity(
         self,

@@ -26,6 +26,8 @@ def detail(client, headers, order_id):
 
 def action(client, headers, order_id, name, payload=None):
     method = client.put if name == "cancel" else client.post
+    if name == "return":  # V1-H1: each return call here is a distinct return intent
+        headers = {**headers, "Idempotency-Key": uuid4().hex}
     return method(f"/api/v1/sales-orders/{order_id}/{name}", headers=headers, json=payload)
 
 
