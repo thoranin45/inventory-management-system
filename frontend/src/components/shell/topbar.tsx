@@ -22,7 +22,8 @@ export function Topbar({ onOpenNav }: { onOpenNav: () => void }) {
       .toUpperCase() || "?";
 
   return (
-    <header className="wc-panel z-30 flex items-center gap-3 rounded-[var(--r-xl)] border px-4 shadow-[var(--shadow-sm)] max-[767.98px]:rounded-none max-[767.98px]:border-0 max-[767.98px]:border-b max-[767.98px]:border-[var(--border)] max-[767.98px]:shadow-none">
+    <header className="z-30 flex items-center gap-3 border-b border-[var(--border)] bg-[var(--surface)] px-4">
+
       <button
         type="button"
         aria-label="Open navigation"

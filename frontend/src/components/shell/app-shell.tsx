@@ -30,6 +30,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="wc-app" data-nav-open={navOpen || undefined}>
+      {/* WCAG 2.4.1 bypass block: first tab stop, visible on focus only */}
+      <a href="#content" className="wc-skip-link">
+        Skip to main content
+      </a>
       <div className="wc-topbar">
         <Topbar onOpenNav={() => setNavOpen(true)} />
       </div>
