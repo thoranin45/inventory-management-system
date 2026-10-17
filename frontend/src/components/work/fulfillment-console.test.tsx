@@ -8,13 +8,17 @@ import { DEFAULT_SCANNER_TIMING } from "./use-scanner";
 /* ------------------------------ mocks ------------------------------ */
 const push = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+vi.mock("sonner", () => ({ toast }));
 vi.mock("@tanstack/react-query", () => ({ useQueries: () => [] }));
 
 const scanMutate = vi.fn();
 const startMutate = vi.fn();
 const completeMutate = vi.fn();
 const undoMutate = vi.fn();
+const packScanMutate = vi.fn();
+const completePackMutate = vi.fn();
+const undoPackMutate = vi.fn();
 let detail: unknown;
 
 const COFFEE_2_ALLOC = {
@@ -86,16 +90,18 @@ vi.mock("@/lib/query/sales", () => ({
   })),
   useStartPicking: () => ({ mutate: startMutate, isPending: false }),
   useScanPick: () => ({ mutate: scanMutate, isPending: false }),
-  useScanPack: () => ({ mutate: vi.fn(), isPending: false }),
+  useScanPack: () => ({ mutate: packScanMutate, isPending: false }),
   useCompletePicking: () => ({ mutate: completeMutate, isPending: false }),
-  useCompletePacking: () => ({ mutate: vi.fn(), isPending: false }),
+  useCompletePacking: () => ({ mutate: completePackMutate, isPending: false }),
   useUndoPick: () => ({ mutate: undoMutate, isPending: false }),
-  useUndoPack: () => ({ mutate: vi.fn(), isPending: false }),
+  useUndoPack: () => ({ mutate: undoPackMutate, isPending: false }),
   usePackingSlipData: () => ({ isLoading: true }),
   useShippingLabelData: () => ({ isLoading: true }),
 }));
 
 import { FulfillmentConsole } from "./fulfillment-console";
+import { LanguageProvider } from "@/lib/i18n/client";
+import { LanguageSwitch } from "@/components/shell/language-switch";
 
 /*
  * Deterministic scanner clock. useScanner ignores a repeat of the same code
@@ -113,6 +119,11 @@ beforeEach(() => {
   startMutate.mockReset();
   completeMutate.mockReset();
   undoMutate.mockReset();
+  packScanMutate.mockReset();
+  completePackMutate.mockReset();
+  undoPackMutate.mockReset();
+  toast.success.mockReset();
+  toast.error.mockReset();
   detail = makeDetail("PICKING");
   clock = 1_700_000_000_000;
   nowSpy = vi.spyOn(Date, "now").mockImplementation(() => clock);
@@ -354,5 +365,167 @@ describe("FulfillmentConsole — Phase 12C Scan +1 / Undo", () => {
       expect.any(Object),
     );
     expect(await screen.findByText(/Picked undone · now/i)).toBeInTheDocument();
+  });
+});
+
+/* ------------------- R3.0 characterization (pre-refactor) ------------------- */
+
+describe("FulfillmentConsole — characterization (R3.0)", () => {
+  const ok = (allocation_id: number, quantity: string, picked: string, packed = "0.000", status = "PICKING") => ({
+    sales_order_id: 7, so_number: "SO-000007", status, allocation_id, quantity, picked_quantity: picked, packed_quantity: packed,
+  });
+
+  /** fully picked / packed order (every allocation done) */
+  function doneDetail(status: string, packed: boolean) {
+    const d = makeDetail(status);
+    for (const it of d.items) {
+      for (const a of it.fulfillment_allocations) {
+        a.picked_quantity = a.quantity;
+        if (packed) a.packed_quantity = a.quantity;
+      }
+    }
+    return d;
+  }
+
+  it("scan arguments: { id, barcode } with no allocation or quantity unless targeted", async () => {
+    const user = userEvent.setup();
+    render(<FulfillmentConsole orderId={7} mode="pick" />);
+    await scan(user, "885000000009");
+    expect(scanMutate.mock.calls[0][0]).toEqual({ id: 7, barcode: "885000000009", allocation_id: undefined, quantity: undefined });
+  });
+
+  it("scans are NOT idempotent: two deliberate scans while the first is pending send two requests", async () => {
+    const user = userEvent.setup();
+    render(<FulfillmentConsole orderId={7} mode="pick" />); // scanMutate never settles here
+    await scan(user, "885000000009");
+    await scan(user, "885000000009");
+    expect(scanMutate).toHaveBeenCalledTimes(2);
+  });
+
+  it("the scanner drops a repeat of the same code inside the 120 ms window, and only that", async () => {
+    const user = userEvent.setup();
+    expect(DEFAULT_SCANNER_TIMING.dedupeMs).toBe(120);
+    render(<FulfillmentConsole orderId={7} mode="pick" />);
+    await scan(user, "885000000009");
+    clock += 119;
+    const input = screen.getByLabelText("Barcode scan input");
+    await user.type(input, "885000000009{Enter}");
+    expect(scanMutate).toHaveBeenCalledTimes(1);
+    clock += 1;
+    await user.type(input, "885000000009{Enter}");
+    expect(scanMutate).toHaveBeenCalledTimes(2);
+  });
+
+  it("complete picking posts every allocation in item order with its full quantity, then opens packing", async () => {
+    const user = userEvent.setup();
+    detail = doneDetail("PICKING", false);
+    completeMutate.mockImplementation((_a, opts) => opts.onSuccess({ so_number: "SO-000007" }));
+    render(<FulfillmentConsole orderId={7} mode="pick" />);
+    await user.click(screen.getByRole("button", { name: /complete picking/i }));
+    expect(completeMutate.mock.calls[0][0]).toEqual({
+      id: 7,
+      allocations: [
+        { allocation_id: 7, quantity: "3.000" },
+        { allocation_id: 71, quantity: "1.000" },
+        { allocation_id: 8, quantity: "2.000" },
+      ],
+    });
+    expect(push).toHaveBeenCalledWith("/packing/7");
+  });
+
+  it("a failed complete toasts with the request id and stays", async () => {
+    const user = userEvent.setup();
+    detail = doneDetail("PICKING", false);
+    completeMutate.mockImplementation((_a, opts) => opts.onError(new ApiError({ status: 409, message: "x", requestId: "req-c" })));
+    render(<FulfillmentConsole orderId={7} mode="pick" />);
+    await user.click(screen.getByRole("button", { name: /complete picking/i }));
+    expect(toast.error).toHaveBeenCalledWith("Complete picking failed", { description: expect.stringMatching(/req-c/) });
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it("a failed undo toasts and records the failure on the line", async () => {
+    const user = userEvent.setup();
+    scanMutate.mockImplementation((_a, opts) => opts.onSuccess(ok(8, "2.000", "2.000")));
+    undoMutate.mockImplementation((_a, opts) => opts.onError(new ApiError({ status: 409, message: "x", requestId: "req-u" })));
+    render(<FulfillmentConsole orderId={7} mode="pick" />);
+    await scan(user, "885000000009");
+    await user.click(screen.getByRole("button", { name: /undo one Refined Sugar/i }));
+    expect(toast.error).toHaveBeenCalledWith("Undo picked failed", { description: expect.stringMatching(/req-u/) });
+    expect(await screen.findByText("Undo failed · Request req-u")).toBeInTheDocument();
+  });
+
+  describe("pack mode", () => {
+    it("scans go to the pack mutation and count packed quantities", async () => {
+      const user = userEvent.setup();
+      detail = doneDetail("PACKING", false);
+      packScanMutate.mockImplementation((_a, opts) => opts.onSuccess(ok(8, "2.000", "2.000", "2.000", "PACKING")));
+      render(<FulfillmentConsole orderId={7} mode="pack" />);
+      await scan(user, "885000000009");
+      expect(packScanMutate.mock.calls[0][0]).toEqual({ id: 7, barcode: "885000000009", allocation_id: undefined, quantity: undefined });
+      expect(scanMutate).not.toHaveBeenCalled();
+      expect(await screen.findByText("✓ Packed +2.000 / 2.000")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /complete packing/i })).toBeDisabled();
+    });
+
+    it("complete packing posts every allocation and returns to the packing queue", async () => {
+      const user = userEvent.setup();
+      detail = doneDetail("PACKING", true);
+      completePackMutate.mockImplementation((_a, opts) => opts.onSuccess({ so_number: "SO-000007" }));
+      render(<FulfillmentConsole orderId={7} mode="pack" />);
+      await user.click(screen.getByRole("button", { name: /complete packing/i }));
+      expect(completePackMutate.mock.calls[0][0]).toEqual({
+        id: 7,
+        allocations: [
+          { allocation_id: 7, quantity: "3.000" },
+          { allocation_id: 71, quantity: "1.000" },
+          { allocation_id: 8, quantity: "2.000" },
+        ],
+      });
+      expect(push).toHaveBeenCalledWith("/packing");
+      expect(completeMutate).not.toHaveBeenCalled();
+    });
+
+    it("undo in pack mode uses the pack undo mutation with quantity '1'", async () => {
+      const user = userEvent.setup();
+      const d = doneDetail("PACKING", false);
+      d.items[1].fulfillment_allocations[0].packed_quantity = "2.000";
+      detail = d;
+      undoPackMutate.mockImplementation((_a, opts) => opts.onSuccess(ok(8, "2.000", "2.000", "1.000", "PACKING")));
+      render(<FulfillmentConsole orderId={7} mode="pack" />);
+      await user.click(screen.getByRole("button", { name: /undo one Refined Sugar/i }));
+      expect(undoPackMutate.mock.calls[0][0]).toEqual({ id: 7, allocation_id: 8, quantity: "1" });
+      expect(undoMutate).not.toHaveBeenCalled();
+    });
+
+    it("a picking-state order is directed to the picking console", () => {
+      detail = makeDetail("PICKING");
+      render(<FulfillmentConsole orderId={7} mode="pack" />);
+      expect(screen.getByText(/not in packing/i)).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: /open picking console/i })).toHaveAttribute("href", "/picking/7");
+    });
+  });
+
+  it("a language switch keeps scan progress and sends no fulfillment request", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      scanMutate.mockImplementation((_a, opts) => opts.onSuccess(ok(8, "2.000", "2.000")));
+      render(
+        <LanguageProvider initialLocale="th">
+          <LanguageSwitch />
+          <FulfillmentConsole orderId={7} mode="pick" />
+        </LanguageProvider>,
+      );
+      await scan(user, "885000000009");
+      expect(await screen.findByText("✓ Picked +2.000 / 2.000")).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "EN" }));
+      await user.click(screen.getByRole("button", { name: "ไทย" }));
+      expect(screen.getByText("✓ Picked +2.000 / 2.000")).toBeInTheDocument();
+      expect(scanMutate).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls.every((c) => (c as unknown[])[0] === "/api/prefs/language")).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

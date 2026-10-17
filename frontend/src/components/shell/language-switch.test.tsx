@@ -29,7 +29,13 @@ vi.mock("@/lib/query/sales", () => ({
   useProductLookup: () => ({ data: { 6: { id: 6, sku: "WH-TEA-200G", product_name: "Green Tea 200g" } } }),
 }));
 
-import { LanguageProvider, useT } from "@/lib/i18n/client";
+import {
+  LanguageProvider,
+  LOCALE_SAVE_TIMEOUT_MS,
+  useI18n,
+  useT,
+  type LocaleSaveOutcome,
+} from "@/lib/i18n/client";
 import type { Locale } from "@/lib/i18n/config";
 import { LanguageSwitch } from "./language-switch";
 import { ReturnDrawer } from "@/components/sales/return-form";
@@ -385,6 +391,252 @@ describe("LanguageSwitch — Sales Return state safety under rapid switching", (
     retMut.mutate.mockImplementation(() => {});
     await user.click(screen.getByRole("button", { name: /record return/i }));
     await waitFor(() => expect(retMut.mutate).toHaveBeenCalledTimes(2));
+    expect((retMut.mutate.mock.calls[1][0] as { idempotencyKey: string }).idempotencyKey).toBe(keyBefore);
+  });
+});
+
+/** Exposes the provider's setLocale so a test can read each choice's outcome. */
+function OutcomeProbe({ onReady }: { onReady: (set: (l: Locale) => Promise<LocaleSaveOutcome>) => void }) {
+  const { setLocale } = useI18n();
+  React.useEffect(() => onReady(setLocale), [onReady, setLocale]);
+  return null;
+}
+
+function setupProbe(initial: Locale) {
+  let set!: (l: Locale) => Promise<LocaleSaveOutcome>;
+  const utils = render(
+    <LanguageProvider initialLocale={initial}>
+      <OutcomeProbe onReady={(s) => (set = s)} />
+      <LanguageSwitch />
+    </LanguageProvider>,
+  );
+  return { ...utils, setLocale: (l: Locale) => set(l) };
+}
+
+/** Records how each promise settled, so "still pending" is observable. */
+function track<T>(p: Promise<T>) {
+  const t: { value?: T; settled: boolean } = { settled: false };
+  void p.then((v) => {
+    t.value = v;
+    t.settled = true;
+  });
+  return t;
+}
+
+const flush = () => act(async () => {});
+
+describe("LanguageProvider — every choice settles with an explicit outcome (R2-RF)", () => {
+  it("a superseded choice settles as 'superseded' as soon as a newer choice is made", async () => {
+    const prefs = controlledPrefs();
+    vi.stubGlobal("fetch", prefs.fn);
+    const { setLocale } = setupProbe("th");
+    let first!: ReturnType<typeof track<LocaleSaveOutcome>>;
+    let second!: ReturnType<typeof track<LocaleSaveOutcome>>;
+    await act(async () => {
+      first = track(setLocale("en"));
+    });
+    expect(first.settled).toBe(false); // its write is in flight
+    await act(async () => {
+      second = track(setLocale("th"));
+    });
+    await flush();
+    expect(first).toEqual({ settled: true, value: "superseded" }); // settled, not left pending
+    expect(second.settled).toBe(false);
+
+    await prefs.drainNewestFirst();
+    expect(second).toEqual({ settled: true, value: "saved" });
+    expect(prefs.state.jar).toBe("th");
+    expect(prefs.state.maxInFlight).toBe(1);
+  });
+
+  it("the latest choice settles 'saved', 'failed' on a rejected response, and 'failed' on a network error", async () => {
+    const prefs = controlledPrefs();
+    vi.stubGlobal("fetch", prefs.fn);
+    const { setLocale } = setupProbe("th");
+    let a!: ReturnType<typeof track<LocaleSaveOutcome>>;
+    await act(async () => {
+      a = track(setLocale("en"));
+    });
+    await act(async () => prefs.open()[0].ok());
+    expect(a).toEqual({ settled: true, value: "saved" });
+
+    let b!: ReturnType<typeof track<LocaleSaveOutcome>>;
+    await act(async () => {
+      b = track(setLocale("th"));
+    });
+    await flush();
+    await act(async () => prefs.open()[0].fail(400));
+    expect(b).toEqual({ settled: true, value: "failed" });
+
+    let c!: ReturnType<typeof track<LocaleSaveOutcome>>;
+    await act(async () => {
+      c = track(setLocale("en"));
+    });
+    await flush();
+    await act(async () => prefs.open()[0].fail());
+    expect(c).toEqual({ settled: true, value: "failed" });
+  });
+
+  it("unmounting the provider settles a waiting choice as 'superseded' (nothing left to report to)", async () => {
+    const prefs = controlledPrefs();
+    vi.stubGlobal("fetch", prefs.fn);
+    const { setLocale, unmount } = setupProbe("th");
+    let a!: ReturnType<typeof track<LocaleSaveOutcome>>;
+    await act(async () => {
+      a = track(setLocale("en"));
+    });
+    unmount();
+    await Promise.resolve();
+    expect(a).toEqual({ settled: true, value: "superseded" });
+  });
+});
+
+describe("LanguageSwitch — stalled preference writes (R2-RF bounded feedback)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const click = (name: string) => act(async () => fireEvent.click(screen.getByRole("button", { name })));
+
+  it("a stalled write is reported as not saved after the timeout, never as success", async () => {
+    const prefs = controlledPrefs();
+    vi.stubGlobal("fetch", prefs.fn);
+    setup("th");
+    await click("EN");
+    expect(document.documentElement.lang).toBe("en"); // the UI switched immediately
+
+    await act(async () => vi.advanceTimersByTimeAsync(LOCALE_SAVE_TIMEOUT_MS - 1));
+    expect(toast.warning).not.toHaveBeenCalled(); // not before the bound
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(toast.warning).toHaveBeenCalledTimes(1);
+    expect(toast.warning).toHaveBeenCalledWith("The language changed, but it could not be saved for your next visit.");
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(prefs.open()).toHaveLength(1); // not aborted: still waiting for the server
+
+    // the request completes late: the cookie is written, but no late success is announced
+    await act(async () => prefs.open()[0].ok());
+    expect(prefs.state.jar).toBe("en");
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it("a timed-out write that succeeds late cannot overwrite a newer choice: the newer write is sent only after it settles", async () => {
+    const prefs = controlledPrefs();
+    vi.stubGlobal("fetch", prefs.fn);
+    setup("th");
+    await click("EN");
+    await act(async () => vi.advanceTimersByTimeAsync(LOCALE_SAVE_TIMEOUT_MS)); // EN reported not saved
+    await click("ไทย"); // a newer choice while EN is still in flight
+
+    // the Thai write waits: never two writes at once, even after a timeout
+    await flush();
+    expect(prefs.state.requests).toHaveLength(1);
+    expect(prefs.state.maxInFlight).toBe(1);
+
+    await act(async () => prefs.open()[0].ok()); // EN lands late: cookie briefly en
+    expect(prefs.state.jar).toBe("en");
+    await flush();
+    expect(prefs.open().map((r) => r.locale)).toEqual(["th"]); // only now is Thai sent
+    await act(async () => prefs.open()[0].ok());
+
+    expect(prefs.state.jar).toBe("th"); // the latest choice is the last cookie written
+    expect(prefs.state.maxInFlight).toBe(1);
+    expect(toast.success).toHaveBeenCalledTimes(1);
+    expect(toast.success).toHaveBeenCalledWith("เปลี่ยนเป็นภาษาไทยแล้ว");
+    reload(prefs.state.jar);
+    expect(screen.getByRole("button", { name: "ไทย" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("a timed-out write that later fails does not block the newer choice", async () => {
+    const prefs = controlledPrefs();
+    vi.stubGlobal("fetch", prefs.fn);
+    setup("th");
+    await click("EN");
+    await act(async () => vi.advanceTimersByTimeAsync(LOCALE_SAVE_TIMEOUT_MS));
+    await click("ไทย");
+    await act(async () => prefs.open()[0].fail()); // the stalled EN write finally errors
+    await flush();
+    await act(async () => prefs.open()[0].ok());
+    expect(prefs.state.jar).toBe("th");
+    expect(toast.success).toHaveBeenCalledWith("เปลี่ยนเป็นภาษาไทยแล้ว");
+  });
+
+  it("TH → EN → TH while the first write is stalled past the timeout: only Thai is written next, and it wins", async () => {
+    const prefs = controlledPrefs();
+    vi.stubGlobal("fetch", prefs.fn);
+    setup("en");
+    await click("ไทย");
+    await act(async () => vi.advanceTimersByTimeAsync(LOCALE_SAVE_TIMEOUT_MS));
+    await click("EN");
+    await click("ไทย");
+    expect(document.documentElement.lang).toBe("th");
+    await act(async () => prefs.open()[0].ok()); // the stalled first write (th) completes
+    await flush();
+    // the intermediate English choice was superseded and is never written
+    expect(prefs.state.requests.map((r) => r.locale)).toEqual(["th", "th"]);
+    await act(async () => prefs.open()[0].ok());
+    expect(prefs.state.jar).toBe("th");
+    expect(prefs.state.maxInFlight).toBe(1);
+    expect(toast.warning).toHaveBeenCalledTimes(1); // the first choice's bounded "not saved"
+    expect(toast.success).toHaveBeenCalledTimes(1); // the final choice only
+  });
+
+  it("the latest choice still stalled is reported once at the bound, and saved when it completes", async () => {
+    const prefs = controlledPrefs();
+    vi.stubGlobal("fetch", prefs.fn);
+    setup("th");
+    await click("EN");
+    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+    await click("ไทย"); // its own bound starts at this click
+    await act(async () => vi.advanceTimersByTimeAsync(LOCALE_SAVE_TIMEOUT_MS));
+    expect(toast.warning).toHaveBeenCalledTimes(1);
+    expect(toast.warning).toHaveBeenCalledWith("เปลี่ยนภาษาแล้ว แต่บันทึกค่าสำหรับการเข้าใช้ครั้งถัดไปไม่สำเร็จ");
+    await act(async () => prefs.open()[0].ok());
+    await flush();
+    await act(async () => prefs.open()[0].ok());
+    expect(prefs.state.jar).toBe("th");
+    expect(toast.success).not.toHaveBeenCalled(); // its outcome was already reported
+  });
+
+  it("a stall and timeout keep the Sales Return draft and Idempotency-Key, with no business request", async () => {
+    retMut.mutate.mockReset();
+    window.sessionStorage.clear();
+    retMut.mutate.mockImplementation((_a, { onError }) =>
+      onError(new ApiError({ status: 503, message: "Service unavailable", requestId: "req-ret-503" })),
+    );
+    const prefs = controlledPrefs();
+    vi.stubGlobal("fetch", prefs.fn);
+    render(
+      <LanguageProvider initialLocale="th">
+        <LanguageSwitch />
+        <ReturnDrawer id={63} soNumber="SO-000063" open onOpenChange={() => {}} />
+      </LanguageProvider>,
+    );
+    const qty = screen.getByLabelText(/Return quantity for Green Tea 200g/i);
+    fireEvent.change(qty, { target: { value: "2" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: /record return/i })));
+    expect(retMut.mutate).toHaveBeenCalledTimes(1);
+    const keyBefore = (retMut.mutate.mock.calls[0][0] as { idempotencyKey: string }).idempotencyKey;
+
+    const langButton = (name: string) => screen.getByRole("button", { name, hidden: true });
+    await act(async () => fireEvent.click(langButton("EN")));
+    await act(async () => vi.advanceTimersByTimeAsync(LOCALE_SAVE_TIMEOUT_MS));
+    await act(async () => fireEvent.click(langButton("ไทย")));
+    await act(async () => prefs.open()[0].ok());
+    await flush();
+    await act(async () => prefs.open()[0].ok());
+
+    expect(prefs.state.jar).toBe("th");
+    expect(prefs.fn.mock.calls.every(([url]) => url === "/api/prefs/language")).toBe(true);
+    expect(retMut.mutate).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText(/Return quantity for Green Tea 200g/i)).toBe(qty);
+    expect(qty).toHaveValue("2");
+
+    retMut.mutate.mockImplementation(() => {});
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: /record return/i })));
+    expect(retMut.mutate).toHaveBeenCalledTimes(2);
     expect((retMut.mutate.mock.calls[1][0] as { idempotencyKey: string }).idempotencyKey).toBe(keyBefore);
   });
 });

@@ -10,21 +10,24 @@ import { Button } from "@/components/ui/button";
 import { Combobox, type ComboboxItem } from "@/components/ui/combobox";
 import { QuantityDisplay } from "@/components/ui/quantity-display";
 import { CameraBarcodeScanner } from "@/components/work/camera-barcode-scanner";
-import { useScanner } from "@/components/work/use-scanner";
 import { useBeep } from "@/components/work/use-beep";
 import { isApiError } from "@/lib/api/errors";
 import { businessToday, EXPIRY_STATE_LABEL, expiryState } from "@/lib/business-date";
 import { useProducts } from "@/lib/query/hooks";
 import { useProduct } from "@/lib/query/products";
-import { resolveBarcode } from "@/lib/query/sales";
 import { useSaveStockInSession } from "@/lib/query/stock";
 import { useIdempotentDraft } from "@/lib/idempotent-draft";
+import { useDebounced } from "@/lib/use-debounced";
+import type { TrailEntry } from "@/lib/workflow/scan-count";
+import { isLooseKeyMismatch, requestIdOf as rid } from "@/lib/workflow/submission-errors";
+import { useIdempotentSubmission } from "@/lib/workflow/use-idempotent-submission";
 import {
   buildStockInSaveBody,
   stockInSetupInput,
   STOCK_IN_ERROR_COPY,
   type StockInSaveBody,
 } from "@/lib/api/schemas/stock-in";
+import { useScanCountSession, type ScanFeedback } from "./use-scan-count-session";
 
 /* --------------------------------------------------------------- session -- */
 
@@ -48,13 +51,6 @@ interface SessionLine {
   trail: TrailEntry[];
 }
 
-interface TrailEntry {
-  id: string;
-  kind: "hit" | "undo";
-  text: string;
-  at: string;
-}
-
 function buildPayload(lines: Record<number, SessionLine>): StockInSaveBody | null {
   const s = lines[0];
   if (!s) return null;
@@ -76,20 +72,20 @@ function buildPayload(lines: Record<number, SessionLine>): StockInSaveBody | nul
 const FIELD_CLS =
   "h-11 w-full rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-[15px] tabular-nums outline-hidden focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-[var(--focus)] disabled:opacity-60";
 
-function nowHM(): string {
-  return new Date().toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
-}
+const hitTrailText = (code: string) => `barcode ${code} +1`;
 
-function rid(e: unknown): string | undefined {
-  return isApiError(e) ? e.requestId : undefined;
+function feedbackText(feedback: Exclude<ScanFeedback, { kind: "idle" }>): string {
+  switch (feedback.kind) {
+    case "match":
+      return `Matched — scanned ${feedback.count}`;
+    case "wrong":
+      return `Wrong product — that barcode is ${feedback.productName}. Count unchanged.`;
+    case "unknown":
+      return `Barcode read ${feedback.code} — product not registered. Nothing was counted.`;
+    case "error":
+      return feedback.userMessage ?? "Could not read that barcode. Nothing was counted.";
+  }
 }
-
-type ScanFeedback =
-  | { kind: "idle" }
-  | { kind: "match"; text: string }
-  | { kind: "wrong"; text: string }
-  | { kind: "unknown"; text: string }
-  | { kind: "error"; text: string };
 
 /* --------------------------------------------------------------- console -- */
 
@@ -105,12 +101,12 @@ export function StockInConsole() {
   const line = draft.lines[0] as SessionLine | undefined;
 
   const saveMut = useSaveStockInSession();
+  // a reused key whose stored request differs forces a new session (no silent new key)
+  const submission = useIdempotentSubmission({ draft, mutate: saveMut.mutate, isMismatch: isLooseKeyMismatch });
+  const { mismatch } = submission;
   const [saved, setSaved] = React.useState<{ qty: string; onHand: string; name: string; lot: string | null } | null>(
     null,
   );
-  const [mismatch, setMismatch] = React.useState(false);
-  const [feedback, setFeedback] = React.useState<ScanFeedback>({ kind: "idle" });
-  const [resolving, setResolving] = React.useState(false);
   const [cameraOpen, setCameraOpen] = React.useState(false);
 
   const phase: "setup" | "scanning" | "saved" = saved ? "saved" : line?.started ? "scanning" : "setup";
@@ -212,63 +208,15 @@ export function StockInConsole() {
   const expState = line?.expiry_date ? expiryState(line.expiry_date) : null;
 
   /* ------------------------------- SCAN SESSION ------------------------- */
-  const bump = React.useCallback(
-    (delta: 1 | -1, text: string) => {
-      const cur = draft.lines[0] as SessionLine | undefined;
-      if (!cur) return;
-      const nextCount = Math.max(0, cur.count + delta);
-      if (delta === -1 && cur.count === 0) return;
-      const entry: TrailEntry = {
-        id: `${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
-        kind: delta === 1 ? "hit" : "undo",
-        text,
-        at: nowHM(),
-      };
-      draft.setLine(0, { count: nextCount, trail: [entry, ...cur.trail].slice(0, 12) });
-    },
-    [draft],
-  );
-
-  const handleScan = React.useCallback(
-    async (code: string) => {
-      const cur = draft.lines[0] as SessionLine | undefined;
-      if (!cur || !cur.started || resolving || saveMut.isPending) return;
-      setResolving(true);
-      try {
-        const res = await resolveBarcode(code, "stock_in");
-        if (res.product.id === cur.productId) {
-          bump(1, `barcode ${code} +1`);
-          beepOk();
-          setFeedback({ kind: "match", text: `Matched — scanned ${cur.count + 1}` });
-        } else {
-          beepBad();
-          setFeedback({
-            kind: "wrong",
-            text: `Wrong product — that barcode is ${res.product.product_name}. Count unchanged.`,
-          });
-        }
-      } catch (e) {
-        beepBad();
-        if (isApiError(e) && e.status === 404) {
-          setFeedback({ kind: "unknown", text: `Barcode read ${code} — product not registered. Nothing was counted.` });
-        } else {
-          setFeedback({
-            kind: "error",
-            text: isApiError(e) ? e.userMessage : "Could not read that barcode. Nothing was counted.",
-          });
-        }
-      } finally {
-        setResolving(false);
-        requestAnimationFrame(() => scanner.focus());
-      }
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [draft, resolving, saveMut.isPending, bump, beepOk, beepBad],
-  );
-
-  const scanner = useScanner({
-    onScan: handleScan,
-    disabled: phase !== "scanning" || resolving || saveMut.isPending,
+  // each scan verifies the item (read-only "stock_in" lookup); nothing moves until Save
+  const { feedback, setFeedback, resolving, bump, handleScan, scanner } = useScanCountSession({
+    draft,
+    purpose: "stock_in",
+    scanning: phase === "scanning",
+    busy: saveMut.isPending,
+    beepOk,
+    beepBad,
+    hitTrailText,
   });
 
   const undoLast = () => {
@@ -287,7 +235,7 @@ export function StockInConsole() {
   const clearSession = () => {
     draft.commitSuccess(); // clears the persisted draft + rotates the key
     setSaved(null);
-    setMismatch(false);
+    submission.clearMismatch();
     setFeedback({ kind: "idle" });
     setTerm("");
   };
@@ -299,8 +247,9 @@ export function StockInConsole() {
   const save = () => {
     const body = draft.payload;
     if (!body || !line || line.count <= 0 || saveMut.isPending) return;
-    saveMut.mutate(
-      { body, idempotencyKey: draft.idempotencyKey },
+    // success consumes the draft — next session gets a fresh key
+    submission.submit(
+      { body },
       {
         onSuccess: (res) => {
           beepDone();
@@ -310,15 +259,10 @@ export function StockInConsole() {
             name: line.name,
             lot: res.lotNo,
           });
-          setMismatch(false);
-          draft.commitSuccess(); // draft consumed — next session gets a fresh key
         },
-        onError: (e) => {
+        onError: (e, isMismatch) => {
           beepBad();
-          if (isApiError(e) && e.status === 409 && /different payload/i.test(e.message)) {
-            setMismatch(true);
-            return;
-          }
+          if (isMismatch) return;
           const backend = isApiError(e) ? e.message : "";
           const copy =
             STOCK_IN_ERROR_COPY[backend] ??
@@ -548,7 +492,7 @@ export function StockInConsole() {
                   ) : (
                     <TriangleAlert aria-hidden className="h-4 w-4 flex-none" />
                   )}
-                  {feedback.text}
+                  {feedbackText(feedback)}
                 </p>
               ) : null}
 
@@ -669,15 +613,4 @@ export function StockInConsole() {
       />
     </div>
   );
-}
-
-/* --------------------------------------------------------------- utils --- */
-
-function useDebounced<T>(value: T, ms: number): T {
-  const [v, setV] = React.useState(value);
-  React.useEffect(() => {
-    const t = window.setTimeout(() => setV(value), ms);
-    return () => window.clearTimeout(t);
-  }, [value, ms]);
-  return v;
 }

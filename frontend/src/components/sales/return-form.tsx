@@ -7,17 +7,20 @@ import { Button } from "@/components/ui/button";
 import { Drawer, DrawerContent } from "@/components/ui/drawer";
 import { QuantityDisplay } from "@/components/ui/quantity-display";
 import { isApiError } from "@/lib/api/errors";
-import { compareDecimals, subtractDecimals, sumDecimals } from "@/lib/decimal";
+import { subtractDecimals } from "@/lib/decimal";
 import { useIdempotentDraft } from "@/lib/idempotent-draft";
 import { useReturnSalesOrder, useSalesOrder } from "@/lib/query/sales";
 import { useProductLookup } from "@/lib/query/sales";
+import { shipErrorCopy, type SalesReturnItemResult } from "@/lib/api/schemas/sales";
 import {
-  RETURN_KEY_CONFLICT,
-  salesReturnLineInput,
-  shipErrorCopy,
-  type SalesReturnItemResult,
-  type SalesReturnLineInput,
-} from "@/lib/api/schemas/sales";
+  clearReturnedLines,
+  isReturnKeyConflict,
+  mergeReturnedTotals,
+  returnTotal,
+  validateReturnLines,
+  type ReturnLineDraft,
+} from "@/lib/workflow/return-submission";
+import { useIdempotentSubmission } from "@/lib/workflow/use-idempotent-submission";
 
 // The draft hook is used only for its persisted per-intent Idempotency-Key; the
 // drawer keeps its own line state, so there is no draft payload.
@@ -26,13 +29,16 @@ const noDraftPayload = () => null;
 const inputCls =
   "min-h-11 w-28 rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-[13px] tabular-nums outline-hidden focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-[var(--focus)]";
 
-interface LineDraft {
-  product_id: number;
-  ordered: string;
-  quantity: string; // "return now"
-  reason: string;
-  error?: string;
+/** The drawer's running total; "—" while any entered quantity is not yet a number. */
+function ReturningTotal({ total }: { total: string | null }) {
+  return total !== null ? (
+    <QuantityDisplay value={total} className="font-semibold text-[var(--foreground)]" />
+  ) : (
+    <span className="font-semibold text-[var(--foreground)]">—</span>
+  );
 }
+
+type LineDraft = ReturnLineDraft;
 
 function ReturnBody({ id, onClose }: { id: number; onClose: () => void }) {
   const detailQ = useSalesOrder(id);
@@ -47,7 +53,9 @@ function ReturnBody({ id, onClose }: { id: number; onClose: () => void }) {
     keyPrefix: "so-ret-",
     buildPayload: noDraftPayload,
   });
-  const [keyConflict, setKeyConflict] = React.useState(false);
+  // a 409 key conflict blocks resubmission until the operator starts a new return
+  const submission = useIdempotentSubmission({ draft, mutate: ret.mutate, isMismatch: isReturnKeyConflict });
+  const keyConflict = submission.mismatch;
 
   const productIds = React.useMemo(() => (detail?.items ?? []).map((it) => it.product_id), [detail]);
   const lookup = useProductLookup(productIds);
@@ -81,7 +89,10 @@ function ReturnBody({ id, onClose }: { id: number; onClose: () => void }) {
   };
 
   const activeLines = Object.values(lines).filter((l) => l.quantity.trim() !== "");
-  const total = sumDecimals(activeLines.map((l) => l.quantity.trim()), 3);
+  // A quantity still being typed ("1.") or invalid ("abc") is not a number: the
+  // total is unknown (shown as "—"), never computed (that threw during render)
+  // and never counted as zero. Submit still validates every line.
+  const total = returnTotal(activeLines);
 
   const submit = () => {
     setFormError(null);
@@ -89,50 +100,34 @@ function ReturnBody({ id, onClose }: { id: number; onClose: () => void }) {
       setFormError({ message: "Enter a quantity on at least one line." });
       return;
     }
-    let bad = false;
-    const payloadItems: SalesReturnLineInput[] = [];
-    for (const l of activeLines) {
-      const parsed = salesReturnLineInput.safeParse({ product_id: l.product_id, quantity: l.quantity.trim(), reason: l.reason.trim() || undefined });
-      if (!parsed.success) {
-        setLine(l.product_id, { error: parsed.error.issues[0].message });
-        bad = true;
-        continue;
+    const checked = validateReturnLines(activeLines, (l) => remainingReturnable(l.product_id, l.ordered));
+    if (!checked.ok) {
+      for (const [pid, problem] of Object.entries(checked.problems)) {
+        setLine(Number(pid), {
+          error:
+            problem.kind === "invalid"
+              ? problem.message
+              : `Can't exceed ${problem.ceiling} (ordered minus already returned)`,
+        });
       }
-      const ceiling = remainingReturnable(l.product_id, l.ordered);
-      if (compareDecimals(parsed.data.quantity, ceiling) > 0) {
-        setLine(l.product_id, { error: `Can't exceed ${ceiling} (ordered minus already returned)` });
-        bad = true;
-        continue;
-      }
-      payloadItems.push(parsed.data);
+      return;
     }
-    if (bad) return;
 
-    ret.mutate(
-      { id, input: { items: payloadItems }, idempotencyKey: draft.idempotencyKey },
+    // recorded: the next return is a new intent with a new key (commitSuccess)
+    submission.submit(
+      { id, input: { items: checked.items } },
       {
         onSuccess: (data) => {
-          draft.commitSuccess(); // recorded: the next return is a new intent with a new key
-          setKeyConflict(false);
           setResults(data.returned_items);
-          setAlreadyReturned((s) => {
-            const next = { ...s };
-            for (const r of data.returned_items) next[r.product_id] = r.total_returned;
-            return next;
-          });
+          setAlreadyReturned((s) => mergeReturnedTotals(s, data.returned_items));
           // clear the quantities we just submitted, keep the rows for further returns
-          setLines((s) => {
-            const next = { ...s };
-            for (const r of data.returned_items) if (next[r.product_id]) next[r.product_id] = { ...next[r.product_id], quantity: "", reason: "" };
-            return next;
-          });
+          setLines((s) => clearReturnedLines(s, data.returned_items));
           toast.success("Return recorded", { description: `${data.returned_items.length} line${data.returned_items.length === 1 ? "" : "s"} returned to stock` });
         },
         onError: (error) => {
           // draft quantities and the Idempotency-Key are preserved — resubmitting the
           // same return reuses the key, so an already-recorded return is replayed
           if (isApiError(error)) {
-            if (error.status === 409 && error.message === RETURN_KEY_CONFLICT) setKeyConflict(true);
             setFormError({ message: shipErrorCopy(error.message) ?? error.userMessage, requestId: error.requestId });
           } else {
             setFormError({ message: "The return was rejected. Your entries are kept." });
@@ -236,7 +231,7 @@ function ReturnBody({ id, onClose }: { id: number; onClose: () => void }) {
             variant="secondary"
             onClick={() => {
               draft.startNewDraft();
-              setKeyConflict(false);
+              submission.clearMismatch();
               setFormError(null);
             }}
           >
@@ -247,7 +242,7 @@ function ReturnBody({ id, onClose }: { id: number; onClose: () => void }) {
 
       <div className="sticky bottom-0 -mx-4 flex items-center justify-between gap-2 border-t border-[var(--border)] bg-[var(--surface)] px-4 pt-3">
         <span className="text-[12px] text-[var(--muted)]">
-          Returning <QuantityDisplay value={total} className="font-semibold text-[var(--foreground)]" />
+          Returning <ReturningTotal total={total} />
         </span>
         <span className="flex gap-2">
           <Button variant="ghost" onClick={onClose}>

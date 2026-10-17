@@ -23,10 +23,12 @@ export function LanguageSwitch({ className }: { className?: string }) {
 
   async function choose(next: Locale) {
     if (next === locale) return;
-    const saved = await setLocale(next);
+    const outcome = await setLocale(next);
+    // a newer choice replaced this one: only the latest choice is announced
+    if (outcome === "superseded") return;
     // announce in the NEW language (sonner renders an aria-live region)
     const dict = DICTIONARIES[next];
-    if (saved) toast.success(translate(dict, "shell.languageChanged"));
+    if (outcome === "saved") toast.success(translate(dict, "shell.languageChanged"));
     else toast.warning(translate(dict, "shell.languageSaveFailed"));
   }
 

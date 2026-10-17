@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { DEFAULT_SCANNER_TIMING } from "@/components/work/use-scanner";
@@ -45,11 +45,21 @@ const BATCH = {
   barcode: "880000000006",
 };
 
+const DATED = {
+  id: 7,
+  sku: "WH-DATED",
+  product_name: "Dated Widget",
+  is_active: true,
+  track_batch: true,
+  track_expiry: true,
+  barcode: "880000000007",
+};
+
 const resolveBarcode = vi.fn();
 vi.mock("@/lib/query/sales", () => ({ resolveBarcode: (...a: unknown[]) => resolveBarcode(...a) }));
 
 vi.mock("@/lib/query/hooks", () => ({
-  useProducts: () => ({ data: { items: [NON_BATCH, BATCH] }, isFetching: false }),
+  useProducts: () => ({ data: { items: [NON_BATCH, BATCH, DATED] }, isFetching: false }),
 }));
 
 let preselectData: unknown = undefined;
@@ -64,6 +74,8 @@ vi.mock("@/lib/query/stock", () => ({
 }));
 
 import { StockInConsole } from "./stock-in-console";
+import { LanguageProvider } from "@/lib/i18n/client";
+import { LanguageSwitch } from "@/components/shell/language-switch";
 
 /* ------------------------------- helpers ----------------------------- */
 
@@ -352,5 +364,233 @@ describe("StockInConsole — deep-link preselect (?product=)", () => {
     searchParams = new URLSearchParams("product=not-a-number");
     render(<StockInConsole />);
     expect(screen.queryByRole("button", { name: /start scanning/i })).not.toBeInTheDocument();
+  });
+});
+
+/* ------------------- R3.0 characterization (pre-refactor) ------------------- */
+
+describe("StockInConsole — characterization (R3.0)", () => {
+  const saveButton = (n: number) => screen.getByRole("button", { name: new RegExp(`save ${n} items?`, "i") });
+
+  async function countScans(user: ReturnType<typeof userEvent.setup>, product: { id: number; product_name: string }, n: number) {
+    for (let i = 1; i <= n; i++) {
+      resolvesTo(product);
+      await scan(user, "88000000000x");
+      expect(await screen.findByText(new RegExp(`Matched — scanned ${i}`, "i"))).toBeInTheDocument();
+    }
+  }
+
+  it("non-batch body: the integer scan count as a plain string, trimmed remark, expected never sent", async () => {
+    const user = userEvent.setup();
+    render(<StockInConsole />);
+    await pick(user, /Sea Salt 500g/);
+    await user.type(screen.getByPlaceholderText("0.000"), "5");
+    await user.type(screen.getByPlaceholderText("e.g. opening count"), "  opening  ");
+    await startScanning(user);
+    await countScans(user, { id: 5, product_name: "Sea Salt 500g" }, 3);
+    await user.click(saveButton(3));
+    expect(saveMutate).toHaveBeenCalledTimes(1);
+    expect(saveMutate.mock.calls[0][0]).toEqual({
+      body: { endpoint: "stock/in", json: { product_id: 5, quantity: "3", remark: "opening" } },
+      idempotencyKey: expect.stringMatching(/^stockin-/),
+    });
+  });
+
+  it("batch body: POST batches with the trimmed lot and no dates for a batch-only product", async () => {
+    const user = userEvent.setup();
+    render(<StockInConsole />);
+    await pick(user, /Lot Widget/);
+    await user.type(screen.getByPlaceholderText("LOT-…"), "  LOT-A  ");
+    await startScanning(user);
+    await countScans(user, { id: 6, product_name: "Lot Widget" }, 1);
+    await user.click(saveButton(1));
+    expect(saveMutate.mock.calls[0][0].body).toEqual({
+      endpoint: "batches",
+      json: { product_id: 6, lot_no: "LOT-A", quantity: "1" },
+    });
+  });
+
+  it("batch + expiry body carries both dates; an already-expired lot is flagged but not blocked", async () => {
+    const user = userEvent.setup();
+    render(<StockInConsole />);
+    await pick(user, /Dated Widget/);
+    expect(screen.getByRole("button", { name: /start scanning/i })).toBeDisabled(); // lot + dates required
+    await user.type(screen.getByPlaceholderText("LOT-…"), "LOT-OLD");
+    fireEvent.change(screen.getByLabelText("Manufacturing date"), { target: { value: "2000-01-01" } });
+    fireEvent.change(screen.getByLabelText("Expiry date"), { target: { value: "2000-01-02" } });
+    expect(screen.getByText(/accepted, not blocked/i)).toBeInTheDocument();
+    await startScanning(user);
+    await countScans(user, { id: 7, product_name: "Dated Widget" }, 1);
+    await user.click(saveButton(1));
+    expect(saveMutate.mock.calls[0][0].body).toEqual({
+      endpoint: "batches",
+      json: { product_id: 7, lot_no: "LOT-OLD", quantity: "1", mfg_date: "2000-01-01", expiry_date: "2000-01-02" },
+    });
+  });
+
+  it("an expected quantity with more than 3 decimals keeps Start scanning disabled", async () => {
+    const user = userEvent.setup();
+    render(<StockInConsole />);
+    await pick(user, /Sea Salt 500g/);
+    await user.type(screen.getByPlaceholderText("0.000"), "1.2345");
+    expect(screen.getByRole("button", { name: /start scanning/i })).toBeDisabled();
+  });
+
+  it("reload (unmount + remount) keeps the scanning session, count and the SAME key for an unresolved Save", async () => {
+    const user = userEvent.setup();
+    saveMutate.mockImplementation((_a, opts) => opts.onError(new ApiError({ status: 503, message: "down", requestId: "r" })));
+    const first = render(<StockInConsole />);
+    await pick(user, /Sea Salt 500g/);
+    await startScanning(user);
+    await countScans(user, { id: 5, product_name: "Sea Salt 500g" }, 2);
+    await user.click(saveButton(2));
+    const k1 = saveMutate.mock.calls[0][0].idempotencyKey;
+    first.unmount();
+
+    render(<StockInConsole />);
+    expect(screen.getByLabelText("Barcode scan input")).toBeInTheDocument(); // still scanning
+    expect(screen.getByText("2", { selector: "span.font-bold" })).toBeInTheDocument();
+    await user.click(saveButton(2));
+    expect(saveMutate).toHaveBeenCalledTimes(2);
+    expect(saveMutate.mock.calls[1][0]).toEqual(saveMutate.mock.calls[0][0]);
+    expect(saveMutate.mock.calls[1][0].idempotencyKey).toBe(k1);
+  });
+
+  it("Save is disabled and inert while a save is pending (restored draft)", async () => {
+    const user = userEvent.setup();
+    const first = render(<StockInConsole />);
+    await pick(user, /Sea Salt 500g/);
+    await startScanning(user);
+    await countScans(user, { id: 5, product_name: "Sea Salt 500g" }, 1);
+    first.unmount();
+
+    saveState = { ...saveState, isPending: true };
+    render(<StockInConsole />);
+    const button = screen.getByRole("button", { name: /saving…/i });
+    expect(button).toBeDisabled();
+    await user.click(button);
+    expect(saveMutate).not.toHaveBeenCalled();
+  });
+
+  it("a non-mismatch 409 keeps the session and key (toast only), unlike the payload mismatch", async () => {
+    const user = userEvent.setup();
+    saveMutate.mockImplementation((_a, opts) => opts.onError(new ApiError({ status: 409, message: "Not enough stock", requestId: "r9" })));
+    render(<StockInConsole />);
+    await pick(user, /Sea Salt 500g/);
+    await startScanning(user);
+    await countScans(user, { id: 5, product_name: "Sea Salt 500g" }, 1);
+    await user.click(saveButton(1));
+    expect(screen.queryByText(/can no longer be saved/i)).not.toBeInTheDocument();
+    expect(saveButton(1)).toBeEnabled();
+  });
+
+  it("the mismatch predicate is status 409 + /different payload/i (case-insensitive substring)", async () => {
+    const user = userEvent.setup();
+    saveMutate.mockImplementation((_a, opts) =>
+      opts.onError(new ApiError({ status: 409, message: "key reused with a DIFFERENT PAYLOAD here", requestId: "r" })),
+    );
+    render(<StockInConsole />);
+    await pick(user, /Sea Salt 500g/);
+    await startScanning(user);
+    await countScans(user, { id: 5, product_name: "Sea Salt 500g" }, 1);
+    await user.click(saveButton(1));
+    expect(await screen.findByText(/can no longer be saved/i)).toBeInTheDocument();
+  });
+
+  it("the same message with a non-409 status is NOT treated as a mismatch", async () => {
+    const user = userEvent.setup();
+    saveMutate.mockImplementation((_a, opts) =>
+      opts.onError(new ApiError({ status: 422, message: "Idempotency-Key already used with a different payload", requestId: "r" })),
+    );
+    render(<StockInConsole />);
+    await pick(user, /Sea Salt 500g/);
+    await startScanning(user);
+    await countScans(user, { id: 5, product_name: "Sea Salt 500g" }, 1);
+    await user.click(saveButton(1));
+    expect(screen.queryByText(/can no longer be saved/i)).not.toBeInTheDocument();
+  });
+
+  it("mismatch recovery: 'Start new stock-in session' clears the session and the next save uses a NEW key", async () => {
+    const user = userEvent.setup();
+    saveMutate.mockImplementationOnce((_a, opts) =>
+      opts.onError(new ApiError({ status: 409, message: "Idempotency-Key already used with a different payload", requestId: "r" })),
+    );
+    render(<StockInConsole />);
+    await pick(user, /Sea Salt 500g/);
+    await startScanning(user);
+    await countScans(user, { id: 5, product_name: "Sea Salt 500g" }, 1);
+    await user.click(saveButton(1));
+    const k1 = saveMutate.mock.calls[0][0].idempotencyKey;
+    await user.click(await screen.findByRole("button", { name: /start new stock-in session/i }));
+
+    expect(screen.queryByLabelText("Barcode scan input")).not.toBeInTheDocument(); // back to setup, no product
+    expect(screen.queryByRole("button", { name: /start scanning/i })).not.toBeInTheDocument();
+    await pick(user, /Sea Salt 500g/);
+    await startScanning(user);
+    await countScans(user, { id: 5, product_name: "Sea Salt 500g" }, 1);
+    await user.click(saveButton(1));
+    expect(saveMutate.mock.calls[1][0].idempotencyKey).not.toBe(k1);
+  });
+
+  it("success rotates the key: the next session's save uses a new key", async () => {
+    const user = userEvent.setup();
+    saveMutate.mockImplementation((_a, opts) =>
+      opts.onSuccess({ productId: 5, productName: "Sea Salt 500g", savedQuantity: "1", currentStock: "2", lotNo: null }),
+    );
+    render(<StockInConsole />);
+    await pick(user, /Sea Salt 500g/);
+    await startScanning(user);
+    await countScans(user, { id: 5, product_name: "Sea Salt 500g" }, 1);
+    await user.click(saveButton(1));
+    const k1 = saveMutate.mock.calls[0][0].idempotencyKey;
+    await user.click(screen.getByRole("button", { name: /scan next product/i }));
+    await pick(user, /Sea Salt 500g/);
+    await startScanning(user);
+    await countScans(user, { id: 5, product_name: "Sea Salt 500g" }, 1);
+    await user.click(saveButton(1));
+    expect(saveMutate.mock.calls[1][0].idempotencyKey).not.toBe(k1);
+  });
+
+  it("a language switch keeps the scanning session, count and key and sends no business request", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 204 })));
+    try {
+      render(
+        <LanguageProvider initialLocale="th">
+          <LanguageSwitch />
+          <StockInConsole />
+        </LanguageProvider>,
+      );
+      await pick(user, /Sea Salt 500g/);
+      await startScanning(user);
+      await countScans(user, { id: 5, product_name: "Sea Salt 500g" }, 2);
+      const scanInput = screen.getByLabelText("Barcode scan input");
+      await user.click(screen.getByRole("button", { name: "EN" }));
+      await user.click(screen.getByRole("button", { name: "ไทย" }));
+      expect(screen.getByLabelText("Barcode scan input")).toBe(scanInput); // not remounted
+      expect(screen.getByText("2", { selector: "span.font-bold" })).toBeInTheDocument();
+      expect(saveMutate).not.toHaveBeenCalled();
+      expect(resolveBarcode).toHaveBeenCalledTimes(2);
+      const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+      expect(fetchMock.mock.calls.every(([url]) => url === "/api/prefs/language")).toBe(true);
+      saveMutate.mockImplementation(() => {});
+      await user.click(saveButton(2));
+      expect(saveMutate.mock.calls[0][0].body).toEqual({ endpoint: "stock/in", json: { product_id: 5, quantity: "2" } });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe("StockInConsole — characterization: resolve purpose (R3.0)", () => {
+  it("scans resolve with the 'stock_in' purpose (read-only lookup, no stock moves)", async () => {
+    const user = userEvent.setup();
+    render(<StockInConsole />);
+    await pick(user, /Sea Salt 500g/);
+    await startScanning(user);
+    resolvesTo({ id: 5, product_name: "Sea Salt 500g" });
+    await scan(user, "880000000005");
+    expect(await screen.findByText(/Matched — scanned 1/i)).toBeInTheDocument();
+    expect(resolveBarcode).toHaveBeenCalledWith("880000000005", "stock_in");
   });
 });

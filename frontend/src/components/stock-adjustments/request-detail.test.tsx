@@ -202,3 +202,81 @@ describe("StockAdjustmentRequestDetailBody", () => {
     expect(window.sessionStorage.getItem("adjreq-approve-key:42")).toBeNull();
   });
 });
+
+/* ------------------- R3.0 characterization (pre-refactor) ------------------- */
+
+describe("StockAdjustmentRequestDetailBody — approval key characterization (R3.0)", () => {
+  async function approveOnce(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByRole("button", { name: /^approve$/i }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^approve$/i }));
+  }
+
+  it("the key is created on render, persisted per request id, and sent as { id, idempotencyKey }", async () => {
+    const user = userEvent.setup();
+    render(<StockAdjustmentRequestDetailBody id={42} role="admin" />);
+    const stored = window.sessionStorage.getItem("adjreq-approve-key:42");
+    expect(stored).toMatch(/^adjreq-approve-/);
+    await approveOnce(user);
+    expect(approveMutate.mock.calls[0][0]).toEqual({ id: 42, idempotencyKey: stored });
+  });
+
+  it("keys are scoped per request id", () => {
+    render(<StockAdjustmentRequestDetailBody id={42} role="admin" />);
+    requestData = { ...requestData, id: 43 };
+    render(<StockAdjustmentRequestDetailBody id={43} role="admin" />);
+    const k42 = window.sessionStorage.getItem("adjreq-approve-key:42");
+    const k43 = window.sessionStorage.getItem("adjreq-approve-key:43");
+    expect(k42).toBeTruthy();
+    expect(k43).toBeTruthy();
+    expect(k42).not.toBe(k43);
+  });
+
+  it("a 409 'already decided' (case-insensitive) clears the key; the next attempt uses a fresh, unpersisted key", async () => {
+    const user = userEvent.setup();
+    approveMutate.mockImplementationOnce((_v, opts) => opts.onError(new ApiError({ status: 409, message: "This request was ALREADY DECIDED: REJECTED." })));
+    render(<StockAdjustmentRequestDetailBody id={42} role="admin" />);
+    await approveOnce(user);
+    expect(window.sessionStorage.getItem("adjreq-approve-key:42")).toBeNull();
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^approve$/i }));
+    expect(approveMutate.mock.calls[1][0].idempotencyKey).not.toBe(approveMutate.mock.calls[0][0].idempotencyKey);
+    expect(window.sessionStorage.getItem("adjreq-approve-key:42")).toBeNull();
+  });
+
+  it("'already decided' with a non-409 status, and any other error, keep the key", async () => {
+    const user = userEvent.setup();
+    approveMutate.mockImplementationOnce((_v, opts) => opts.onError(new ApiError({ status: 500, message: "already decided" })));
+    approveMutate.mockImplementationOnce((_v, opts) => opts.onError(new ApiError({ status: 409, message: "Stale quantity: on hand is now 9.000" })));
+    render(<StockAdjustmentRequestDetailBody id={42} role="admin" />);
+    const stored = window.sessionStorage.getItem("adjreq-approve-key:42");
+    await approveOnce(user);
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^approve$/i }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^approve$/i }));
+    expect(approveMutate.mock.calls.map((c) => c[0].idempotencyKey)).toEqual([stored, stored, stored]);
+    expect(window.sessionStorage.getItem("adjreq-approve-key:42")).toBe(stored);
+  });
+
+  it("a self-approval rejection from the server is shown with its mapped copy and keeps the key", async () => {
+    const user = userEvent.setup();
+    approveMutate.mockImplementationOnce((_v, opts) =>
+      opts.onError(new ApiError({ status: 403, message: "You cannot approve a request you submitted yourself" })),
+    );
+    render(<StockAdjustmentRequestDetailBody id={42} role="admin" />);
+    const stored = window.sessionStorage.getItem("adjreq-approve-key:42");
+    await approveOnce(user);
+    expect(window.sessionStorage.getItem("adjreq-approve-key:42")).toBe(stored);
+  });
+
+  it("reject sends { id, rejection_reason } with no key; cancel is offered to the warehouse role on PENDING", async () => {
+    const user = userEvent.setup();
+    const { unmount } = render(<StockAdjustmentRequestDetailBody id={42} role="admin" />);
+    await user.click(screen.getByRole("button", { name: /^reject$/i }));
+    const dialog = screen.getByRole("dialog");
+    await user.type(within(dialog).getByRole("textbox"), "miscounted");
+    await user.click(within(dialog).getByRole("button", { name: /^reject$/i }));
+    expect(rejectMutate.mock.calls[0][0]).toEqual({ id: 42, rejection_reason: "miscounted" });
+    unmount();
+    render(<StockAdjustmentRequestDetailBody id={42} role="warehouse" />);
+    expect(screen.queryByRole("button", { name: /^approve$/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /cancel request/i })).toBeInTheDocument();
+  });
+});

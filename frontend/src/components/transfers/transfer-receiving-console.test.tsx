@@ -31,9 +31,15 @@ vi.mock("@/lib/query/sales", () => ({
 }));
 
 import { TransferReceivingConsole } from "./transfer-receiving-console";
+import { resolveBarcode } from "@/lib/query/sales";
+import { LanguageProvider } from "@/lib/i18n/client";
+import { LanguageSwitch } from "@/components/shell/language-switch";
 
 beforeEach(() => {
   receiveMutate.mockReset();
+  vi.mocked(toast.error).mockClear();
+  vi.mocked(toast.info).mockClear();
+  vi.mocked(resolveBarcode).mockReset();
   detail = transferDetailResponse;
   batchExpiry = {};
   window.sessionStorage.clear();
@@ -148,5 +154,169 @@ describe("TransferReceivingConsole — expired in transit / not receivable", () 
     render(<TransferReceivingConsole transferId={1} />);
     expect(screen.getByText(/not in transit — nothing to receive/i)).toBeInTheDocument();
     expect(screen.queryByLabelText("Receive now")).toBeNull();
+  });
+});
+
+/* ------------------- R3.0 characterization (pre-refactor) ------------------- */
+
+describe("TransferReceivingConsole — characterization (R3.0)", () => {
+  const MISMATCH = "Idempotency-Key already used with a different payload";
+
+  it("exact mutate arguments: transfer_item_id lines sorted, quantity padded to 3dp, key prefix tr-rcpt-", async () => {
+    const user = userEvent.setup();
+    render(<TransferReceivingConsole transferId={1} />);
+    await user.type(qty()[1], "1.5");
+    await user.type(qty()[0], "2");
+    await user.click(receiveBtn());
+    expect(receiveMutate.mock.calls[0][0]).toEqual({
+      id: 1,
+      idempotencyKey: expect.stringMatching(/^tr-rcpt-/),
+      payload: {
+        items: [
+          { transfer_item_id: 1, quantity: "2.000" },
+          { transfer_item_id: 2, quantity: "1.500" },
+        ],
+      },
+    });
+  });
+
+  it("more than 3 decimals is rejected client-side", async () => {
+    const user = userEvent.setup();
+    render(<TransferReceivingConsole transferId={1} />);
+    await user.type(qty()[0], "1.0001");
+    expect(screen.getByText(/At most 3 decimal places/i)).toBeInTheDocument();
+    expect(receiveBtn()).toBeDisabled();
+  });
+
+  it("a failed receive keeps entries and key; the retry is identical; a reload restores both", async () => {
+    const user = userEvent.setup();
+    receiveMutate.mockImplementation((_a, opts) => opts.onError(new ApiError({ status: 503, message: "down", requestId: "r" })));
+    const first = render(<TransferReceivingConsole transferId={1} />);
+    await user.type(qty()[0], "2");
+    await user.click(receiveBtn());
+    await user.click(receiveBtn());
+    expect(receiveMutate.mock.calls[1][0]).toEqual(receiveMutate.mock.calls[0][0]);
+    first.unmount();
+    render(<TransferReceivingConsole transferId={1} />);
+    expect(qty()[0]).toHaveValue("2");
+    await user.click(receiveBtn());
+    expect(receiveMutate.mock.calls[2][0]).toEqual(receiveMutate.mock.calls[0][0]);
+  });
+
+  it("success rotates the key and clears entries; a replayed receipt is listed once", async () => {
+    const user = userEvent.setup();
+    receiveMutate.mockImplementation((_a, opts) => opts.onSuccess(transferReceiptResponse));
+    render(<TransferReceivingConsole transferId={1} />);
+    await user.type(qty()[0], "2");
+    await user.click(receiveBtn());
+    const k1 = receiveMutate.mock.calls[0][0].idempotencyKey;
+    expect(qty()[0]).toHaveValue("");
+    await user.type(qty()[0], "2");
+    await user.click(receiveBtn());
+    expect(receiveMutate.mock.calls[1][0].idempotencyKey).not.toBe(k1);
+    const receipt = transferReceiptResponse.receipt_number;
+    expect(screen.getAllByText((_, el) => el?.textContent === receipt && el.children.length === 0)).toHaveLength(1);
+  });
+
+  it("the mismatch predicate is the exact message regardless of status; a look-alike is a normal rejection", async () => {
+    const user = userEvent.setup();
+    receiveMutate.mockImplementationOnce((_a, opts) =>
+      opts.onError(new ApiError({ status: 409, message: "IDEMPOTENCY-KEY already used with a different payload", requestId: "r" })),
+    );
+    render(<TransferReceivingConsole transferId={1} />);
+    await user.type(qty()[0], "2");
+    await user.click(receiveBtn());
+    expect(toast.error).toHaveBeenCalledWith("Receipt rejected", expect.anything());
+    expect(screen.queryByRole("button", { name: /start a new receipt/i })).toBeNull();
+
+    receiveMutate.mockImplementationOnce((_a, opts) => opts.onError(new ApiError({ status: 500, message: MISMATCH, requestId: "r" })));
+    await user.click(receiveBtn());
+    expect(await screen.findByRole("button", { name: /start a new receipt/i })).toBeInTheDocument();
+  });
+
+  it("mismatch recovery keeps entries and the next submit uses a NEW key with the same payload", async () => {
+    const user = userEvent.setup();
+    receiveMutate.mockImplementationOnce((_a, opts) => opts.onError(new ApiError({ status: 409, message: MISMATCH, requestId: "r" })));
+    render(<TransferReceivingConsole transferId={1} />);
+    await user.type(qty()[0], "2");
+    await user.click(receiveBtn());
+    expect(receiveBtn()).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: /start a new receipt/i }));
+    await user.click(receiveBtn());
+    expect(receiveMutate.mock.calls[1][0].payload).toEqual(receiveMutate.mock.calls[0][0].payload);
+    expect(receiveMutate.mock.calls[1][0].idempotencyKey).not.toBe(receiveMutate.mock.calls[0][0].idempotencyKey);
+  });
+
+  describe("barcode assist (read-only, never a receive)", () => {
+    const assist = async (user: ReturnType<typeof userEvent.setup>, code: string) => {
+      await user.type(screen.getByLabelText("Barcode assist"), `${code}{Enter}`);
+    };
+    const product = (id: number, product_name: string) => ({ product: { id, product_name }, batches: [], barcode: "x", context: "stock_in" });
+
+    it("jumps to the first line still in transit and announces when a product has several lines", async () => {
+      const user = userEvent.setup();
+      const scroll = vi.fn();
+      Element.prototype.scrollIntoView = scroll; // jsdom has no scrollIntoView
+      detail = {
+        ...transferDetailResponse,
+        items: [
+          { ...transferDetailResponse.items[0], received_quantity: "5.000", outstanding_quantity: "0.000" },
+          { ...transferDetailResponse.items[0], id: 3, batch_id: 9 },
+          transferDetailResponse.items[1],
+        ],
+      };
+      vi.mocked(resolveBarcode).mockResolvedValueOnce(product(1, "Arabica Whole Bean 1kg") as never);
+      render(<TransferReceivingConsole transferId={1} />);
+      await assist(user, "8800000000001");
+      await vi.waitFor(() => expect(document.getElementById("trl-3-qty")).toHaveFocus());
+      expect(resolveBarcode).toHaveBeenCalledWith("8800000000001", "stock_in");
+      expect(toast.info).toHaveBeenCalledWith("Arabica Whole Bean 1kg has 2 lines — jumped to the first with stock in transit.");
+      expect(receiveMutate).not.toHaveBeenCalled();
+      // @ts-expect-error -- remove the test-only stub again
+      delete Element.prototype.scrollIntoView;
+    });
+
+    it("not on the transfer / fully received / unknown code are toasts only", async () => {
+      const user = userEvent.setup();
+      detail = {
+        ...transferDetailResponse,
+        items: [{ ...transferDetailResponse.items[0], received_quantity: "5.000", outstanding_quantity: "0.000" }, transferDetailResponse.items[1]],
+      };
+      render(<TransferReceivingConsole transferId={1} />);
+      vi.mocked(resolveBarcode).mockResolvedValueOnce(product(99, "Stranger") as never);
+      await assist(user, "8800000000099");
+      await vi.waitFor(() => expect(toast.error).toHaveBeenCalledWith("Stranger is not on this transfer."));
+      vi.mocked(resolveBarcode).mockResolvedValueOnce(product(1, "Arabica Whole Bean 1kg") as never);
+      await assist(user, "8800000000001");
+      await vi.waitFor(() => expect(toast.info).toHaveBeenCalledWith("Arabica Whole Bean 1kg is already fully received."));
+      vi.mocked(resolveBarcode).mockRejectedValueOnce(new Error("network"));
+      await assist(user, "8800000000500");
+      await vi.waitFor(() => expect(toast.error).toHaveBeenCalledWith("Could not resolve that barcode."));
+      expect(receiveMutate).not.toHaveBeenCalled();
+    });
+  });
+
+  it("a language switch keeps entries and sends no business request", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      render(
+        <LanguageProvider initialLocale="th">
+          <LanguageSwitch />
+          <TransferReceivingConsole transferId={1} />
+        </LanguageProvider>,
+      );
+      await user.type(qty()[0], "2");
+      const input = qty()[0];
+      await user.click(screen.getByRole("button", { name: "EN" }));
+      await user.click(screen.getByRole("button", { name: "ไทย" }));
+      expect(qty()[0]).toBe(input);
+      expect(input).toHaveValue("2");
+      expect(receiveMutate).not.toHaveBeenCalled();
+      expect(fetchMock.mock.calls.every((c) => (c as unknown[])[0] === "/api/prefs/language")).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

@@ -5,15 +5,24 @@ import * as React from "react";
 import { DEFAULT_LOCALE, type Locale } from "./config";
 import { DICTIONARIES, translate, type MessageKey, type MessageVars } from "./translate";
 
+/**
+ * How a language choice ended, as far as this page can tell:
+ * - `saved`: the preference cookie was written;
+ * - `failed`: not confirmed: the request failed, was rejected, or took
+ *   longer than LOCALE_SAVE_TIMEOUT_MS (it may still complete later);
+ * - `superseded`: a newer choice replaced this one before its outcome was
+ *   known; callers should stay silent and let the newer choice report.
+ */
+export type LocaleSaveOutcome = "saved" | "failed" | "superseded";
+
+/** How long a choice waits for confirmation before it is reported as not saved. */
+export const LOCALE_SAVE_TIMEOUT_MS = 10_000;
+
 export interface I18nValue {
   locale: Locale;
   t: (key: MessageKey, vars?: MessageVars) => string;
-  /**
-   * Switch language; resolves to whether the preference cookie was saved. A
-   * call superseded by a newer choice before its outcome is known never
-   * settles, so callers only ever report the latest choice.
-   */
-  setLocale: (next: Locale) => Promise<boolean>;
+  /** Switch language now and persist the choice; always settles (see LocaleSaveOutcome). */
+  setLocale: (next: Locale) => Promise<LocaleSaveOutcome>;
 }
 
 const I18nContext = React.createContext<I18nValue | null>(null);
@@ -22,7 +31,7 @@ const I18nContext = React.createContext<I18nValue | null>(null);
 const FALLBACK: I18nValue = {
   locale: "en",
   t: (key, vars) => translate(DICTIONARIES.en, key, vars),
-  setLocale: async () => false,
+  setLocale: async () => "failed",
 };
 
 /**
@@ -39,24 +48,50 @@ const FALLBACK: I18nValue = {
  */
 export function LanguageProvider({ initialLocale = DEFAULT_LOCALE, children }: { initialLocale?: Locale; children: React.ReactNode }) {
   const [locale, setLocaleState] = React.useState<Locale>(initialLocale);
-  // Preference writes run one at a time, in click order: the tail of the chain
-  // and a counter identifying the latest choice.
+  // Preference writes run one at a time, in click order: the tail of the chain,
+  // a counter identifying the latest choice, and the settle function of the
+  // choice still waiting for its outcome.
   const writes = React.useRef<Promise<unknown>>(Promise.resolve());
   const latest = React.useRef(0);
+  const pending = React.useRef<((outcome: LocaleSaveOutcome) => void) | null>(null);
+
+  // Nothing is left to report to once the provider is gone.
+  React.useEffect(() => () => pending.current?.("superseded"), []);
 
   const setLocale = React.useCallback((next: Locale) => {
     const choice = ++latest.current;
     const isLatest = () => choice === latest.current;
     setLocaleState(next);
     document.documentElement.lang = next;
-    // Concurrent POSTs would let an older response land last and leave the
-    // cookie on a choice the user already replaced. Chained writes never
-    // overlap, and a write whose choice was superseded while it waited is
-    // skipped, so the last cookie written is always the latest choice.
-    const write = writes.current.then(() => (isLatest() ? persistLocale(next) : false));
-    writes.current = write;
-    // a superseded outcome is withheld (never settles) rather than reported
-    return write.then((saved) => (isLatest() ? saved : new Promise<boolean>(() => {})));
+    pending.current?.("superseded");
+
+    return new Promise<LocaleSaveOutcome>((resolve) => {
+      let done = false;
+      const settle = (outcome: LocaleSaveOutcome) => {
+        if (done) return;
+        done = true;
+        window.clearTimeout(timer);
+        if (pending.current === settle) pending.current = null;
+        resolve(outcome);
+      };
+      pending.current = settle;
+      // Bounded feedback: a slow write is reported as not saved, but it is
+      // NOT aborted and the chain keeps waiting for it. An abort cannot stop a
+      // request the server may already be handling; its cookie could then land
+      // after a newer write. The browser applies a response's cookies before
+      // fetch() settles, so starting the next write only once this one has
+      // really settled keeps cookies landing in click order.
+      const timer = window.setTimeout(() => settle("failed"), LOCALE_SAVE_TIMEOUT_MS);
+      // Concurrent POSTs would let an older response land last and leave the
+      // cookie on a choice the user already replaced. Chained writes never
+      // overlap, and a write whose choice was superseded while it waited is
+      // skipped, so the last cookie written is always the latest choice.
+      const write = writes.current.then(() => (isLatest() ? persistLocale(next) : null));
+      writes.current = write;
+      void write.then((saved) => {
+        if (saved !== null && isLatest()) settle(saved ? "saved" : "failed");
+      });
+    });
   }, []);
 
   const value = React.useMemo<I18nValue>(

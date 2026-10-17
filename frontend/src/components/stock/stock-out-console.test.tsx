@@ -39,6 +39,8 @@ vi.mock("@/lib/query/stock", () => ({
 }));
 
 import { StockOutConsole } from "./stock-out-console";
+import { LanguageProvider } from "@/lib/i18n/client";
+import { LanguageSwitch } from "@/components/shell/language-switch";
 
 /* ------------------------------- helpers ----------------------------- */
 
@@ -459,5 +461,119 @@ describe("StockOutConsole — availability race (stale lookup never wins)", () =
     );
     expect(unmountedWarning).toBe(false);
     errorSpy.mockRestore();
+  });
+});
+
+/* ------------------- R3.0 characterization (pre-refactor) ------------------- */
+
+describe("StockOutConsole — characterization (R3.0)", () => {
+  const saveButton = (n: number) => screen.getByRole("button", { name: new RegExp(`issue ${n} items?`, "i") });
+
+  async function countScans(user: ReturnType<typeof userEvent.setup>, n: number) {
+    for (let i = 1; i <= n; i++) {
+      resolveBarcode.mockResolvedValueOnce(lookupResult(PRODUCT));
+      await scan(user, PRODUCT.barcode);
+      expect(await screen.findByText(new RegExp(`Matched — ready to issue ${i}`, "i"))).toBeInTheDocument();
+    }
+  }
+
+  async function sessionAt(user: ReturnType<typeof userEvent.setup>, n: number, strategy: "fefo" | "fifo" = "fefo") {
+    await pick(user, /Coffee 1kg/);
+    if (strategy === "fifo") await user.click(screen.getByRole("button", { name: /\(FIFO\)/i }));
+    await startScanning(user);
+    await countScans(user, n);
+  }
+
+  it("FIFO body: count as a plain string, trimmed remark, expected never sent; scans resolve with the 'lookup' purpose", async () => {
+    const user = userEvent.setup();
+    render(<StockOutConsole />);
+    await pick(user, /Coffee 1kg/);
+    await user.click(screen.getByRole("button", { name: /\(FIFO\)/i }));
+    await user.type(screen.getByPlaceholderText("0.000"), "9");
+    await user.type(screen.getByPlaceholderText("e.g. order pick"), "  pick 7  ");
+    await startScanning(user);
+    await countScans(user, 3);
+    await user.click(saveButton(3));
+    expect(saveMutate.mock.calls[0][0]).toEqual({
+      body: { endpoint: "stock/out-fifo", json: { product_id: 5, quantity: "3", remark: "pick 7" } },
+      idempotencyKey: expect.stringMatching(/^stockout-/),
+    });
+    // availability lookup on pick + 3 scans, all read-only "lookup" resolutions
+    expect(resolveBarcode.mock.calls.map((c) => c[1])).toEqual(["lookup", "lookup", "lookup", "lookup"]);
+  });
+
+  it("the mismatch predicate is status 409 + /different payload/i; the same text with another status is not", async () => {
+    const user = userEvent.setup();
+    saveMutate.mockImplementationOnce((_a, opts) =>
+      opts.onError(new ApiError({ status: 422, message: "Idempotency-Key already used with a different payload", requestId: "r" })),
+    );
+    render(<StockOutConsole />);
+    await sessionAt(user, 1);
+    await user.click(saveButton(1));
+    expect(screen.queryByText(/can no longer be saved/i)).not.toBeInTheDocument();
+    saveMutate.mockImplementationOnce((_a, opts) =>
+      opts.onError(new ApiError({ status: 409, message: "x Different Payload x", requestId: "r" })),
+    );
+    await user.click(saveButton(1));
+    expect(await screen.findByText(/can no longer be saved/i)).toBeInTheDocument();
+    expect(saveMutate.mock.calls[0][0].idempotencyKey).toBe(saveMutate.mock.calls[1][0].idempotencyKey);
+  });
+
+  it("mismatch recovery clears the session (strategy back to FEFO) and the next save uses a NEW key", async () => {
+    const user = userEvent.setup();
+    saveMutate.mockImplementationOnce((_a, opts) =>
+      opts.onError(new ApiError({ status: 409, message: "Idempotency-Key already used with a different payload", requestId: "r" })),
+    );
+    render(<StockOutConsole />);
+    await sessionAt(user, 1, "fifo");
+    await user.click(saveButton(1));
+    const k1 = saveMutate.mock.calls[0][0].idempotencyKey;
+    await user.click(await screen.findByRole("button", { name: /start new stock-out session/i }));
+    expect(screen.queryByLabelText("Barcode scan input")).not.toBeInTheDocument();
+    await sessionAt(user, 1);
+    await user.click(saveButton(1));
+    expect(saveMutate.mock.calls[1][0].body.endpoint).toBe("stock/out-fefo");
+    expect(saveMutate.mock.calls[1][0].idempotencyKey).not.toBe(k1);
+  });
+
+  it("success rotates the key for the next session", async () => {
+    const user = userEvent.setup();
+    saveMutate.mockImplementation((_a, opts) =>
+      opts.onSuccess({ product_id: 5, product_name: "Coffee 1kg", difference: "-1", current_stock: "19" }),
+    );
+    render(<StockOutConsole />);
+    await sessionAt(user, 1);
+    await user.click(saveButton(1));
+    const k1 = saveMutate.mock.calls[0][0].idempotencyKey;
+    await user.click(screen.getByRole("button", { name: /issue next product/i }));
+    await sessionAt(user, 1);
+    await user.click(saveButton(1));
+    expect(saveMutate.mock.calls[1][0].idempotencyKey).not.toBe(k1);
+  });
+
+  it("a language switch keeps the session, count and key and sends no business request", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      render(
+        <LanguageProvider initialLocale="th">
+          <LanguageSwitch />
+          <StockOutConsole />
+        </LanguageProvider>,
+      );
+      await sessionAt(user, 2, "fifo");
+      const scanInput = screen.getByLabelText("Barcode scan input");
+      await user.click(screen.getByRole("button", { name: "EN" }));
+      await user.click(screen.getByRole("button", { name: "ไทย" }));
+      expect(screen.getByLabelText("Barcode scan input")).toBe(scanInput);
+      expect(saveMutate).not.toHaveBeenCalled();
+      expect(resolveBarcode).toHaveBeenCalledTimes(3);
+      expect(fetchMock.mock.calls.every((c) => (c as unknown[])[0] === "/api/prefs/language")).toBe(true);
+      await user.click(saveButton(2));
+      expect(saveMutate.mock.calls[0][0].body).toEqual({ endpoint: "stock/out-fifo", json: { product_id: 5, quantity: "2" } });
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

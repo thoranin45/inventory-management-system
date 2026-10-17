@@ -12,7 +12,7 @@ import { Dialog, DialogClose, DialogContent } from "@/components/ui/dialog";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { isApiError } from "@/lib/api/errors";
-import { compareDecimals, sumDecimals, type DecimalString } from "@/lib/decimal";
+import { compareDecimals, sumDecimals } from "@/lib/decimal";
 import { queryKeys } from "@/lib/query/keys";
 import {
   resolveBarcode,
@@ -31,7 +31,6 @@ import {
 import {
   SCAN_ERROR_COPY,
   SO_ATTENTION_LABEL,
-  type SalesOrderDetail,
 } from "@/lib/api/schemas/sales";
 import {
   initialScanContext,
@@ -47,6 +46,15 @@ import { WorkLine } from "./work-line";
 import { ProgressRing } from "./progress-ring";
 import { AllocationPicker } from "./allocation-picker";
 import { PrintPreview } from "./print-preview";
+import {
+  allocationsWithLocal,
+  buildAmbiguityCandidates,
+  buildCompletePayload,
+  everyAllocationDone,
+  findItemByAllocation,
+  mergeScanResult,
+  type LocalProgress,
+} from "./fulfillment-logic";
 
 type Mode = "pick" | "pack";
 
@@ -77,25 +85,7 @@ const MODES: Record<Mode, ModeCfg> = {
   },
 };
 
-type LocalProgress = Record<number, { picked_quantity: DecimalString; packed_quantity: DecimalString }>;
-
 const EMPTY_LOOKUP: Record<number, ProductLite> = {};
-
-/** merge the immediate scan response over the server detail (no optimism) */
-function allocationsWithLocal(detail: SalesOrderDetail, local: LocalProgress) {
-  return detail.items.flatMap((it) =>
-    it.fulfillment_allocations.map((a) => {
-      const patch = local[a.id];
-      return {
-        ...a,
-        product_id: it.product_id,
-        item_quantity: it.quantity,
-        picked_quantity: patch?.picked_quantity ?? a.picked_quantity,
-        packed_quantity: patch?.packed_quantity ?? a.packed_quantity,
-      };
-    }),
-  );
-}
 
 export function FulfillmentConsole({ orderId, mode }: { orderId: number; mode: Mode }) {
   const cfg = MODES[mode];
@@ -192,9 +182,7 @@ export function FulfillmentConsole({ orderId, mode }: { orderId: number; mode: M
     () => (detail ? allocationsWithLocal(detail, local) : []),
     [detail, local],
   );
-  const allComplete =
-    allocations.length > 0 &&
-    allocations.every((a) => compareDecimals(a[cfg.doneField], a.quantity) >= 0);
+  const allComplete = allocations.length > 0 && everyAllocationDone(allocations, cfg.doneField);
 
   const productByBarcode = React.useCallback(
     (code: string) => Object.values(lookup).find((p) => p.barcode === code) ?? null,
@@ -212,21 +200,7 @@ export function FulfillmentConsole({ orderId, mode }: { orderId: number; mode: M
       } catch {
         /* expiry metadata is a bonus — proceed without it */
       }
-      const candidates: AmbiguityCandidate[] = allocs.map((a) => {
-        const b = a.batch_id != null ? resolved?.batches.find((x) => x.id === a.batch_id) : undefined;
-        const patch = local[a.id];
-        return {
-          allocation_id: a.id,
-          batch_id: a.batch_id,
-          quantity: a.quantity,
-          done: (patch?.[cfg.doneField] ?? a[cfg.doneField]) as string,
-          lot_no: b?.lot_no ?? null,
-          expiry_date: b?.expiry_date ?? null,
-          days_to_expiry: b?.days_to_expiry ?? null,
-          is_expired: b?.is_expired,
-          is_near_expiry: b?.is_near_expiry,
-        };
-      });
+      const candidates: AmbiguityCandidate[] = buildAmbiguityCandidates(allocs, resolved, local, cfg.doneField);
       dispatch({ type: "AMBIGUOUS", message: SCAN_ERROR_COPY.ALLOCATION_IDENTIFICATION_REQUIRED, candidates });
       setAmbig({ code, productName: product?.product_name ?? code, candidates });
     },
@@ -241,37 +215,20 @@ export function FulfillmentConsole({ orderId, mode }: { orderId: number; mode: M
         { id: orderId, barcode: code, allocation_id: allocationId, quantity: opts.quantity },
         {
           onSuccess: (data) => {
-            setLocal((p) => ({
-              ...p,
-              [data.allocation_id]: {
-                picked_quantity: data.picked_quantity,
-                packed_quantity: data.packed_quantity,
-              },
-            }));
+            setLocal((p) => mergeScanResult(p, data));
             flashLine(data.allocation_id, "hit");
             beepOk();
             setTargetItemId(null);
+            const item = findItemByAllocation(detail, data.allocation_id);
             {
-              const itId = detail.items.find((it) =>
-                it.fulfillment_allocations.some((a) => a.id === data.allocation_id),
-              )?.id;
+              const itId = item?.id;
               if (itId != null) {
                 setLineActivity((m) => ({ ...m, [itId]: `✓ ${cfg.verb} +${data[cfg.doneField]} / ${data.quantity}` }));
               }
             }
-            const merged = allocationsWithLocal(detail, {
-              ...local,
-              [data.allocation_id]: {
-                picked_quantity: data.picked_quantity,
-                packed_quantity: data.packed_quantity,
-              },
-            });
-            const done = merged.every((a) => compareDecimals(a[cfg.doneField], a.quantity) >= 0);
-            const name = lookup[
-              detail.items.find((it) =>
-                it.fulfillment_allocations.some((a) => a.id === data.allocation_id),
-              )?.product_id ?? -1
-            ]?.product_name;
+            const merged = allocationsWithLocal(detail, mergeScanResult(local, data));
+            const done = everyAllocationDone(merged, cfg.doneField);
+            const name = lookup[item?.product_id ?? -1]?.product_name;
             dispatch(
               done
                 ? { type: "COMPLETE", message: `Every line is ${cfg.verb.toLowerCase()}. Review and complete ${cfg.label.toLowerCase()}.` }
@@ -316,13 +273,7 @@ export function FulfillmentConsole({ orderId, mode }: { orderId: number; mode: M
         { id: orderId, allocation_id: allocationId, quantity: "1" },
         {
           onSuccess: (data) => {
-            setLocal((p) => ({
-              ...p,
-              [data.allocation_id]: {
-                picked_quantity: data.picked_quantity,
-                packed_quantity: data.packed_quantity,
-              },
-            }));
+            setLocal((p) => mergeScanResult(p, data));
             beepOk();
             setLineActivity((m) => ({
               ...m,
@@ -386,7 +337,7 @@ export function FulfillmentConsole({ orderId, mode }: { orderId: number; mode: M
   const runComplete = () => {
     if (!detail) return;
     completeMut.mutate(
-      { id: orderId, allocations: allocations.map((a) => ({ allocation_id: a.id, quantity: a.quantity })) },
+      { id: orderId, allocations: buildCompletePayload(allocations) },
       {
         onSuccess: (data) => {
           toast.success(

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { ApiError } from "@/lib/api/errors";
@@ -156,5 +156,259 @@ describe("ReturnDrawer — V1-H1 Idempotency-Key lifecycle", () => {
     retMut.mutate.mockReset();
     await submit();
     expect(keyOfCall(0)).not.toBe(conflicted);
+  });
+});
+
+/* ------------------- R3.0 characterization (pre-refactor) ------------------- */
+
+describe("ReturnDrawer — characterization (R3.0)", () => {
+  const qtyFor = (name: RegExp) => screen.getByLabelText(new RegExp(`Return quantity for ${name.source}`, "i"));
+  const reasonFor = (name: RegExp) => screen.getByLabelText(new RegExp(`Return reason for ${name.source}`, "i"));
+  const submit = () => userEvent.click(screen.getByRole("button", { name: /record return/i }));
+  const conflict = "Idempotency-Key already used with a different payload";
+
+  it("body: items ordered by product_id ascending regardless of entry order, quantities NOT padded, reasons trimmed or omitted", async () => {
+    open();
+    // Decimal values are set in one change: typing "1." keystroke by keystroke
+    // currently throws in render (sumDecimals on a partial value), an R3.0
+    // finding reported separately and deliberately not fixed in R3.
+    fireEvent.change(qtyFor(/Green Tea 200g/), { target: { value: "1.50" } }); // product 6, entered first
+    await userEvent.type(reasonFor(/Green Tea 200g/), "  torn bag  ");
+    await userEvent.type(qtyFor(/Refined Sugar Sack 25kg/), "2"); // product 3
+    await userEvent.type(reasonFor(/Refined Sugar Sack 25kg/), "   ");
+    await submit();
+    expect(retMut.mutate.mock.calls[0][0]).toEqual({
+      id: 63,
+      input: {
+        items: [
+          { product_id: 3, quantity: "2" },
+          { product_id: 6, quantity: "1.50", reason: "torn bag" },
+        ],
+      },
+      idempotencyKey: expect.stringMatching(/^so-ret-/),
+    });
+  });
+
+  it("more than 3 decimals is a line error and nothing is sent", async () => {
+    open();
+    fireEvent.change(qtyFor(/Green Tea 200g/), { target: { value: "1.0001" } }); // see the decimal note above
+    await submit();
+    expect(await screen.findByText(/up to 3 decimals/i)).toBeInTheDocument();
+    expect(retMut.mutate).not.toHaveBeenCalled();
+  });
+
+  it("an empty drawer submit is blocked (button disabled until a quantity is entered)", () => {
+    open();
+    expect(screen.getByRole("button", { name: /record return/i })).toBeDisabled();
+  });
+
+  it("Record return is disabled while a return is pending", async () => {
+    retMut.isPending = true;
+    open();
+    await userEvent.type(qtyFor(/Green Tea 200g/), "1");
+    expect(screen.getByRole("button", { name: /submitting…/i })).toBeDisabled();
+  });
+
+  it("the key-conflict predicate is status 409 AND the exact message", async () => {
+    retMut.mutate.mockImplementationOnce((_a, { onError }) => onError(new ApiError({ status: 422, message: conflict, requestId: "r1" })));
+    open();
+    await userEvent.type(qtyFor(/Green Tea 200g/), "1");
+    await submit();
+    // not a conflict: resubmission stays possible, the copy still comes from the shared map
+    expect(await screen.findByText(/may already be recorded/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /start a new return/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /record return/i })).toBeEnabled();
+
+    retMut.mutate.mockImplementationOnce((_a, { onError }) =>
+      onError(new ApiError({ status: 409, message: conflict.toUpperCase(), requestId: "r2" })),
+    );
+    await submit();
+    expect(screen.queryByRole("button", { name: /start a new return/i })).not.toBeInTheDocument();
+    expect(keyOfCall(1)).toBe(keyOfCall(0));
+  });
+
+  it("a key conflict keeps the entered lines; 'Start a new return' keeps them and only rotates the key", async () => {
+    retMut.mutate.mockImplementationOnce((_a, { onError }) => onError(new ApiError({ status: 409, message: conflict, requestId: "r" })));
+    open();
+    await userEvent.type(qtyFor(/Green Tea 200g/), "2");
+    await submit();
+    await userEvent.click(await screen.findByRole("button", { name: /start a new return/i }));
+    expect(qtyFor(/Green Tea 200g/)).toHaveValue("2");
+    await submit();
+    expect(retMut.mutate.mock.calls[1][0].input).toEqual(retMut.mutate.mock.calls[0][0].input);
+    expect(keyOfCall(1)).not.toBe(keyOfCall(0));
+  });
+
+  it("a non-ApiError failure keeps entries with the generic copy", async () => {
+    retMut.mutate.mockImplementationOnce((_a, { onError }) => onError(new TypeError("Failed to fetch")));
+    open();
+    await userEvent.type(qtyFor(/Green Tea 200g/), "2");
+    await submit();
+    expect(await screen.findByText("The return was rejected. Your entries are kept.")).toBeInTheDocument();
+    expect(qtyFor(/Green Tea 200g/)).toHaveValue("2");
+  });
+
+  it("success clears only the returned lines' quantity and reason", async () => {
+    retMut.mutate.mockImplementationOnce((_a, { onSuccess }) =>
+      onSuccess({ sales_order_id: 63, so_number: "SO-000063", returned_items: [{ product_id: 6, returned_quantity: "1", previously_returned: "0", total_returned: "1", remaining_returnable: "4" }] }),
+    );
+    open();
+    await userEvent.type(qtyFor(/Green Tea 200g/), "1");
+    await userEvent.type(reasonFor(/Green Tea 200g/), "dent");
+    await userEvent.type(qtyFor(/Refined Sugar Sack 25kg/), "1");
+    await submit();
+    expect(qtyFor(/Green Tea 200g/)).toHaveValue("");
+    expect(reasonFor(/Green Tea 200g/)).toHaveValue("");
+    expect(qtyFor(/Refined Sugar Sack 25kg/)).toHaveValue("1"); // not in the backend result: kept
+  });
+
+  it("the ceiling uses what the backend reported as already returned", async () => {
+    retMut.mutate.mockImplementationOnce((_a, { onSuccess }) =>
+      onSuccess({ sales_order_id: 63, so_number: "SO-000063", returned_items: [{ product_id: 6, returned_quantity: "4", previously_returned: "0", total_returned: "4", remaining_returnable: "1" }] }),
+    );
+    open();
+    await userEvent.type(qtyFor(/Green Tea 200g/), "4");
+    await submit();
+    await userEvent.type(qtyFor(/Green Tea 200g/), "2");
+    await submit();
+    expect(await screen.findByText(/can't exceed 1\.000/i)).toBeInTheDocument();
+    expect(retMut.mutate).toHaveBeenCalledTimes(1);
+  });
+
+  it("only the key survives a drawer reload — entered quantities do not", async () => {
+    retMut.mutate.mockImplementation((_a, { onError }) => onError(new ApiError({ status: 504, message: "Gateway Timeout" })));
+    const first = open();
+    await userEvent.type(qtyFor(/Green Tea 200g/), "2");
+    await submit();
+    first.unmount();
+    open();
+    expect(qtyFor(/Green Tea 200g/)).toHaveValue("");
+  });
+});
+
+/* --------- Sales Return input safety (pre-existing render crash, fixed) --------- */
+
+describe("ReturnDrawer — partial and invalid quantity input never crashes", () => {
+  const qtyFor = (name: RegExp) => screen.getByLabelText(new RegExp(`Return quantity for ${name.source}`, "i"));
+  const submit = () => userEvent.click(screen.getByRole("button", { name: /record return/i }));
+  const returning = () => screen.getByText(/^Returning/).textContent;
+
+  it("typing a decimal keystroke by keystroke keeps the drawer and the typed text", async () => {
+    open();
+    await userEvent.type(qtyFor(/Green Tea 200g/), "1.5"); // passes through "1."
+    expect(qtyFor(/Green Tea 200g/)).toHaveValue("1.5");
+    expect(returning()).toMatch(/1\.5/);
+  });
+
+  it("a partial decimal shows no total and is rejected on submit, never sent", async () => {
+    open();
+    await userEvent.type(qtyFor(/Green Tea 200g/), "1.");
+    expect(qtyFor(/Green Tea 200g/)).toHaveValue("1.");
+    expect(returning()).toBe("Returning —"); // not a number, and not a silent zero
+    await submit();
+    expect(await screen.findByText(/up to 3 decimals/i)).toBeInTheDocument();
+    expect(retMut.mutate).not.toHaveBeenCalled();
+  });
+
+  it("invalid text is kept, shows no total, and blocks the whole return (no silent zero line)", async () => {
+    open();
+    await userEvent.type(qtyFor(/Green Tea 200g/), "abc");
+    await userEvent.type(qtyFor(/Refined Sugar Sack 25kg/), "1");
+    expect(qtyFor(/Green Tea 200g/)).toHaveValue("abc");
+    expect(returning()).toBe("Returning —");
+    await submit();
+    expect(await screen.findByText(/up to 3 decimals/i)).toBeInTheDocument();
+    expect(retMut.mutate).not.toHaveBeenCalled(); // the valid sugar line is not sent alone
+  });
+
+  it("other non-numeric fragments ('.', '-', '1.2.3') render without crashing", async () => {
+    open();
+    for (const text of [".", "-", "1.2.3"]) {
+      fireEvent.change(qtyFor(/Green Tea 200g/), { target: { value: text } });
+      expect(qtyFor(/Green Tea 200g/)).toHaveValue(text);
+      expect(returning()).toBe("Returning —");
+    }
+  });
+
+  it("an emptied field returns to no active line (Record return disabled)", async () => {
+    open();
+    await userEvent.type(qtyFor(/Green Tea 200g/), "1.");
+    await userEvent.clear(qtyFor(/Green Tea 200g/));
+    expect(screen.getByRole("button", { name: /record return/i })).toBeDisabled();
+    expect(returning()).toMatch(/Returning\s*0/);
+  });
+
+  it("correcting the input recovers: the corrected value is sent exactly, and a retry reuses the key", async () => {
+    retMut.mutate.mockImplementation((_a, { onError }) => onError(new ApiError({ status: 504, message: "Gateway Timeout" })));
+    open();
+    await userEvent.type(qtyFor(/Green Tea 200g/), "1.");
+    await submit();
+    expect(retMut.mutate).not.toHaveBeenCalled();
+    await userEvent.type(qtyFor(/Green Tea 200g/), "25"); // "1." -> "1.25"
+    expect(returning()).toMatch(/1\.25/);
+    await submit();
+    await submit(); // retry after the timeout
+    expect(retMut.mutate).toHaveBeenCalledTimes(2);
+    expect(retMut.mutate.mock.calls[0][0].input).toEqual({ items: [{ product_id: 6, quantity: "1.25" }] });
+    expect(retMut.mutate.mock.calls[1][0]).toEqual(retMut.mutate.mock.calls[0][0]);
+  });
+
+  it("the ceiling rule still applies to valid decimals", async () => {
+    open();
+    await userEvent.type(qtyFor(/Green Tea 200g/), "5.001");
+    await submit();
+    expect(await screen.findByText(/can't exceed 5/i)).toBeInTheDocument();
+    expect(retMut.mutate).not.toHaveBeenCalled();
+  });
+});
+
+describe("ReturnDrawer — the running total follows the quantity rule (over-precise input)", () => {
+  const qtyFor = (name: RegExp) => screen.getByLabelText(new RegExp(`Return quantity for ${name.source}`, "i"));
+  const submit = () => userEvent.click(screen.getByRole("button", { name: /record return/i }));
+  const returning = () => screen.getByText(/^Returning/).textContent;
+  // QuantityDisplay shows the approved 2-dp form and keeps the exact value in data-raw
+  const rawTotal = () => screen.getByText(/^Returning/).querySelector(".qty")?.getAttribute("data-raw") ?? null;
+
+  it.each(["0.0009", "1.2345"])("'%s' keeps the typed text, shows no total and sends nothing", async (typed) => {
+    open();
+    await userEvent.type(qtyFor(/Green Tea 200g/), typed);
+    expect(qtyFor(/Green Tea 200g/)).toHaveValue(typed);
+    expect(returning()).toBe("Returning —");
+    await submit();
+    expect(await screen.findByText(/up to 3 decimals/i)).toBeInTheDocument();
+    expect(retMut.mutate).not.toHaveBeenCalled();
+  });
+
+  it("an over-precise line beside a valid one: no total, the whole return is blocked", async () => {
+    open();
+    await userEvent.type(qtyFor(/Refined Sugar Sack 25kg/), "1");
+    await userEvent.type(qtyFor(/Green Tea 200g/), "0.0009");
+    expect(returning()).toBe("Returning —");
+    await submit();
+    expect(retMut.mutate).not.toHaveBeenCalled();
+  });
+
+  it("valid 1.234 and 1.5 still total normally", async () => {
+    open();
+    await userEvent.type(qtyFor(/Green Tea 200g/), "1.234");
+    expect(rawTotal()).toBe("1.234");
+    expect(returning()).toBe("Returning 1.23");
+    await userEvent.clear(qtyFor(/Green Tea 200g/));
+    await userEvent.type(qtyFor(/Green Tea 200g/), "1.5");
+    expect(rawTotal()).toBe("1.500");
+    expect(returning()).toBe("Returning 1.50");
+  });
+
+  it("correcting 0.0009 to 0.009 restores the total and sends the corrected value as typed", async () => {
+    open();
+    await userEvent.type(qtyFor(/Green Tea 200g/), "0.0009");
+    await submit();
+    expect(retMut.mutate).not.toHaveBeenCalled();
+    await userEvent.type(qtyFor(/Green Tea 200g/), "{Backspace}{Backspace}9"); // "0.0009" -> "0.009"
+    expect(qtyFor(/Green Tea 200g/)).toHaveValue("0.009");
+    expect(rawTotal()).toBe("0.009");
+    await submit();
+    expect(retMut.mutate).toHaveBeenCalledTimes(1);
+    expect(retMut.mutate.mock.calls[0][0].input).toEqual({ items: [{ product_id: 6, quantity: "0.009" }] });
   });
 });

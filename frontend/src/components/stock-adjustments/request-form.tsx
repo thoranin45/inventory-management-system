@@ -13,17 +13,15 @@ import { isApiError } from "@/lib/api/errors";
 import { useAllProductStock, useProducts } from "@/lib/query/hooks";
 import { useWarehouses } from "@/lib/query/warehouses";
 import { useIdempotentDraft } from "@/lib/idempotent-draft";
+import { useDebounced } from "@/lib/use-debounced";
+import { isLooseKeyMismatch, requestIdOf as rid } from "@/lib/workflow/submission-errors";
+import { useIdempotentSubmission } from "@/lib/workflow/use-idempotent-submission";
 import { useCreateStockAdjustmentRequest } from "@/lib/query/stock-adjustment-requests";
 import {
   ADJUSTMENT_REQUEST_ERROR_COPY,
   BATCH_REASON_CODES,
   batchAdjustmentErrorCopy,
-  batchReasonError,
   buildCreateAdjustmentRequestBody,
-  compareQty,
-  createAdjustmentRequestInput,
-  isQty,
-  qtyInputError,
   REASON_CODES,
   REASON_LABELS,
   type CreateAdjustmentRequestBody,
@@ -32,6 +30,13 @@ import {
 import type { StockBalanceRow } from "@/lib/api/schemas/stock";
 import type { Warehouse } from "@/lib/api/schemas/warehouses";
 import { ExactBalancePicker, operationalBatchOptions, type BalanceOption } from "./exact-balance-picker";
+import {
+  adjustmentChecks,
+  defaultBalancePrefill,
+  pickBalancePatch,
+  verifyBatchSelection,
+  type SelectionState,
+} from "./adjustment-request-logic";
 
 /** The single persisted "line" (id 0) — mirrors Stock Out's session shape.
  * Product/strategy-equivalent fields never change once a submit is in
@@ -77,13 +82,6 @@ function buildPayload(lines: Record<number, RequestLine>): CreateAdjustmentReque
 
 const FIELD_CLS =
   "h-11 w-full rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-[15px] tabular-nums outline-hidden focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-[var(--focus)] disabled:opacity-60";
-
-type SelectionState =
-  | { kind: "checking" }
-  | { kind: "error" }
-  | { kind: "missing" }
-  | { kind: "changed"; option: BalanceOption }
-  | { kind: "ok"; option: BalanceOption };
 
 function SelectionNotice({
   selection,
@@ -138,10 +136,6 @@ function SelectionNotice({
   );
 }
 
-function rid(e: unknown): string | undefined {
-  return isApiError(e) ? e.requestId : undefined;
-}
-
 export function StockAdjustmentRequestForm() {
   const router = useRouter();
 
@@ -153,8 +147,10 @@ export function StockAdjustmentRequestForm() {
   const line = draft.lines[0] as RequestLine | undefined;
 
   const createMut = useCreateStockAdjustmentRequest();
+  // a reused key whose stored request differs forces a new request (never silently re-keys)
+  const submission = useIdempotentSubmission({ draft, mutate: createMut.mutate, isMismatch: isLooseKeyMismatch });
+  const { mismatch } = submission;
   const [submitted, setSubmitted] = React.useState<{ referenceNumber: string | null; status: string } | null>(null);
-  const [mismatch, setMismatch] = React.useState(false);
 
   const phase: "form" | "submitted" = submitted ? "submitted" : "form";
 
@@ -217,25 +213,11 @@ export function StockAdjustmentRequestForm() {
     if (!line || line.trackBatch || line.observed !== "" || !stockQ.data || !directoryQ.data) return;
     if (prefilledFor.current === line.productId) return; // once per chosen product
     prefilledFor.current = line.productId;
-    const main = directory.find((w) => w.warehouse_code === "MAIN");
-    const defaultLocation = main?.locations.find((l) => l.location_code === "DEFAULT");
-    const row = balances.find(
-      (b) => b.batch_id === null && b.warehouse_id === main?.id && b.location_id === defaultLocation?.id,
-    );
-    draft.setLine(0, { observed: row?.on_hand_qty ?? "0.000", reserved: row?.reserved_qty ?? "0" });
+    draft.setLine(0, defaultBalancePrefill(balances, directory));
   }, [line, stockQ.data, directoryQ.data, directory, balances, draft]);
 
-  const pickBalance = (option: BalanceOption) =>
-    draft.setLine(0, {
-      warehouseId: option.warehouseId,
-      locationId: option.locationId,
-      batchId: option.batchId,
-      batchExpired: option.isExpired,
-      pickedOnHand: option.onHand,
-      reserved: option.reserved,
-      observed: option.onHand, // B2: on-hand, never available
-      reasonCode: line?.reasonCode === "EXPIRY_WRITE_OFF" && !option.isExpired ? "CYCLE_COUNT_VARIANCE" : line?.reasonCode,
-    });
+  // B2: observed is the lot's on-hand, never available
+  const pickBalance = (option: BalanceOption) => draft.setLine(0, pickBalancePatch(option, line?.reasonCode));
 
   const patch = (p: Partial<RequestLine>) => draft.setLine(0, p);
 
@@ -243,56 +225,18 @@ export function StockAdjustmentRequestForm() {
   // LATEST successful balance + directory load: same product, warehouse,
   // location and batch, still operational, and unchanged since it was
   // picked. Approval re-checks the live balance regardless.
-  const selection = React.useMemo((): SelectionState | null => {
-    if (!line || !line.trackBatch || line.batchId == null) return null;
-    if (stockQ.isError || directoryQ.isError) return { kind: "error" };
-    if (!stockQ.data || !directoryQ.data || stockQ.isFetching || directoryQ.isFetching) return { kind: "checking" };
-    const option = batchOptions.find(
-      (o) =>
-        o.productId === line.productId &&
-        o.warehouseId === line.warehouseId &&
-        o.locationId === line.locationId &&
-        o.batchId === line.batchId,
-    );
-    if (!option) return { kind: "missing" };
-    if (
-      compareQty(line.pickedOnHand ?? "", option.onHand) !== 0 ||
-      compareQty(line.reserved, option.reserved) !== 0 ||
-      line.batchExpired !== option.isExpired
-    ) {
-      return { kind: "changed", option };
-    }
-    return { kind: "ok", option };
-  }, [line, stockQ.isError, stockQ.data, stockQ.isFetching, directoryQ.isError, directoryQ.data, directoryQ.isFetching, batchOptions]);
+  const selection = React.useMemo(
+    (): SelectionState | null =>
+      verifyBatchSelection(
+        line,
+        batchOptions,
+        { isError: stockQ.isError, isFetching: stockQ.isFetching, loaded: !!stockQ.data },
+        { isError: directoryQ.isError, isFetching: directoryQ.isFetching, loaded: !!directoryQ.data },
+      ),
+    [line, stockQ.isError, stockQ.data, stockQ.isFetching, directoryQ.isError, directoryQ.data, directoryQ.isFetching, batchOptions],
+  );
 
-  const ruleError =
-    line && line.trackBatch && line.batchId != null
-      ? batchReasonError({
-          reasonCode: line.reasonCode,
-          observed: line.observed,
-          requested: line.requested,
-          isExpired: line.batchExpired,
-        })
-      : null;
-  const belowReserved =
-    !!line && isQty(line.requested) && compareQty(line.requested, line.reserved || "0") < 0;
-  const observedError = line ? qtyInputError(line.observed) : null;
-  const requestedError = line ? qtyInputError(line.requested) : null;
-
-  const valid = React.useMemo(() => {
-    if (!line) return false;
-    if (line.trackBatch && (line.batchId == null || selection?.kind !== "ok" || ruleError || belowReserved)) return false;
-    return createAdjustmentRequestInput.safeParse({
-      product_id: line.productId,
-      ...(line.trackBatch && line.batchId != null
-        ? { warehouse_id: line.warehouseId ?? undefined, location_id: line.locationId ?? undefined, batch_id: line.batchId }
-        : {}),
-      observed_quantity: line.observed,
-      requested_quantity: line.requested,
-      reason_code: line.reasonCode,
-      notes: line.notes || undefined,
-    }).success;
-  }, [line, selection, ruleError, belowReserved]);
+  const { ruleError, belowReserved, observedError, requestedError, valid } = adjustmentChecks(line, selection);
 
   const reasonOptions: readonly ReasonCode[] = line?.trackBatch ? BATCH_REASON_CODES : REASON_CODES;
 
@@ -304,26 +248,22 @@ export function StockAdjustmentRequestForm() {
   const startNew = () => {
     draft.commitSuccess();
     setSubmitted(null);
-    setMismatch(false);
+    submission.clearMismatch();
     setTerm("");
   };
 
   const submit = () => {
     const body = draft.payload;
     if (!body || !valid || createMut.isPending) return;
-    createMut.mutate(
-      { body, idempotencyKey: draft.idempotencyKey },
+    // success consumes the draft (fresh key for the next request)
+    submission.submit(
+      { body },
       {
         onSuccess: (res) => {
           setSubmitted({ referenceNumber: res.reference_number, status: res.status });
-          setMismatch(false);
-          draft.commitSuccess();
         },
-        onError: (e) => {
-          if (isApiError(e) && e.status === 409 && /different payload/i.test(e.message)) {
-            setMismatch(true);
-            return;
-          }
+        onError: (e, isMismatch) => {
+          if (isMismatch) return;
           const backend = isApiError(e) ? e.message : "";
           const copy =
             ADJUSTMENT_REQUEST_ERROR_COPY[backend] ??
@@ -583,13 +523,4 @@ export function StockAdjustmentRequestForm() {
       </div>
     </div>
   );
-}
-
-function useDebounced<T>(value: T, ms: number): T {
-  const [v, setV] = React.useState(value);
-  React.useEffect(() => {
-    const t = window.setTimeout(() => setV(value), ms);
-    return () => window.clearTimeout(t);
-  }, [value, ms]);
-  return v;
 }

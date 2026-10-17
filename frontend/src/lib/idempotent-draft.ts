@@ -47,7 +47,8 @@ export interface IdempotentDraftOptions<Line, Payload> {
 const activeKey = (scope: string) => `${scope}:active`;
 const draftKey = (scope: string, draftId: string) => `${scope}:${draftId}`;
 
-function ss(): Storage | null {
+/** sessionStorage, or null where it is unavailable (SSR, blocked storage). */
+export function sessionStore(): Storage | null {
   try {
     return typeof window !== "undefined" ? window.sessionStorage : null;
   } catch {
@@ -70,7 +71,7 @@ interface DraftState<Line> {
 }
 
 function loadOrCreate<Line>(scope: string, keyPrefix: string): DraftState<Line> {
-  const store = ss();
+  const store = sessionStore();
   if (store) {
     try {
       const active = store.getItem(activeKey(scope));
@@ -93,7 +94,7 @@ function loadOrCreate<Line>(scope: string, keyPrefix: string): DraftState<Line> 
 }
 
 function persist<Line>(scope: string, s: DraftState<Line>) {
-  const store = ss();
+  const store = sessionStore();
   if (!store) return;
   try {
     store.setItem(activeKey(scope), s.draftId);
@@ -150,7 +151,7 @@ export function useIdempotentDraft<Line, Payload>({
 
   const commitSuccess = React.useCallback(() => {
     setState((s) => {
-      const store = ss();
+      const store = sessionStore();
       try {
         store?.removeItem(draftKey(scope, s.draftId));
         store?.removeItem(activeKey(scope));
@@ -165,7 +166,7 @@ export function useIdempotentDraft<Line, Payload>({
 
   const startNewDraft = React.useCallback(() => {
     setState((s) => {
-      const store = ss();
+      const store = sessionStore();
       try {
         store?.removeItem(draftKey(scope, s.draftId));
       } catch {

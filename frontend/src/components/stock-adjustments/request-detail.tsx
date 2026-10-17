@@ -9,7 +9,7 @@ import { QuantityDisplay } from "@/components/ui/quantity-display";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
 import { isApiError } from "@/lib/api/errors";
-import { newId } from "@/lib/idempotent-draft";
+import { usePersistedIdempotencyKey } from "@/lib/workflow/persisted-key";
 import { isAdmin, type Role } from "@/lib/auth/permissions";
 import {
   useApproveStockAdjustmentRequest,
@@ -33,14 +33,6 @@ function errLine(error: unknown): { message: string; requestId?: string } {
   return { message: error instanceof Error ? error.message : "Something went wrong." };
 }
 
-function ss(): Storage | null {
-  try {
-    return typeof window !== "undefined" ? window.sessionStorage : null;
-  } catch {
-    return null;
-  }
-}
-
 /**
  * Approve's Idempotency-Key, persisted per request id — NOT a fresh key
  * per click. A dropped network response or a page reload after clicking
@@ -51,28 +43,7 @@ function ss(): Storage | null {
  * admin saw a terminal "already decided" and moved on).
  */
 function useApprovalIdempotencyKey(requestId: number): { key: string; clear: () => void } {
-  const storageKey = `adjreq-approve-key:${requestId}`;
-  const [key, setKey] = React.useState<string>(() => {
-    const store = ss();
-    const existing = store?.getItem(storageKey);
-    if (existing) return existing;
-    const fresh = `adjreq-approve-${newId()}`;
-    try {
-      store?.setItem(storageKey, fresh);
-    } catch {
-      /* quota / private mode — the in-memory key still works for this render */
-    }
-    return fresh;
-  });
-  const clear = React.useCallback(() => {
-    try {
-      ss()?.removeItem(storageKey);
-    } catch {
-      /* ignore */
-    }
-    setKey(`adjreq-approve-${newId()}`);
-  }, [storageKey]);
-  return { key, clear };
+  return usePersistedIdempotencyKey(`adjreq-approve-key:${requestId}`, "adjreq-approve-");
 }
 
 /** Approve / Reject / Cancel for one request, plus the Observed → Requested

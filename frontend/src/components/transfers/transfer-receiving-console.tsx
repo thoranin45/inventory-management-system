@@ -17,6 +17,9 @@ import { compareDecimals, subtractDecimals, sumDecimals } from "@/lib/decimal";
 import { resolveBarcode, useProductLookup } from "@/lib/query/sales";
 import { useBatchExpiryMap, useReceiveTransfer, useTransfer, useWarehouseNames } from "@/lib/query/transfers";
 import { useTransferReceiptDraft } from "@/lib/transfer-receipt-draft";
+import { addReceiptOnce, summarizeReceipt } from "@/lib/workflow/receipt-summary";
+import { isExactKeyMismatch, KEY_MISMATCH_MESSAGE } from "@/lib/workflow/submission-errors";
+import { useIdempotentSubmission } from "@/lib/workflow/use-idempotent-submission";
 import {
   RECEIVABLE_TRANSFER_STATUSES,
   TRANSFER_ERROR_COPY,
@@ -24,8 +27,6 @@ import {
 } from "@/lib/api/schemas/transfers";
 import { TransferRoute } from "./transfer-route";
 import { TransferReceiveLine, validateTransferReceiveLine } from "./transfer-receive-line";
-
-const MISMATCH_MSG = "Idempotency-Key already used with a different payload";
 
 export function TransferReceivingConsole({ transferId }: { transferId: number }) {
   const detailQ = useTransfer(transferId);
@@ -38,9 +39,11 @@ export function TransferReceivingConsole({ transferId }: { transferId: number })
 
   const draft = useTransferReceiptDraft(transferId);
   const receive = useReceiveTransfer();
+  // never auto-generate a new key on a mismatch — the operator decides
+  const submission = useIdempotentSubmission({ draft, mutate: receive.mutate, isMismatch: isExactKeyMismatch });
+  const { mismatch } = submission;
 
   const [sessionReceipts, setSessionReceipts] = React.useState<TransferReceiptResponse[]>([]);
-  const [mismatch, setMismatch] = React.useState(false);
   const [highlightItemId, setHighlightItemId] = React.useState<number | null>(null);
   const [cameraOpen, setCameraOpen] = React.useState(false);
 
@@ -119,50 +122,34 @@ export function TransferReceivingConsole({ transferId }: { transferId: number })
     inTransit: sumDecimals(detail.items.map((i) => figs(i).outstanding), 3),
   };
 
-  const lineErrors = detail.items
-    .map((it) => validateTransferReceiveLine(draft.lines[it.id]?.quantity, figs(it).outstanding))
-    .filter(Boolean) as string[];
-
-  const receivingNow = sumDecimals(
+  const { lineErrors, receivingNow, selectedCount } = summarizeReceipt(
     detail.items.map((it) => {
-      const q = (draft.lines[it.id]?.quantity ?? "").trim();
-      const bad = validateTransferReceiveLine(q, figs(it).outstanding);
-      return !bad && q ? q : "0";
+      const quantity = (draft.lines[it.id]?.quantity ?? "").trim();
+      return { quantity, error: validateTransferReceiveLine(quantity, figs(it).outstanding) };
     }),
-    3,
   );
-  const selectedCount = detail.items.filter((it) => {
-    const q = (draft.lines[it.id]?.quantity ?? "").trim();
-    return !validateTransferReceiveLine(q, figs(it).outstanding) && q && Number(q) > 0;
-  }).length;
 
   const canReceive = draft.ready && !!draft.payload && lineErrors.length === 0 && selectedCount > 0 && !receive.isPending && !mismatch;
 
   const submit = () => {
     if (!draft.payload) return;
-    receive.mutate(
-      { id: transferId, idempotencyKey: draft.idempotencyKey, payload: draft.payload },
+    // success clears the key + starts a fresh draft; a mismatch raises the banner
+    submission.submit(
+      { id: transferId, payload: draft.payload },
       {
         onSuccess: (data) => {
-          setSessionReceipts((prev) =>
-            prev.some((r) => r.receipt_number === data.receipt_number) ? prev : [data, ...prev],
-          );
+          setSessionReceipts((prev) => addReceiptOnce(prev, data));
           toast.success(`Receipt ${data.receipt_number.replace(/^TRR-/, "").slice(0, 8)}… recorded`, {
             description:
               data.transfer.status === "COMPLETED" ? "Transfer fully received." : "Transfer partially received.",
           });
-          draft.commitSuccess();
-          setMismatch(false);
           setHighlightItemId(null);
           void detailQ.refetch();
         },
-        onError: (error) => {
+        onError: (error, isMismatch) => {
+          if (isMismatch) return;
           const msg = isApiError(error) ? error.message : "";
           const rid = isApiError(error) ? error.requestId : undefined;
-          if (msg === MISMATCH_MSG) {
-            setMismatch(true);
-            return;
-          }
           const copy = TRANSFER_ERROR_COPY[msg] ?? (isApiError(error) ? error.userMessage : "The receipt was rejected.");
           toast.error("Receipt rejected", { description: rid ? `${copy} · Request ${rid}` : copy });
         },
@@ -171,7 +158,7 @@ export function TransferReceivingConsole({ transferId }: { transferId: number })
   };
 
   const receiveError =
-    receive.isError && isApiError(receive.error) && receive.error.message !== MISMATCH_MSG ? receive.error : null;
+    receive.isError && isApiError(receive.error) && receive.error.message !== KEY_MISMATCH_MESSAGE ? receive.error : null;
 
   return (
     <div className="flex flex-col gap-4">
@@ -255,14 +242,14 @@ export function TransferReceivingConsole({ transferId }: { transferId: number })
               >
                 <span className="flex items-start gap-2 text-[var(--danger)]">
                   <TriangleAlert aria-hidden className="h-4 w-4 flex-none" />
-                  {TRANSFER_ERROR_COPY[MISMATCH_MSG]}
+                  {TRANSFER_ERROR_COPY[KEY_MISMATCH_MESSAGE]}
                 </span>
                 <Button
                   size="sm"
                   variant="secondary"
                   onClick={() => {
                     draft.startNewDraft();
-                    setMismatch(false);
+                    submission.clearMismatch();
                   }}
                 >
                   Start a new receipt
