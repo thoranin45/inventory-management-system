@@ -308,7 +308,7 @@ export function StockAdjustmentRequestDetailBody({ id, role, onDone }: { id: num
           <label className="flex flex-col gap-1 text-[12px] text-[var(--muted)]">
             Rejection reason
             <textarea
-              className="min-h-20 w-full rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] p-2 text-[13px] outline-none focus-visible:outline-2 focus-visible:outline-[var(--focus)]"
+              className="min-h-20 w-full rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] p-2 text-[13px] outline-hidden focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-[var(--focus)]"
               value={rejectReason}
               onChange={(e) => setRejectReason(e.target.value)}
               maxLength={500}

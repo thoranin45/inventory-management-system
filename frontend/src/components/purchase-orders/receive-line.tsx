@@ -12,7 +12,7 @@ import type { ReceiptDraftLine } from "@/lib/receipt-draft";
 import { cn } from "@/lib/utils";
 
 const inputCls =
-  "min-h-11 rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-[13px] tabular-nums outline-none focus-visible:outline-2 focus-visible:outline-[var(--focus)]";
+  "min-h-11 rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-[13px] tabular-nums outline-hidden focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-[var(--focus)]";
 
 /** Per-line client validation. Mirrors the backend rules EXCEPT it never blocks
  *  an expired / same-day expiry date (Phase 7 accepts those inbound). */

@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Mono, IBM_Plex_Sans, IBM_Plex_Sans_Thai } from "next/font/google";
 
+import { getLocale } from "@/lib/i18n/server";
 import { Providers } from "./providers";
 import "./globals.css";
 
@@ -41,15 +42,18 @@ export const viewport: Viewport = {
   ],
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  // R2: the language is resolved on the server from the akk_lang cookie, so
+  // the first HTML response already carries the right <html lang> and text.
+  const locale = await getLocale();
   return (
     <html
-      lang="en"
+      lang={locale}
       suppressHydrationWarning
       className={`${plexSans.variable} ${plexThai.variable} ${plexMono.variable} h-full`}
     >
       <body className="min-h-full">
-        <Providers>{children}</Providers>
+        <Providers locale={locale}>{children}</Providers>
       </body>
     </html>
   );

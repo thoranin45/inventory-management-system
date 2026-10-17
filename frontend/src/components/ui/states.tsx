@@ -4,6 +4,7 @@ import { AlertTriangle, Inbox, Loader2 } from "lucide-react";
 import { isApiError } from "@/lib/api/errors";
 import { cn } from "@/lib/utils";
 import { Button } from "./button";
+import { Msg } from "./msg";
 
 export function Skeleton({ className }: { className?: string }) {
   return (
@@ -18,10 +19,10 @@ export function Skeleton({ className }: { className?: string }) {
 }
 
 export function LoadingState({
-  label = "Loading…",
+  label,
   className,
 }: {
-  label?: string;
+  label?: React.ReactNode;
   className?: string;
 }) {
   return (
@@ -31,17 +32,17 @@ export function LoadingState({
       className={cn("flex items-center gap-2 p-6 text-[12.5px] text-[var(--muted)]", className)}
     >
       <Loader2 aria-hidden className="h-4 w-4 animate-spin motion-reduce:animate-none" />
-      {label}
+      {label ?? <Msg k="common.loading" />}
     </div>
   );
 }
 
 export function EmptyState({
-  title = "Nothing here yet",
+  title,
   message,
   className,
 }: {
-  title?: string;
+  title?: React.ReactNode;
   message?: React.ReactNode;
   className?: string;
 }) {
@@ -53,7 +54,7 @@ export function EmptyState({
       )}
     >
       <Inbox aria-hidden className="h-8 w-8 text-[var(--faint)]" />
-      <h3 className="text-[14px] text-[var(--foreground)]">{title}</h3>
+      <h3 className="text-[14px] text-[var(--foreground)]">{title ?? <Msg k="common.emptyTitle" />}</h3>
       {message ? <p className="max-w-[36ch] text-[12.5px]">{message}</p> : null}
     </div>
   );
@@ -75,9 +76,10 @@ export function ErrorState({
   compact?: boolean;
 }) {
   const api = isApiError(error) ? error : null;
-  const message =
+  // backend / error wording is shown as sent; only the generic fallback is translated
+  const message: React.ReactNode =
     api?.userMessage ??
-    (error instanceof Error ? error.message : "Something went wrong.");
+    (error instanceof Error ? error.message : <Msg k="common.somethingWrong" />);
   const requestId = api?.requestId;
 
   return (
@@ -95,12 +97,12 @@ export function ErrorState({
       </div>
       {requestId ? (
         <div className="text-[11px] text-[var(--muted)]">
-          Request ID: <span className="mono select-all">{requestId}</span>
+          <Msg k="common.requestId" /> <span className="mono select-all">{requestId}</span>
         </div>
       ) : null}
       {onRetry ? (
         <Button size="sm" variant="secondary" onClick={onRetry} className="mt-1">
-          Try again
+          <Msg k="common.tryAgain" />
         </Button>
       ) : null}
     </div>

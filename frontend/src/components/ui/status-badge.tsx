@@ -1,45 +1,26 @@
+"use client";
+
 import * as React from "react";
 
+import { useT } from "@/lib/i18n/client";
+import { CANONICAL_STATUS, TONE_ICON, humanizeStatus, isCanonicalStatus, type Tone } from "@/lib/status";
 import { cn } from "@/lib/utils";
 
-type Tone = "neutral" | "info" | "accent" | "success" | "warning" | "danger";
-
+/** Concept B filled chips: tone text on its tinted fill, no outline. */
 const TONE_CLASS: Record<Tone, string> = {
-  neutral: "bg-[var(--surface-sunken)] text-[var(--muted)] border-[var(--border)]",
-  info: "bg-[var(--info-subtle)] text-[var(--info)] border-[color-mix(in_srgb,var(--info)_30%,transparent)]",
-  accent: "bg-[var(--accent-subtle)] text-[var(--accent)] border-[var(--accent-line)]",
-  success:
-    "bg-[var(--success-subtle)] text-[var(--success)] border-[color-mix(in_srgb,var(--success)_30%,transparent)]",
-  warning:
-    "bg-[var(--warning-subtle)] text-[var(--warning)] border-[color-mix(in_srgb,var(--warning)_32%,transparent)]",
-  danger:
-    "bg-[var(--danger-subtle)] text-[var(--danger)] border-[color-mix(in_srgb,var(--danger)_32%,transparent)]",
+  neutral: "bg-[var(--surface-sunken)] text-[var(--muted)]",
+  info: "bg-[var(--info-subtle)] text-[var(--info)]",
+  accent: "bg-[var(--accent-subtle)] text-[var(--accent)]",
+  success: "bg-[var(--success-subtle)] text-[var(--success)]",
+  warning: "bg-[var(--warning-subtle)] text-[var(--warning)]",
+  danger: "bg-[var(--danger-subtle)] text-[var(--danger)]",
 };
-
-/** SO/PO/Transfer lifecycle → tone + human label. */
-const STATUS_META: Record<string, { tone: Tone; label: string }> = {
-  DRAFT: { tone: "neutral", label: "Draft" },
-  CONFIRMED: { tone: "info", label: "Confirmed" },
-  PICKING: { tone: "info", label: "Picking" },
-  PACKING: { tone: "info", label: "Packing" },
-  READY_TO_SHIP: { tone: "accent", label: "Ready to ship" },
-  IN_TRANSIT: { tone: "accent", label: "In transit" },
-  SHIPPED: { tone: "success", label: "Shipped" },
-  PARTIALLY_RECEIVED: { tone: "warning", label: "Partially received" },
-  RECEIVED: { tone: "success", label: "Received" },
-  COMPLETED: { tone: "success", label: "Completed" },
-  CANCELLED: { tone: "danger", label: "Cancelled" },
-  active: { tone: "success", label: "Active" },
-  inactive: { tone: "neutral", label: "Inactive" },
-};
-
-export function statusMeta(status: string): { tone: Tone; label: string } {
-  return STATUS_META[status] ?? { tone: "neutral", label: status.replace(/_/g, " ").toLowerCase() };
-}
 
 /**
- * Status is never colour-only: a dot **and** a text label always render, so
- * the state is legible without perceiving hue.
+ * Status chip (R2.6). Never colour-only: an icon **and** a text label always
+ * render. A known API status gets its typed tone, icon and translated label;
+ * an unknown one is shown humanized and neutral (`data-status-unmapped`).
+ * Caller `label` / `tone` overrides keep working exactly as before.
  */
 export function StatusBadge({
   status,
@@ -52,18 +33,22 @@ export function StatusBadge({
   label?: React.ReactNode;
   className?: string;
 }) {
-  const meta = status ? statusMeta(status) : { tone: tone ?? "neutral", label: "" };
-  const finalTone = tone ?? meta.tone;
-  const finalLabel = label ?? meta.label;
+  const t = useT();
+  const known = status !== undefined && isCanonicalStatus(status) ? CANONICAL_STATUS[status] : null;
+  const finalTone: Tone = tone ?? known?.tone ?? "neutral";
+  const Icon = known && !tone ? known.icon : TONE_ICON[finalTone];
+  const finalLabel = label ?? (known ? t(known.labelKey) : status ? humanizeStatus(status) : "");
   return (
     <span
+      data-tone={finalTone}
+      data-status-unmapped={status !== undefined && !known ? "" : undefined}
       className={cn(
-        "inline-flex items-center gap-[5px] whitespace-nowrap rounded-[var(--r-full)] border px-2 py-[2px] text-[11px] font-semibold tracking-[0.02em]",
+        "inline-flex h-[22px] flex-none items-center gap-[5px] whitespace-nowrap rounded-[var(--r-xs)] px-[7px] text-[12px] font-semibold leading-none",
         TONE_CLASS[finalTone],
         className,
       )}
     >
-      <span aria-hidden className="h-[6px] w-[6px] flex-none rounded-[var(--r-full)] bg-current" />
+      <Icon aria-hidden className="h-[14px] w-[14px] flex-none" />
       {finalLabel}
     </span>
   );

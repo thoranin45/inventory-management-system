@@ -12,7 +12,7 @@ import { MOVEMENT_GROUPS, type LedgerItem } from "@/lib/api/schemas/inventory-mo
 import type { ReportParamKey } from "@/lib/reports/use-report-params";
 
 const fieldCls =
-  "h-9 rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 text-[12.5px] tabular-nums outline-none focus-visible:outline-2 focus-visible:outline-[var(--focus)]";
+  "h-9 rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 text-[12.5px] tabular-nums outline-hidden focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-[var(--focus)]";
 
 const FILTER_KEYS: ReportParamKey[] = [
   "product_id",

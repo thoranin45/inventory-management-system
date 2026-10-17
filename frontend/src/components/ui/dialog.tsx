@@ -4,6 +4,7 @@ import * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 
+import { useT } from "@/lib/i18n/client";
 import { cn } from "@/lib/utils";
 
 export const Dialog = DialogPrimitive.Root;
@@ -30,6 +31,7 @@ export function DialogContent({
   title: string;
   description?: string;
 }) {
+  const t = useT();
   return (
     <DialogPrimitive.Portal>
       <Overlay />
@@ -50,7 +52,7 @@ export function DialogContent({
         )}
         {children}
         <DialogPrimitive.Close
-          aria-label="Close"
+          aria-label={t("common.close")}
           className="absolute right-3 top-3 grid h-8 w-8 place-items-center rounded-[var(--r-sm)] text-[var(--muted)] hover:bg-[var(--surface-sunken)] focus-visible:outline-2 focus-visible:outline-[var(--focus)]"
         >
           <X className="h-4 w-4" aria-hidden />

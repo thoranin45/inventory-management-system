@@ -73,7 +73,7 @@ export interface MasterDataConfig<Row, Input> {
 /* ------------------------------------------------------------------- form === */
 
 const inputCls =
-  "min-h-11 w-full rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-[13px] outline-none focus-visible:outline-2 focus-visible:outline-[var(--focus)]";
+  "min-h-11 w-full rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-[13px] outline-hidden focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-[var(--focus)]";
 
 function zodFieldErrors(err: z.ZodError): Record<string, string> {
   const out: Record<string, string> = {};

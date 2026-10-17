@@ -5,8 +5,13 @@ import { useRouter } from "next/navigation";
 import { Command } from "cmdk";
 import { Search } from "lucide-react";
 
+import { useSession } from "@/components/session-provider";
+import { isAdmin } from "@/lib/auth/permissions";
+import { useT } from "@/lib/i18n/client";
+import type { MessageKey } from "@/lib/i18n/translate";
 import { useGlobalSearch } from "@/lib/query/hooks";
-import { NAV_ITEMS } from "@/lib/nav";
+import { visibleNavItems } from "@/lib/nav";
+import { CANONICAL_STATUS, isCanonicalStatus } from "@/lib/status";
 import { cn } from "@/lib/utils";
 
 interface PaletteContextValue {
@@ -26,20 +31,25 @@ const TYPE_ROUTE: Record<string, string> = {
   customer: "/customers",
   supplier: "/suppliers",
 };
-const TYPE_LABEL: Record<string, string> = {
-  product: "Products",
-  sales_order: "Sales orders",
-  purchase_order: "Purchase orders",
-  transfer: "Transfers",
-  batch: "Batches",
-  customer: "Customers",
-  supplier: "Suppliers",
+const TYPE_LABEL: Record<string, MessageKey> = {
+  product: "palette.product",
+  sales_order: "palette.sales_order",
+  purchase_order: "palette.purchase_order",
+  transfer: "palette.transfer",
+  batch: "palette.batch",
+  customer: "palette.customer",
+  supplier: "palette.supplier",
 };
 
 export function CommandPaletteProvider({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
   const router = useRouter();
+  const t = useT();
+  const { user } = useSession();
+  // R2.3: the same role filter as the sidebar — warehouse users never see
+  // admin-only destinations here (presentation only; the backend enforces).
+  const navItems = visibleNavItems(isAdmin(user.role));
 
   const openPalette = React.useCallback(() => setOpen(true), []);
 
@@ -89,18 +99,18 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
       <Command.Dialog
         open={open}
         onOpenChange={setOpen}
-        label="Command palette"
+        label={t("palette.label")}
         shouldFilter={false}
         className="fixed left-1/2 top-[12vh] z-[80] w-[min(560px,92vw)] -translate-x-1/2 overflow-hidden rounded-[var(--r-lg)] border border-[var(--border-strong)] bg-[var(--surface-raised)] shadow-[var(--shadow-lg)]"
-        overlayClassName="fixed inset-0 z-[80] bg-[rgba(10,11,13,0.4)]"
+        overlayClassName="fixed inset-0 z-[80] bg-[var(--overlay)]"
       >
         <div className="flex items-center gap-[10px] border-b border-[var(--border)] px-4">
           <Search aria-hidden className="h-4 w-4 flex-none text-[var(--faint)]" />
           <Command.Input
             value={query}
             onValueChange={setQuery}
-            placeholder="Search products, orders, lots…"
-            className="h-12 flex-1 bg-transparent text-[14px] text-[var(--foreground)] outline-none placeholder:text-[var(--faint)]"
+            placeholder={t("palette.placeholder")}
+            className="h-12 flex-1 bg-transparent text-[14px] text-[var(--foreground)] outline-hidden placeholder:text-[var(--faint)]"
           />
           <kbd className="rounded-[var(--r-sm)] border border-[var(--border-strong)] px-[6px] py-[1px] text-[11px] text-[var(--muted)]">
             Esc
@@ -111,30 +121,30 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
           {query.trim().length < 2 ? (
             <>
               <Command.Group
-                heading="Jump to"
+                heading={t("palette.jumpTo")}
                 className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1 [&_[cmdk-group-heading]]:wc-section-label"
               >
-                {NAV_ITEMS.map((n) => (
-                  <PaletteItem key={n.key} onSelect={() => go(n.href)} title={n.label} sub="Navigate" />
+                {navItems.map((n) => (
+                  <PaletteItem key={n.key} onSelect={() => go(n.href)} title={t(n.labelKey)} sub={t("palette.navigate")} />
                 ))}
               </Command.Group>
             </>
           ) : isError ? (
-            <div className="px-3 py-6 text-[12.5px] text-[var(--danger)]">Search is unavailable right now.</div>
+            <div className="px-3 py-6 text-[12.5px] text-[var(--danger)]">{t("palette.unavailable")}</div>
           ) : (
             <>
               {isFetching && !data ? (
-                <div className="px-3 py-6 text-[12.5px] text-[var(--muted)]">Searching…</div>
+                <div className="px-3 py-6 text-[12.5px] text-[var(--muted)]">{t("common.searching")}</div>
               ) : null}
               {!isFetching && data && data.results.length === 0 ? (
                 <Command.Empty className="px-3 py-6 text-[12.5px] text-[var(--muted)]">
-                  No matches for “{query}”.
+                  {t("palette.noMatchesFor", { query })}
                 </Command.Empty>
               ) : null}
               {grouped.map(([type, items]) => (
                 <Command.Group
                   key={type}
-                  heading={TYPE_LABEL[type] ?? type}
+                  heading={TYPE_LABEL[type] ? t(TYPE_LABEL[type]) : type}
                   className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1 [&_[cmdk-group-heading]]:wc-section-label"
                 >
                   {items.map((r) => (
@@ -142,13 +152,17 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
                       key={`${r.type}:${r.id}`}
                       onSelect={() => go(`${TYPE_ROUTE[r.type] ?? "/dashboard"}/${r.id}`)}
                       title={r.label}
-                      sub={[r.sublabel, r.status].filter(Boolean).join(" · ") || undefined}
+                      sub={
+                        [r.sublabel, r.status && isCanonicalStatus(r.status) ? t(CANONICAL_STATUS[r.status].labelKey) : r.status]
+                          .filter(Boolean)
+                          .join(" · ") || undefined
+                      }
                     />
                   ))}
                 </Command.Group>
               ))}
               {data?.truncated ? (
-                <div className="px-3 py-2 text-[11px] text-[var(--faint)]">Showing the top matches only.</div>
+                <div className="px-3 py-2 text-[11px] text-[var(--faint)]">{t("palette.topOnly")}</div>
               ) : null}
             </>
           )}

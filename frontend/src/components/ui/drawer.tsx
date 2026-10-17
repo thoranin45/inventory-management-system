@@ -4,6 +4,7 @@ import * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 
+import { useT } from "@/lib/i18n/client";
 import { cn } from "@/lib/utils";
 
 /**
@@ -20,6 +21,7 @@ export function DrawerContent({
   title,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & { title: string }) {
+  const t = useT();
   return (
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay className="fixed inset-0 z-[60] bg-[rgba(10,11,13,0.42)]" />
@@ -33,7 +35,7 @@ export function DrawerContent({
         <div className="flex items-start justify-between gap-3 border-b border-[var(--border)] p-4">
           <DialogPrimitive.Title className="text-[15px] font-semibold">{title}</DialogPrimitive.Title>
           <DialogPrimitive.Close
-            aria-label="Close"
+            aria-label={t("common.close")}
             className="grid h-8 w-8 place-items-center rounded-[var(--r-sm)] text-[var(--muted)] hover:bg-[var(--surface-sunken)] focus-visible:outline-2 focus-visible:outline-[var(--focus)]"
           >
             <X className="h-4 w-4" aria-hidden />

@@ -2,6 +2,7 @@
 
 import * as React from "react";
 
+import { useT } from "@/lib/i18n/client";
 import { cn } from "@/lib/utils";
 
 export interface FilterOption {
@@ -21,7 +22,7 @@ export function FilterStrip({
   value,
   onChange,
   className,
-  ariaLabel = "Filter",
+  ariaLabel,
 }: {
   options: FilterOption[];
   value: string;
@@ -29,10 +30,11 @@ export function FilterStrip({
   className?: string;
   ariaLabel?: string;
 }) {
+  const t = useT();
   return (
     <div
       role="tablist"
-      aria-label={ariaLabel}
+      aria-label={ariaLabel ?? t("common.filter")}
       className={cn(
         "wc-scrollbar-none flex max-w-full flex-nowrap gap-[2px] overflow-x-auto rounded-[var(--r-sm)] border border-[var(--border)] bg-[var(--surface-sunken)] p-[2px]",
         className,

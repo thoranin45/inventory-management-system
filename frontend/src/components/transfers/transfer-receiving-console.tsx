@@ -200,7 +200,7 @@ export function TransferReceivingConsole({ transferId }: { transferId: number })
             received={totals.received}
           />
 
-          <div className="flex items-center gap-2 rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-3">
+          <div className="flex items-center gap-2 rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 focus-within:border-[var(--accent)] focus-within:outline-2 focus-within:outline-[var(--focus)]">
             <ScanLine aria-hidden className="h-4 w-4 flex-none text-[var(--muted)]" />
             <input
               {...scanner.inputProps}

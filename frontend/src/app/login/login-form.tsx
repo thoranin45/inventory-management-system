@@ -7,13 +7,15 @@ import { zodResolver } from "@hookform/resolvers/zod";
 
 import { Button } from "@/components/ui/button";
 import { loginInputSchema, type LoginInput } from "@/lib/api/schemas/auth";
+import { useT } from "@/lib/i18n/client";
 import { cn } from "@/lib/utils";
 
 const fieldClass =
-  "h-[38px] w-full rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-[10px] text-[14px] text-[var(--foreground)] outline-none transition-colors focus-visible:border-[var(--accent)] focus-visible:outline-2 focus-visible:outline-[var(--focus)]";
+  "h-[38px] w-full rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-[10px] text-[14px] text-[var(--foreground)] outline-hidden transition-colors focus-visible:border-[var(--accent)] focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-[var(--focus)]";
 
 export function LoginForm({ next }: { next: string }) {
   const router = useRouter();
+  const t = useT();
   const [serverError, setServerError] = React.useState<{ message: string; requestId?: string } | null>(null);
 
   const {
@@ -38,7 +40,8 @@ export function LoginForm({ next }: { next: string }) {
     };
     if (!res.ok) {
       setServerError({
-        message: body.message ?? "Sign-in failed. Check your username and password.",
+        // backend wording is shown as sent (server messages are not translated in R2)
+        message: body.message ?? t("auth.signInFailed"),
         requestId: body.request_id,
       });
       return;
@@ -52,7 +55,7 @@ export function LoginForm({ next }: { next: string }) {
     <form onSubmit={handleSubmit(onSubmit)} className="mt-5 flex flex-col gap-4" noValidate>
       <div className="flex flex-col gap-[5px]">
         <label htmlFor="username" className="text-[12px] font-medium">
-          Username
+          {t("auth.username")}
         </label>
         <input
           id="username"
@@ -63,13 +66,13 @@ export function LoginForm({ next }: { next: string }) {
           {...register("username")}
         />
         {errors.username ? (
-          <span className="text-[11.5px] text-[var(--danger)]">{errors.username.message}</span>
+          <span className="text-[11.5px] text-[var(--danger)]">{t("auth.usernameRequired")}</span>
         ) : null}
       </div>
 
       <div className="flex flex-col gap-[5px]">
         <label htmlFor="password" className="text-[12px] font-medium">
-          Password
+          {t("auth.password")}
         </label>
         <input
           id="password"
@@ -80,7 +83,7 @@ export function LoginForm({ next }: { next: string }) {
           {...register("password")}
         />
         {errors.password ? (
-          <span className="text-[11.5px] text-[var(--danger)]">{errors.password.message}</span>
+          <span className="text-[11.5px] text-[var(--danger)]">{t("auth.passwordRequired")}</span>
         ) : null}
       </div>
 
@@ -92,14 +95,14 @@ export function LoginForm({ next }: { next: string }) {
           <span>{serverError.message}</span>
           {serverError.requestId ? (
             <span className="text-[11px] text-[var(--muted)]">
-              Request ID: <span className="mono select-all">{serverError.requestId}</span>
+              {t("common.requestId")} <span className="mono select-all">{serverError.requestId}</span>
             </span>
           ) : null}
         </div>
       ) : null}
 
       <Button type="submit" variant="primary" size="lg" disabled={isSubmitting} className="w-full">
-        {isSubmitting ? "Signing in…" : "Sign in"}
+        {isSubmitting ? t("auth.signingIn") : t("auth.signIn")}
       </Button>
     </form>
   );

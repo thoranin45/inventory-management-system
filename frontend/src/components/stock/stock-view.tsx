@@ -245,7 +245,7 @@ function StockBalancesTable() {
           aria-label="Category"
           value={category.categoryId ?? ""}
           onChange={(e) => category.setCategoryId(e.target.value ? Number(e.target.value) : null)}
-          className="h-9 rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 text-[12.5px] outline-none focus-visible:outline-2 focus-visible:outline-[var(--focus)]"
+          className="h-9 rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 text-[12.5px] outline-hidden focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-[var(--focus)]"
         >
           <option value="">All categories</option>
           {(categoriesQ.data ?? []).map((c) => (

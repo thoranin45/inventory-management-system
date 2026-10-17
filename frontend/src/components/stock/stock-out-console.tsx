@@ -76,7 +76,7 @@ function buildPayload(lines: Record<number, SessionLine>): StockOutSaveBody | nu
 }
 
 const FIELD_CLS =
-  "h-11 w-full rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-[15px] tabular-nums outline-none focus-visible:outline-2 focus-visible:outline-[var(--focus)] disabled:opacity-60";
+  "h-11 w-full rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-[15px] tabular-nums outline-hidden focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-[var(--focus)] disabled:opacity-60";
 
 function nowHM(): string {
   return new Date().toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
@@ -454,7 +454,7 @@ export function StockOutConsole() {
               </div>
 
               {/* scan surface */}
-              <div className="flex items-center gap-2 rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-3">
+              <div className="flex items-center gap-2 rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 focus-within:border-[var(--accent)] focus-within:outline-2 focus-within:outline-[var(--focus)]">
                 <ScanLine aria-hidden className="h-4 w-4 flex-none text-[var(--muted)]" />
                 <input
                   {...scanner.inputProps}

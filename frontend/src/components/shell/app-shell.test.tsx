@@ -6,6 +6,8 @@ vi.mock("next/navigation", () => ({ usePathname: () => "/dashboard" }));
 vi.mock("./topbar", () => ({ Topbar: () => <header><button type="button">Open navigation</button></header> }));
 vi.mock("./sidebar", () => ({ SidebarNav: () => <nav aria-label="Primary" /> }));
 vi.mock("./mobile-bottom-nav", () => ({ MobileBottomNav: () => null }));
+vi.mock("./icon-rail", () => ({ IconRail: () => null }));
+vi.mock("./more-sheet", () => ({ MoreSheet: () => null }));
 
 import { AppShell } from "./app-shell";
 

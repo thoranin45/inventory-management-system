@@ -83,6 +83,8 @@
 
   /* B fixed metrics: sidebar 236 · header 54 · detail pane 400 · content max 1400 */
   --sidebar-w: 236px;
+  --rail-w: 76px; /* B iPad icon rail */
+  --bottom-nav-h: 64px; /* B phone bottom bar: 52px items + 2x6px padding (safe area added separately) */
   --topbar-h: 54px;
   --content-max: 1400px;
   --drawer-w: 400px;
@@ -388,15 +390,29 @@
   max-width: var(--content-max);
 }
 
-/* tablet / iPad — sidebar becomes a slide-over; topbar + content stay panels */
+/* iPad icon rail (R2): only between 768 and 1023.98px */
+.wc-rail-slot {
+  display: none;
+}
+
+/* tablet / iPad — B icon rail; the full menu opens as a slide-over */
 @media (max-width: 1023.98px) {
   .wc-app {
-    grid-template-columns: 0 1fr;
+    grid-template-columns: var(--rail-w) 1fr;
     column-gap: 0;
     row-gap: var(--frame-gap);
   }
   .wc-sidebar-slot {
     display: none;
+  }
+  .wc-rail-slot {
+    display: flex;
+    grid-column: 1;
+    grid-row: 2;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    z-index: 25;
   }
   .wc-content {
     padding: 20px; /* B iPad page padding */
@@ -409,13 +425,17 @@
     --topbar-h: calc(50px + env(safe-area-inset-top));
   }
   .wc-app {
+    grid-template-columns: 0 1fr;
     grid-template-rows: var(--topbar-h) 1fr;
     padding: 0;
     gap: 0;
   }
+  .wc-rail-slot {
+    display: none;
+  }
   .wc-content {
     /* B phone page padding 16 / 14, plus bottom-nav clearance */
-    padding: 14px 16px calc(64px + env(safe-area-inset-bottom));
+    padding: 14px 16px calc(var(--bottom-nav-h) + 14px + env(safe-area-inset-bottom));
   }
 }
 
@@ -450,6 +470,38 @@
   inset: 0;
   z-index: 48;
   background: var(--overlay);
+}
+
+/* phone "More" bottom sheet (B showroom: grouped 3-column grid, 22px top radius) */
+.wc-more-sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 49;
+  max-height: 80dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  border-radius: 22px 22px 0 0;
+  box-shadow: var(--shadow-lg);
+  padding: 8px 16px calc(16px + env(safe-area-inset-bottom));
+}
+.wc-more-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .wc-more-sheet[data-state="open"] {
+    animation: wc-sheet-in var(--dur-3) var(--ease);
+  }
+}
+@keyframes wc-sheet-in {
+  from {
+    transform: translateY(100%);
+  }
 }
 
 /* ---------- dashboard composition (ported from the approved prototype) ---------- */
@@ -597,7 +649,7 @@
   }
   .wc-work-side {
     position: fixed;
-    left: 0;
+    left: var(--rail-w); /* iPad: keep the icon rail uncovered */
     right: 0;
     bottom: 0;
     top: auto;
@@ -662,7 +714,8 @@
 /* phone — the dock sits above the fixed bottom nav */
 @media (max-width: 767.98px) {
   .wc-work-side {
-    bottom: calc(54px + env(safe-area-inset-bottom));
+    left: 0;
+    bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom));
   }
   html[data-kb] .wc-work-side {
     bottom: var(--wc-kb-inset, 0px);
@@ -711,7 +764,7 @@
   }
   .wc-receive-dock {
     position: fixed;
-    left: 0;
+    left: var(--rail-w); /* iPad: keep the icon rail uncovered */
     right: 0;
     bottom: 0;
     z-index: 44;
@@ -731,9 +784,10 @@
 }
 @media (max-width: 767.98px) {
   .wc-receive-main {
-    padding-bottom: calc(84px + 54px + env(safe-area-inset-bottom));
+    padding-bottom: calc(84px + var(--bottom-nav-h) + env(safe-area-inset-bottom));
   }
   .wc-receive-dock {
-    bottom: calc(54px + env(safe-area-inset-bottom));
+    left: 0;
+    bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom));
   }
 }

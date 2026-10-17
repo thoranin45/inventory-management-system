@@ -1,7 +1,11 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 
+import { DICTIONARIES, translate, type MessageKey } from "@/lib/i18n/translate";
 import { NAV_GROUPS, NAV_ITEMS } from "@/lib/nav";
+
+/** English label (components render English outside a LanguageProvider). */
+const en = (key: MessageKey) => translate(DICTIONARIES.en, key);
 
 const session = { user: { id: 1, username: "wc_admin", role: "admin", is_active: true } };
 let pathname = "/dashboard";
@@ -29,7 +33,7 @@ describe("Concept B navigation model", () => {
 
   it("assigns every item to one of the six frozen sections", () => {
     const groups = new Set(NAV_GROUPS.map((g) => g.key));
-    expect(NAV_GROUPS.map((g) => g.label)).toEqual([
+    expect(NAV_GROUPS.map((g) => en(g.labelKey))).toEqual([
       "Overview", "Warehouse tasks", "Inventory", "Orders", "Reports & audit", "Master data",
     ]);
     for (const n of NAV_ITEMS) expect(groups.has(n.group), n.key).toBe(true);
@@ -41,10 +45,10 @@ describe("SidebarNav — grouped sections", () => {
     render(<SidebarNav />);
     const groups = screen.getAllByRole("group");
     expect(groups.map((g) => g.getAttribute("aria-labelledby") && document.getElementById(g.getAttribute("aria-labelledby")!)?.textContent))
-      .toEqual(NAV_GROUPS.map((g) => g.label));
+      .toEqual(NAV_GROUPS.map((g) => en(g.labelKey)));
     for (const n of NAV_ITEMS) {
-      const group = screen.getByRole("group", { name: NAV_GROUPS.find((g) => g.key === n.group)!.label });
-      expect(within(group).getByRole("link", { name: n.label })).toHaveAttribute("href", n.href);
+      const group = screen.getByRole("group", { name: en(NAV_GROUPS.find((g) => g.key === n.group)!.labelKey) });
+      expect(within(group).getByRole("link", { name: en(n.labelKey) })).toHaveAttribute("href", n.href);
     }
   });
 

@@ -45,7 +45,7 @@ function ExportCard({ ex }: { ex: ReportExport }) {
               <input
                 inputMode={p.kind === "int" ? "numeric" : "decimal"}
                 aria-label={`${ex.title} — ${p.label}`}
-                className="h-8 w-20 rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 text-[12px] tabular-nums outline-none focus-visible:outline-2 focus-visible:outline-[var(--focus)]"
+                className="h-8 w-20 rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 text-[12px] tabular-nums outline-hidden focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-[var(--focus)]"
                 value={params[p.name] ?? ""}
                 onChange={(e) => {
                   const v = e.currentTarget.value;

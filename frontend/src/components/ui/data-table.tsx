@@ -4,6 +4,7 @@ import * as React from "react";
 import { ChevronsUpDown, ChevronDown, ChevronLeft, ChevronRight, ChevronUp } from "lucide-react";
 
 import { useMediaQuery } from "@/lib/hooks/use-viewport";
+import { useT } from "@/lib/i18n/client";
 import { cn } from "@/lib/utils";
 import { Button } from "./button";
 import { EmptyState, ErrorState, LoadingState } from "./states";
@@ -77,6 +78,7 @@ export function DataTable<Row>({
   pagination?: DataTablePagination;
   className?: string;
 }) {
+  const t = useT();
   const isMobile = useMediaQuery("(max-width: 1023.98px)");
   const compact = useMediaQuery("(max-width: 1199.98px)");
   const [internalSort, setInternalSort] = React.useState<{ key: string; order: "asc" | "desc" } | null>(null);
@@ -119,9 +121,9 @@ export function DataTable<Row>({
   }, [rows, internalSort, onSort, columns, getRowKey]);
 
   const body = (() => {
-    if (isLoading) return <LoadingState label="Loading…" />;
+    if (isLoading) return <LoadingState />;
     if (error) return <ErrorState error={error} onRetry={onRetry} className="m-4" />;
-    if (!rows.length) return <EmptyState message={emptyMessage ?? "No records match the current filter."} />;
+    if (!rows.length) return <EmptyState message={emptyMessage ?? t("common.emptyFilter")} />;
 
     if (isMobile && renderCard) {
       return (
@@ -241,7 +243,7 @@ export function DataTable<Row>({
             <Button
               size="icon"
               variant="ghost"
-              aria-label="Previous page"
+              aria-label={t("common.previousPage")}
               disabled={pagination.page <= 1}
               onClick={() => pagination.onPageChange(pagination.page - 1)}
             >
@@ -253,7 +255,7 @@ export function DataTable<Row>({
             <Button
               size="icon"
               variant="ghost"
-              aria-label="Next page"
+              aria-label={t("common.nextPage")}
               disabled={pagination.page >= pagination.totalPages}
               onClick={() => pagination.onPageChange(pagination.page + 1)}
             >

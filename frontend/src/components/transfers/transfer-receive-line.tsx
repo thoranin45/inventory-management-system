@@ -11,7 +11,7 @@ import type { ProductLite } from "@/lib/query/sales";
 import { cn } from "@/lib/utils";
 
 const inputCls =
-  "min-h-11 rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-[13px] tabular-nums outline-none focus-visible:outline-2 focus-visible:outline-[var(--focus)]";
+  "min-h-11 rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-[13px] tabular-nums outline-hidden focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-[var(--focus)]";
 
 /** Client validation for one transfer receive line. Never blocks an
  *  expired-in-transit batch — that receipt MUST still be allowed. */
