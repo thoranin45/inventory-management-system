@@ -723,6 +723,18 @@
   .wc-preview-panel {
     display: none;
   }
+  /* R4 Stock In/Out: the Review action stays reachable above the bottom nav */
+  .wc-task-action {
+    position: sticky;
+    bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom) + 8px);
+    z-index: 5;
+    margin: 0 -4px;
+    padding: 8px 4px;
+    background: var(--surface);
+  }
+  html[data-kb] .wc-task-action {
+    bottom: calc(var(--wc-kb-inset, 0px) + 8px);
+  }
 }
 
 /* ---------- PO receiving console ----------
@@ -789,5 +801,64 @@
   .wc-receive-dock {
     left: 0;
     bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom));
+  }
+}
+
+/* ---------------------------------------------- R4: review sheet + steps -- */
+/* Concept B review sheet: centred 540 px dialog from 768 px up, a bottom sheet
+   below (frozen spec). The footer stays visible; the body scrolls. */
+.wc-review-sheet {
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(540px, 94vw);
+  max-height: calc(100dvh - 40px);
+  border-radius: var(--r-lg);
+}
+@media (max-width: 767.98px) {
+  .wc-review-sheet {
+    left: 0;
+    right: 0;
+    top: auto;
+    bottom: 0;
+    transform: none;
+    width: 100%;
+    max-height: 92dvh;
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+    border-left: 0;
+    border-right: 0;
+    border-bottom: 0;
+  }
+  .wc-review-sheet-foot {
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  }
+  .wc-review-sheet-foot > * {
+    flex: 1 1 0;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .wc-review-sheet[data-state="open"] {
+    animation: wc-sheet-in var(--dur-2, 160ms) ease-out;
+  }
+}
+@keyframes wc-sheet-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* step indicator: labelled steps from 768 px, "Step 2 of 4 · Details" below */
+.wc-steps-compact {
+  display: none;
+}
+@media (max-width: 767.98px) {
+  .wc-steps-full {
+    display: none;
+  }
+  .wc-steps-compact {
+    display: flex;
   }
 }

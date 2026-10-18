@@ -41,6 +41,37 @@ const R2_SCOPE = [
   "components/ui/status-badge.tsx",
 ];
 
+// R4 (stock + operational screens and their shared primitives) must have none either.
+const R4_SCOPE = [
+  "components/ui/date-field.tsx",
+  "components/ui/expiry-badge.tsx",
+  "components/ui/local-date.tsx",
+  "components/ui/lot-chip.tsx",
+  "components/ui/quantity-display.tsx",
+  "components/ui/review-sheet.tsx",
+  "components/ui/step-indicator.tsx",
+  "components/ui/stock-triad.tsx",
+  "components/products/product-balances.tsx",
+  "components/products/product-detail.tsx",
+  "components/stock/barcode-lookup-sheet.tsx",
+  "components/stock/stock-detail-pane.tsx",
+  "components/stock/stock-in-console.tsx",
+  "components/stock/stock-out-console.tsx",
+  "components/stock/stock-task-parts.tsx",
+  "components/stock/stock-view.tsx",
+  "components/stock/task-trail.tsx",
+  "components/purchase-orders/receipt-history.tsx",
+  "components/purchase-orders/receive-line.tsx",
+  "components/purchase-orders/receiving-console.tsx",
+  "components/transfers/transfer-receive-line.tsx",
+  "components/transfers/transfer-receiving-console.tsx",
+  "components/transfers/transfer-route.tsx",
+  "components/stock-adjustments/exact-balance-picker.tsx",
+  "components/stock-adjustments/request-detail.tsx",
+  "components/stock-adjustments/request-form.tsx",
+  "components/stock-adjustments/request-list.tsx",
+];
+
 const JSX_TEXT = />\s*([A-Z][a-z]+(?:[ '’&,.:/-]+[A-Za-z]+)*[.…!?]?)\s*</g;
 const PROP_TEXT = /\b(?:aria-label|placeholder|title|label|heading|emptyText|ariaLabel)=["{]["`]?([A-Z][a-z]+[^"`}]*)["`]/g;
 const ALLOW = /^(?:AKKRATHARA|Ctrl K|Ctrl|Esc|EN|SKU|FEFO|FIFO|ID|OK)$/;
@@ -91,6 +122,10 @@ describe("untranslated string tracking (D4)", () => {
 
   it("R2-scope components contain no hard-coded English", () => {
     for (const file of R2_SCOPE) expect(counts[file] ?? 0, `${file}: ${englishLiterals(readFileSync(join(SRC, file), "utf8"))}`).toBe(0);
+  });
+
+  it("R4-scope screens and primitives contain no hard-coded English", () => {
+    for (const file of R4_SCOPE) expect(counts[file] ?? 0, `${file}: ${englishLiterals(readFileSync(join(SRC, file), "utf8"))}`).toBe(0);
   });
 
   it("no file gains untranslated strings beyond the recorded baseline", () => {

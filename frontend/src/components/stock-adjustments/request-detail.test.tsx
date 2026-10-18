@@ -44,6 +44,7 @@ vi.mock("@/lib/query/stock-adjustment-requests", () => ({
 }));
 
 import { StockAdjustmentRequestDetailBody } from "./request-detail";
+import { LanguageProvider } from "@/lib/i18n/client";
 
 beforeEach(() => {
   approveMutate.mockReset();
@@ -278,5 +279,69 @@ describe("StockAdjustmentRequestDetailBody — approval key characterization (R3
     render(<StockAdjustmentRequestDetailBody id={42} role="warehouse" />);
     expect(screen.queryByRole("button", { name: /^approve$/i })).toBeNull();
     expect(screen.getByRole("button", { name: /cancel request/i })).toBeInTheDocument();
+  });
+});
+
+/* ------------------- R4 approval UX (D-R4-6), exact values, history time ------------------- */
+
+describe("StockAdjustmentRequestDetailBody — R4", () => {
+  it("an admin viewing their own PENDING request gets a hint and no Approve; Reject and Cancel remain", () => {
+    render(<StockAdjustmentRequestDetailBody id={42} role="admin" currentUserId={2} />);
+    expect(screen.getByText(/another admin must approve it/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^approve$/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /^reject$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /cancel request/i })).toBeInTheDocument();
+  });
+
+  it("another admin sees Approve and no self-approval hint", () => {
+    render(<StockAdjustmentRequestDetailBody id={42} role="admin" currentUserId={1} />);
+    expect(screen.getByRole("button", { name: /^approve$/i })).toBeInTheDocument();
+    expect(screen.queryByText(/another admin must approve it/i)).toBeNull();
+  });
+
+  it("the difference is an exact decimal with a real minus sign, never a float", () => {
+    requestData = { ...requestData, observed_quantity: "0.300", requested_quantity: "0.100" };
+    render(<StockAdjustmentRequestDetailBody id={42} role="admin" />);
+    expect(screen.getByText("(−0.200)")).toBeInTheDocument();
+  });
+
+  it("history: a zoned instant shows on the Bangkok clock; a naive one is shown as stored and labelled", () => {
+    requestData.history = [
+      { action: "CREATE_ADJUSTMENT_REQUEST", actor: "warehouse1", at: "2026-01-01T10:00:00Z", detail: "PENDING" },
+      { action: "APPROVE_ADJUSTMENT_REQUEST", actor: "admin1", at: "2026-01-01T11:00:00", detail: "PENDING -> APPROVED" },
+    ];
+    render(<StockAdjustmentRequestDetailBody id={42} role="admin" />);
+    expect(screen.getByText("2026-01-01 17:00")).toBeInTheDocument();
+    expect(screen.getByText(/2026-01-01 11:00/)).toBeInTheDocument();
+    expect(screen.getByText("(stored time)")).toBeInTheDocument();
+  });
+
+  it("an APPROVED request links to its ledger movement by reference; a PENDING one does not", () => {
+    requestData = { ...requestData, status: "APPROVED" };
+    const { unmount } = render(<StockAdjustmentRequestDetailBody id={42} role="admin" />);
+    expect(screen.getByRole("link", { name: /view in ledger/i })).toHaveAttribute(
+      "href",
+      "/inventory/ledger?reference_number=ADJ-000042",
+    );
+    unmount();
+    requestData = { ...requestData, status: "PENDING" };
+    render(<StockAdjustmentRequestDetailBody id={42} role="admin" />);
+    expect(screen.queryByRole("link", { name: /view in ledger/i })).toBeNull();
+  });
+
+  it("is translated: Thai reason label, actions and history action", () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 204 })));
+    try {
+      render(
+        <LanguageProvider initialLocale="th">
+          <StockAdjustmentRequestDetailBody id={42} role="admin" currentUserId={1} />
+        </LanguageProvider>,
+      );
+      expect(screen.getByText("นับสต๊อกไม่ตรง")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "อนุมัติ" })).toBeInTheDocument();
+      expect(screen.getByText("สร้างคำขอปรับยอด")).toBeInTheDocument();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

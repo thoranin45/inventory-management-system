@@ -12,10 +12,10 @@ const base = {
 };
 
 describe("WorkLine", () => {
-  it("shows decimal-formatted done / required (2dp, no float)", () => {
+  it("shows exact 3-dp done / required (never rounded, no float)", () => {
     render(<WorkLine {...base} done="1.125" required="4.000" />);
-    expect(screen.getByText("1.13")).toBeInTheDocument(); // 1.125 → 1.13 (half-up, string math)
-    expect(screen.getByText("4.00")).toBeInTheDocument();
+    expect(screen.getByText("1.125")).toBeInTheDocument(); // exact: no rounding (D-R4-1)
+    expect(screen.getByText("4.000")).toBeInTheDocument();
   });
 
   it("[Scan +1] targets the line (no mutation) and is disabled once full", async () => {

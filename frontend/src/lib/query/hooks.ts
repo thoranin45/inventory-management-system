@@ -1,6 +1,7 @@
 "use client";
 
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import * as React from "react";
+import { keepPreviousData, useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
 import { bffJson } from "@/lib/api/browser";
 import {
@@ -215,4 +216,69 @@ export function useGlobalSearch(query: string, enabled: boolean) {
     staleTime: 10_000,
     retry: RETRY_ONCE_NOT_AUTH,
   });
+}
+
+/** Page size of the product-detail balance list (D-R4-7: load more on request). */
+export const PRODUCT_BALANCE_PAGE_SIZE = 50;
+
+export type ProductBalancePages = {
+  rows: StockBalanceListEnvelope["data"]["items"];
+  total: number;
+  /** pages disagree (total changed, or ids repeat / go backwards): reload */
+  inconsistent: boolean;
+};
+
+/**
+ * R4 (D-R4-7) — a product's balances, ONE verified page at a time: the detail
+ * shows the first page and the operator loads more explicitly (never an
+ * automatic walk of every page). Pages are requested in `id asc` order; each
+ * page must match the request (page number, page size, a page count that fits
+ * the total, the expected row count). Across pages the total must not change
+ * and ids must keep rising; otherwise `inconsistent` asks for a reload instead
+ * of showing a silently shifted list.
+ */
+export function useProductBalancePages(productId: number | null) {
+  const q = useInfiniteQuery({
+    queryKey: queryKeys.stock.byProduct(productId ?? "none", { pages: PRODUCT_BALANCE_PAGE_SIZE }),
+    enabled: productId !== null,
+    initialPageParam: 1,
+    queryFn: async ({ pageParam, signal }) => {
+      const env = await bffJson(`/api/bff/stock-balances/product/${productId}`, stockBalanceListEnvelope, {
+        query: { page: pageParam, page_size: PRODUCT_BALANCE_PAGE_SIZE, sort_by: "id", sort_order: "asc" },
+        signal,
+      });
+      const { items, pagination } = env.data;
+      if (pagination.page !== pageParam) throw balancesInconsistent(`asked for page ${pageParam}, got ${pagination.page}`);
+      if (pagination.page_size !== PRODUCT_BALANCE_PAGE_SIZE) throw balancesInconsistent(`unexpected page size ${pagination.page_size}`);
+      if (pagination.total_pages !== Math.ceil(pagination.total_items / PRODUCT_BALANCE_PAGE_SIZE)) {
+        throw balancesInconsistent("page count does not match the total");
+      }
+      const expected = Math.min(PRODUCT_BALANCE_PAGE_SIZE, Math.max(0, pagination.total_items - (pageParam - 1) * PRODUCT_BALANCE_PAGE_SIZE));
+      if (items.length !== expected) throw balancesInconsistent(`page ${pageParam} has ${items.length} of ${expected} rows`);
+      return env.data;
+    },
+    getNextPageParam: (last) => (last.pagination.page < last.pagination.total_pages ? last.pagination.page + 1 : undefined),
+    staleTime: 15_000,
+    retry: RETRY_ONCE_NOT_AUTH,
+  });
+
+  const result = React.useMemo<ProductBalancePages | null>(() => {
+    const pages = q.data?.pages;
+    if (!pages || pages.length === 0) return null;
+    const total = pages[0].pagination.total_items;
+    let inconsistent = false;
+    let lastId = 0;
+    const rows: ProductBalancePages["rows"] = [];
+    for (const page of pages) {
+      if (page.pagination.total_items !== total) inconsistent = true;
+      for (const row of page.items) {
+        if (!(row.id > lastId)) inconsistent = true;
+        lastId = Math.max(lastId, row.id);
+        rows.push(row);
+      }
+    }
+    return { rows, total, inconsistent };
+  }, [q.data]);
+
+  return { ...q, balances: result };
 }

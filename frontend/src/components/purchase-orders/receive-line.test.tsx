@@ -56,7 +56,7 @@ describe("ReceiveLine rendering", () => {
         onChange={onChange}
       />,
     );
-    expect(screen.getByText("20.00")).toBeInTheDocument(); // ordered (2dp display)
+    expect(screen.getByText("20.000")).toBeInTheDocument(); // ordered (fixed 3-dp display)
     await user.type(screen.getByLabelText("Receive now"), "4");
     expect(onChange).toHaveBeenCalledWith({ quantity: "4" });
   });

@@ -3,15 +3,22 @@
 import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Camera, CheckCircle2, ChevronRight, PackageMinus, ScanLine, TriangleAlert, Undo2 } from "lucide-react";
+import { ArrowUpFromLine, BookOpen, Camera, PackageMinus, ScanLine, ShieldCheck, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Combobox, type ComboboxItem } from "@/components/ui/combobox";
-import { QuantityDisplay } from "@/components/ui/quantity-display";
+import { QuantityChange, QuantityDisplay } from "@/components/ui/quantity-display";
+import { ReviewCell, ReviewSheet } from "@/components/ui/review-sheet";
+import { Banner } from "@/components/ui/states";
+import { StepIndicator } from "@/components/ui/step-indicator";
+import { StockTriad } from "@/components/ui/stock-triad";
 import { CameraBarcodeScanner } from "@/components/work/camera-barcode-scanner";
 import { useBeep } from "@/components/work/use-beep";
 import { isApiError } from "@/lib/api/errors";
+import { subtractDecimals } from "@/lib/decimal";
+import { formatQtyDelta } from "@/lib/format";
+import { useT } from "@/lib/i18n/client";
 import { useProducts } from "@/lib/query/hooks";
 import { resolveBarcode } from "@/lib/query/sales";
 import { useSaveStockOutSession } from "@/lib/query/stock";
@@ -24,11 +31,12 @@ import {
   buildStockOutSaveBody,
   stockOutSetupInput,
   STOCK_OUT_ERROR_COPY,
-  STOCK_OUT_STRATEGY_LABELS,
   type StockOutSaveBody,
   type StockOutStrategy,
 } from "@/lib/api/schemas/stock-out";
 import { useScanCountSession, type ScanFeedback } from "./use-scan-count-session";
+import { DEFAULT_STORAGE_LABEL, LotPreview, StorageRow, useDefaultStorage } from "./stock-task-parts";
+import { TrailList } from "./task-trail";
 
 /* --------------------------------------------------------------- session -- */
 
@@ -73,26 +81,15 @@ function buildPayload(lines: Record<number, SessionLine>): StockOutSaveBody | nu
 }
 
 const FIELD_CLS =
-  "h-11 w-full rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-[15px] tabular-nums outline-hidden focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-[var(--focus)] disabled:opacity-60";
+  "h-11 w-full rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-[15px] tabular-nums outline-hidden focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-[var(--focus)] disabled:opacity-60 max-[767.98px]:h-[46px] max-[767.98px]:text-[16px]";
 
-const hitTrailText = (code: string) => `barcode ${code} +1`;
-
-function feedbackText(feedback: Exclude<ScanFeedback, { kind: "idle" }>): string {
-  switch (feedback.kind) {
-    case "match":
-      return `Matched — ready to issue ${feedback.count}`;
-    case "wrong":
-      return `Wrong product — that barcode is ${feedback.productName}. Count unchanged.`;
-    case "unknown":
-      return `Barcode read ${feedback.code} — product not registered. Nothing was counted.`;
-    case "error":
-      return feedback.userMessage ?? "Could not read that barcode. Nothing was counted.";
-  }
-}
+/** the trail stores the scanned code; the wording is rendered in the UI language */
+const hitTrailText = (code: string) => code;
 
 /* --------------------------------------------------------------- console -- */
 
 export function StockOutConsole() {
+  const t = useT();
   const router = useRouter();
   const { beepOk, beepBad, beepDone, enabled: soundOn, setEnabled: setSoundOn } = useBeep();
 
@@ -107,10 +104,30 @@ export function StockOutConsole() {
   // a reused key whose stored request differs forces a new session (no silent new key)
   const submission = useIdempotentSubmission({ draft, mutate: saveMut.mutate, isMismatch: isLooseKeyMismatch });
   const { mismatch } = submission;
-  const [saved, setSaved] = React.useState<{ qty: string; onHand: string; name: string } | null>(null);
+  const [saved, setSaved] = React.useState<{ qty: string; onHand: string; name: string; productId: number } | null>(null);
   const [cameraOpen, setCameraOpen] = React.useState(false);
+  // R4 review before commit: opening it sends nothing; Confirm runs `save`
+  const [reviewOpen, setReviewOpen] = React.useState(false);
+  const [reviewError, setReviewError] = React.useState<string | null>(null);
 
   const phase: "setup" | "scanning" | "saved" = saved ? "saved" : line?.started ? "scanning" : "setup";
+  const storage = useDefaultStorage(line ? line.productId : null);
+
+  const strategyLabel = (s: StockOutStrategy) => t(s === "fefo" ? "task.fefo" : "task.fifo");
+  const strategyHint = (s: StockOutStrategy) => t(s === "fefo" ? "task.fefoHint" : "task.fifoHint");
+
+  const feedbackText = (feedback: Exclude<ScanFeedback, { kind: "idle" }>): string => {
+    switch (feedback.kind) {
+      case "match":
+        return t("task.matchedOut", { n: feedback.count });
+      case "wrong":
+        return t("task.wrongProduct", { name: feedback.productName });
+      case "unknown":
+        return t("task.unknownBarcode", { code: feedback.code });
+      case "error":
+        return feedback.userMessage ?? t("task.scanReadError");
+    }
+  };
 
   /* ------------------------------- SETUP: product picker ---------------- */
   const [term, setTerm] = React.useState("");
@@ -187,11 +204,12 @@ export function StockOutConsole() {
   }, [line]);
 
   /* ------------------------------- SCAN SESSION ------------------------- */
-  // each scan verifies the item (read-only "lookup"); nothing is deducted until Save
+  // each scan verifies the item (read-only "lookup"); nothing is deducted until Save.
+  // While the review sheet is open the scanner is off: the count cannot change under review.
   const { feedback, setFeedback, resolving, bump, handleScan, scanner } = useScanCountSession({
     draft,
     purpose: "lookup",
-    scanning: phase === "scanning",
+    scanning: phase === "scanning" && !reviewOpen,
     busy: saveMut.isPending,
     beepOk,
     beepBad,
@@ -199,7 +217,7 @@ export function StockOutConsole() {
   });
 
   const undoLast = () => {
-    bump(-1, "undo -1");
+    bump(-1, "");
     setFeedback({ kind: "idle" });
     requestAnimationFrame(() => scanner.focus());
   };
@@ -226,17 +244,20 @@ export function StockOutConsole() {
     line?.availableQty != null && line.count > Number(line.availableQty)
       ? { available: line.availableQty, count: line.count }
       : null;
+  const canReview = !!draft.payload && !!line && line.count > 0 && !saveMut.isPending && !mismatch;
 
   const save = () => {
     const body = draft.payload;
     if (!body || !line || line.count <= 0 || saveMut.isPending) return;
+    setReviewError(null);
     // success consumes the draft — next session gets a fresh key
     submission.submit(
       { body },
       {
         onSuccess: (res) => {
           beepDone();
-          setSaved({ qty: res.difference, onHand: res.current_stock, name: line.name });
+          setReviewOpen(false);
+          setSaved({ qty: res.difference, onHand: res.current_stock, name: line.name, productId: line.productId });
         },
         onError: (e, isMismatch) => {
           beepBad();
@@ -246,105 +267,110 @@ export function StockOutConsole() {
           // timeout-then-retry) always surfaces as "start a new session" —
           // the operator must explicitly abandon it, not have the console
           // paper over the ambiguity on their behalf.
-          if (isMismatch) return;
+          if (isMismatch) {
+            setReviewOpen(false);
+            return;
+          }
           const backend = isApiError(e) ? e.message : "";
-          const copy =
-            STOCK_OUT_ERROR_COPY[backend] ??
-            (isApiError(e) ? e.userMessage : "The stock-out was rejected. Nothing was deducted.");
-          toast.error("Save failed", { description: rid(e) ? `${copy} · Request ${rid(e)}` : copy });
+          const copy = STOCK_OUT_ERROR_COPY[backend] ?? (isApiError(e) ? e.userMessage : t("task.outRejected"));
+          const withId = rid(e) ? `${copy} · ${t("task.requestRef", { id: rid(e)! })}` : copy;
+          setReviewError(withId);
+          toast.error(t("task.saveFailed"), { description: withId });
         },
       },
     );
   };
 
+  const openReview = () => {
+    if (!canReview) return;
+    setReviewError(null);
+    setReviewOpen(true);
+  };
+
+  const steps = [t("task.stepDetails"), t("task.stepScan"), t("task.stepReview"), t("task.stepDone")];
+  const stepIndex = phase === "saved" ? 3 : reviewOpen ? 2 : phase === "scanning" ? 1 : 0;
+  const countQty = line ? String(line.count) : "0";
+  const afterQty = storage.status === "ready" ? subtractDecimals(storage.onHand, countQty, 3) : null;
+
   /* --------------------------------------------------------- render ---- */
   return (
     <div className="flex flex-col gap-4">
-      <nav className="flex items-center gap-1 text-[12px] text-[var(--muted)]" aria-label="Breadcrumb">
-        <Link href="/stock" className="font-medium hover:text-[var(--foreground)]">
-          Stock
-        </Link>
-        <ChevronRight aria-hidden className="h-3 w-3" />
-        <span className="text-[var(--foreground)]">Stock Out</span>
-      </nav>
-
       <div className="wc-receive-layout">
         <div className="wc-receive-main flex min-w-0 flex-col gap-3">
           <div className="wc-work-head">
             <div>
-              <div className="flex items-center gap-2 text-[16px] font-bold">
+              <h1 className="flex items-center gap-2 text-[18px] font-semibold">
                 <PackageMinus aria-hidden className="h-[18px] w-[18px] text-[var(--accent)]" />
-                Stock Out
-              </div>
-              <div className="text-[12px] text-[var(--muted)]">
-                {phase === "setup"
-                  ? "Choose a product and a strategy, then scan the items you're removing. Scanning only counts — nothing is deducted until you Save."
-                  : phase === "scanning"
-                    ? "Scan each physical item you're removing. Each scan verifies it matches the selected product."
-                    : "Stock issued."}
+                {t("nav.stockOut")}
+              </h1>
+              <div className="text-[13px] text-[var(--muted)]">
+                {phase === "setup" ? t("task.outSetupHint") : phase === "scanning" ? t("task.outScanHint") : t("task.outSavedHint")}
               </div>
             </div>
           </div>
+
+          <StepIndicator steps={steps} current={stepIndex} />
 
           {/* ---------------------------------------------------- SETUP -- */}
           {phase === "setup" ? (
             <div className="flex flex-col gap-3 rounded-[var(--r-lg)] border border-[var(--border-strong)] bg-[var(--surface)] p-4">
               <label className="flex flex-col gap-1 text-[12px] text-[var(--muted)]">
-                Product
+                {t("task.product")}
                 <Combobox
-                  ariaLabel="Search products"
+                  ariaLabel={t("task.searchProducts")}
                   value={line ? { id: line.productId, label: line.name, sublabel: line.sku } : null}
                   onChange={pickProduct}
                   onSearch={setTerm}
                   items={comboItems}
                   loading={productQ.isFetching}
-                  placeholder="Search products by name or SKU…"
-                  emptyText={debounced.trim().length < 2 ? "Type at least 2 characters" : "No products match"}
+                  placeholder={t("task.searchPlaceholder")}
+                  emptyText={debounced.trim().length < 2 ? t("task.typeTwo") : t("task.noProducts")}
                 />
               </label>
 
               {line ? (
                 <>
                   <div
-                    className="flex items-center justify-between rounded-[var(--r-sm)] border border-[var(--border)] bg-[var(--sunken)] px-3 py-2 text-[12.5px]"
+                    className="flex items-center justify-between rounded-[var(--r-sm)] border border-[var(--border)] bg-[var(--surface-sunken)] px-3 py-2 text-[13px]"
                     role="status"
                   >
-                    <span className="text-[var(--muted)]">Available to issue</span>
+                    <span className="text-[var(--muted)]">{t("task.availableToIssue")}</span>
                     <span className="font-semibold tabular-nums">
                       {line.availableQty != null ? <QuantityDisplay value={line.availableQty} /> : "—"}
                     </span>
                   </div>
 
                   <fieldset className="flex flex-col gap-2">
-                    <legend className="mb-1 text-[12px] text-[var(--muted)]">Strategy</legend>
-                    {(["fefo", "fifo"] as const).map((s) => {
-                      const copy = STOCK_OUT_STRATEGY_LABELS[s];
-                      const active = line.strategy === s;
-                      return (
-                        <button
-                          key={s}
-                          type="button"
-                          onClick={() => patch({ strategy: s })}
-                          className={
-                            "flex flex-col items-start gap-[2px] rounded-[var(--r-sm)] border px-3 py-2 text-left transition-colors " +
-                            (active
-                              ? "border-[var(--accent)] bg-[var(--accent-subtle)]"
-                              : "border-[var(--border-strong)] bg-[var(--surface)] hover:border-[var(--accent)]")
-                          }
-                          aria-pressed={active}
-                        >
-                          <span className="text-[13.5px] font-semibold">{copy.labelTh}</span>
-                          <span className="text-[11px] text-[var(--muted)]">
-                            {copy.label} — {copy.sub}
-                          </span>
-                        </button>
-                      );
-                    })}
+                    <legend className="mb-1 text-[12px] text-[var(--muted)]">{t("task.strategy")}</legend>
+                    <div className="grid grid-cols-1 gap-2 min-[480px]:grid-cols-2">
+                      {(["fefo", "fifo"] as const).map((s) => {
+                        const active = line.strategy === s;
+                        return (
+                          <button
+                            key={s}
+                            type="button"
+                            onClick={() => patch({ strategy: s })}
+                            className={
+                              "flex min-h-11 flex-col items-start gap-[2px] rounded-[var(--r-sm)] border px-3 py-2 text-left transition-colors focus-visible:outline-2 focus-visible:outline-[var(--focus)] " +
+                              (active
+                                ? "border-[var(--accent)] bg-[var(--accent-subtle)] shadow-[inset_0_0_0_1px_var(--accent)]"
+                                : "border-[var(--border-strong)] bg-[var(--surface)] hover:border-[var(--accent)]")
+                            }
+                            aria-pressed={active}
+                          >
+                            <span className="text-[14px] font-semibold">{strategyLabel(s)}</span>
+                            <span className="text-[12px] text-[var(--muted)]">{strategyHint(s)}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </fieldset>
 
-                  <div className="grid grid-cols-2 gap-3">
+                  <LotPreview storage={storage} strategy={line.strategy} />
+
+                  <div className="grid grid-cols-1 gap-3 min-[480px]:grid-cols-2">
                     <label className="flex flex-col gap-1 text-[12px] text-[var(--muted)]">
-                      Expected quantity (optional)
+                      {t("task.expectedQty")}
                       <input
                         inputMode="decimal"
                         className={FIELD_CLS}
@@ -354,24 +380,24 @@ export function StockOutConsole() {
                       />
                     </label>
                     <label className="flex flex-col gap-1 text-[12px] text-[var(--muted)]">
-                      Note (optional)
+                      {t("task.note")}
                       <input
                         className={FIELD_CLS}
                         value={line.remark}
                         onChange={(e) => patch({ remark: e.target.value })}
                         maxLength={255}
-                        placeholder="e.g. order pick"
+                        placeholder={t("task.outNotePlaceholder")}
                       />
                     </label>
                   </div>
 
                   <Button variant="primary" className="h-11" disabled={!setupValid} onClick={startScanning}>
-                    Start scanning
+                    {t("task.startScanning")}
                   </Button>
                 </>
               ) : (
-                <p className="rounded-[var(--r-md)] border border-dashed border-[var(--border)] p-5 text-center text-[12.5px] text-[var(--muted)]">
-                  Pick the product you are issuing. You choose it — and the FIFO/FEFO strategy — before scanning.
+                <p className="rounded-[var(--r-md)] border border-dashed border-[var(--border)] p-5 text-center text-[13px] text-[var(--muted)]">
+                  {t("task.outPickHint")}
                 </p>
               )}
             </div>
@@ -381,20 +407,20 @@ export function StockOutConsole() {
           {phase === "scanning" && line ? (
             <div className="flex flex-col gap-3 rounded-[var(--r-lg)] border border-[var(--border-strong)] bg-[var(--surface)] p-4">
               <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-[14px] font-semibold">{line.name}</div>
-                  <div className="mt-[3px] flex flex-wrap items-center gap-x-3 text-[11.5px] text-[var(--muted)]">
+                <div className="min-w-0">
+                  <div className="text-[15px] font-semibold">{line.name}</div>
+                  <div className="mt-[3px] flex flex-wrap items-center gap-x-3 text-[12px] text-[var(--muted)]">
                     <span className="mono">{line.sku}</span>
-                    <span>{STOCK_OUT_STRATEGY_LABELS[line.strategy].labelTh}</span>
+                    <span>{strategyLabel(line.strategy)}</span>
                     {line.availableQty != null ? (
                       <span>
-                        available <QuantityDisplay value={line.availableQty} />
+                        {t("task.availableShort")} <QuantityDisplay value={line.availableQty} />
                       </span>
                     ) : null}
                   </div>
                 </div>
                 <Button variant="ghost" size="sm" onClick={clearSession} disabled={saveMut.isPending}>
-                  Clear session
+                  {t("task.clearSession")}
                 </Button>
               </div>
 
@@ -403,25 +429,19 @@ export function StockOutConsole() {
                 <ScanLine aria-hidden className="h-4 w-4 flex-none text-[var(--muted)]" />
                 <input
                   {...scanner.inputProps}
-                  placeholder={resolving ? "Reading…" : "Scan an item…"}
-                  aria-label="Barcode scan input"
-                  className="min-h-11 w-full min-w-0 bg-transparent text-[15px] tabular-nums outline-none"
+                  placeholder={resolving ? t("task.reading") : t("task.scanPlaceholder")}
+                  aria-label={t("task.scanInput")}
+                  className="min-h-11 w-full min-w-0 bg-transparent text-[16px] tabular-nums outline-none"
                 />
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  onClick={scanner.submit}
-                  disabled={resolving || saveMut.isPending}
-                >
-                  Enter
+                <Button type="button" variant="secondary" size="sm" onClick={scanner.submit} disabled={resolving || saveMut.isPending}>
+                  {t("task.enter")}
                 </Button>
                 <Button
                   type="button"
                   variant="secondary"
                   size="icon"
-                  aria-label="Scan with camera"
-                  title="Scan with the device camera"
+                  aria-label={t("task.scanWithCamera")}
+                  title={t("task.scanWithCameraTitle")}
                   onClick={() => {
                     if (typeof document !== "undefined") (document.activeElement as HTMLElement | null)?.blur();
                     setCameraOpen(true);
@@ -435,145 +455,171 @@ export function StockOutConsole() {
               {/* count + inline feedback */}
               <div className="flex items-center justify-between gap-3">
                 <div className="text-[13px]">
-                  <span className="text-[var(--muted)]">Ready to issue </span>
-                  <span className="text-[18px] font-bold tabular-nums">{line.count}</span>
-                  {line.expected ? (
-                    <span className="text-[var(--muted)]"> of {line.expected} expected</span>
-                  ) : null}
+                  <span className="text-[var(--muted)]">{t("task.toIssue")} </span>
+                  <span className="text-[20px] font-bold tabular-nums">{line.count}</span>
+                  {line.expected ? <span className="text-[var(--muted)]"> {t("task.ofExpected", { n: line.expected })}</span> : null}
                 </div>
                 <Button variant="ghost" size="sm" onClick={undoLast} disabled={line.count === 0 || saveMut.isPending}>
-                  <Undo2 aria-hidden className="h-3.5 w-3.5" /> Undo last scan
+                  <Undo2 aria-hidden className="h-3.5 w-3.5" /> {t("task.undoLastScan")}
                 </Button>
               </div>
 
               {feedback.kind !== "idle" ? (
-                <p
-                  role="status"
-                  className={
-                    feedback.kind === "match"
-                      ? "flex items-center gap-2 rounded-[var(--r-sm)] border border-[color-mix(in_srgb,var(--success)_35%,transparent)] bg-[var(--success-subtle)] p-2 text-[12px] text-[var(--success)]"
-                      : "flex items-center gap-2 rounded-[var(--r-sm)] border border-[color-mix(in_srgb,var(--danger)_35%,transparent)] bg-[var(--danger-subtle)] p-2 text-[12px] text-[var(--danger)]"
-                  }
-                >
-                  {feedback.kind === "match" ? (
-                    <CheckCircle2 aria-hidden className="h-4 w-4 flex-none" />
-                  ) : (
-                    <TriangleAlert aria-hidden className="h-4 w-4 flex-none" />
-                  )}
-                  {feedbackText(feedback)}
-                </p>
-              ) : null}
-
-              {overAvailable ? (
-                <p className="flex items-center gap-2 rounded-[var(--r-sm)] border border-[color-mix(in_srgb,var(--warning)_35%,transparent)] bg-[var(--warning-subtle)] p-2 text-[12px] text-[var(--warning)]">
-                  <TriangleAlert aria-hidden className="h-4 w-4 flex-none" />
-                  Over the last-known available quantity — {overAvailable.count} of {overAvailable.available}. The
-                  backend re-checks at Save; this is only a heads-up.
-                </p>
+                <Banner tone={feedback.kind === "match" ? "good" : "danger"} title={feedbackText(feedback)} />
               ) : null}
 
               {overExpected ? (
-                <p className="flex items-center gap-2 rounded-[var(--r-sm)] border border-[color-mix(in_srgb,var(--warning)_35%,transparent)] bg-[var(--warning-subtle)] p-2 text-[12px] text-[var(--warning)]">
-                  <TriangleAlert aria-hidden className="h-4 w-4 flex-none" />
-                  Over expected quantity — {overExpected.count} of {overExpected.expected}. You can still save.
-                </p>
+                <Banner tone="warning" title={t("task.overExpected", { count: overExpected.count, expected: overExpected.expected })} />
+              ) : null}
+
+              {overAvailable ? (
+                <Banner tone="warning" title={t("task.overAvailable", { count: overAvailable.count, available: overAvailable.available })} />
               ) : null}
 
               {mismatch ? (
-                <div className="flex flex-col gap-2 rounded-[var(--r-sm)] border border-[color-mix(in_srgb,var(--danger)_45%,transparent)] bg-[var(--danger-subtle)] p-3 text-[12px] text-[var(--danger)]">
-                  <span className="font-semibold">This session can no longer be saved.</span>
-                  <span>
-                    Its Idempotency-Key was already used for a different quantity, product, or strategy. Start a new
-                    stock-out session to continue — a new key is issued only for a genuinely new session.
-                  </span>
-                  <Button variant="secondary" size="sm" className="self-start" onClick={clearSession}>
-                    Start new stock-out session
-                  </Button>
-                </div>
+                <Banner
+                  tone="danger"
+                  title={t("task.outMismatchTitle")}
+                  actions={
+                    <Button variant="secondary" size="sm" onClick={clearSession}>
+                      {t("task.outStartNew")}
+                    </Button>
+                  }
+                >
+                  {t("task.outMismatchBody")}
+                </Banner>
               ) : null}
 
-              <Button
-                variant="primary"
-                className="h-11"
-                disabled={!draft.payload || line.count <= 0 || saveMut.isPending || mismatch}
-                onClick={save}
-              >
-                {saveMut.isPending ? "Saving…" : `Issue ${line.count} ${line.count === 1 ? "item" : "items"}`}
-              </Button>
-              {saveMut.isError && !mismatch ? (
-                <p className="text-[12px] text-[var(--danger)]">
-                  {isApiError(saveMut.error) ? saveMut.error.userMessage : "Save failed."}{" "}
-                  {rid(saveMut.error) ? `· Request ${rid(saveMut.error)}` : null} The count and key are kept — press
-                  Issue to retry.
-                </p>
-              ) : null}
+              <div className="wc-task-action flex flex-col gap-2">
+                <Button variant="primary" className="h-11" disabled={!canReview} onClick={openReview}>
+                  <ShieldCheck aria-hidden className="h-4 w-4" />
+                  {saveMut.isPending ? t("task.saving") : t("task.reviewOut", { n: line.count })}
+                </Button>
+                {saveMut.isError && !mismatch && !reviewOpen ? (
+                  <p className="text-[12px] text-[var(--danger)]">
+                    {isApiError(saveMut.error) ? saveMut.error.userMessage : t("task.saveFailed")}{" "}
+                    {rid(saveMut.error) ? `· ${t("task.requestRef", { id: rid(saveMut.error)! })}` : null} {t("task.keptRetry")}
+                  </p>
+                ) : null}
+              </div>
 
-              {line.trail.length ? (
-                <section>
-                  <h3 className="wc-section-label mb-1">This session</h3>
-                  <ul className="flex flex-col gap-[2px] text-[11.5px] text-[var(--muted)]">
-                    {line.trail.map((t) => (
-                      <li key={t.id} className="tabular-nums">
-                        {t.kind === "hit" ? "✓" : "↶"} {t.at} · {t.text}
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              ) : null}
+              <TrailList trail={line.trail} />
             </div>
           ) : null}
 
           {/* --------------------------------------------------- SAVED -- */}
           {phase === "saved" && saved ? (
-            <div className="flex flex-col gap-3 rounded-[var(--r-lg)] border border-[color-mix(in_srgb,var(--success)_40%,transparent)] bg-[var(--success-subtle)] p-4">
-              <div className="flex items-center gap-2 text-[14px] font-semibold text-[var(--success)]">
-                <CheckCircle2 aria-hidden className="h-5 w-5" />
-                Stock issued
-              </div>
-              <p className="text-[12.5px] text-[var(--foreground)]">
-                {saved.name} — issued{" "}
-                <span className="font-semibold">
-                  <QuantityDisplay value={saved.qty} />
-                </span>
-                . On hand <QuantityDisplay value={saved.onHand} />.
+            <Banner
+              tone="good"
+              title={t("task.outSaved")}
+              actions={
+                <>
+                  <Button variant="primary" className="h-11" onClick={clearSession}>
+                    {t("task.issueNext")}
+                  </Button>
+                  <Button variant="secondary" className="h-11" asChild>
+                    <Link href={`/inventory/ledger?product_id=${saved.productId}`}>
+                      <BookOpen aria-hidden className="h-4 w-4" />
+                      {t("review.viewInLedger")}
+                    </Link>
+                  </Button>
+                  <Button variant="ghost" className="h-11" onClick={() => router.push("/stock")}>
+                    {t("task.backToStock")}
+                  </Button>
+                </>
+              }
+            >
+              <p className="text-[13px]">
+                {saved.name} — {t("task.issued")} <QuantityDisplay value={saved.qty} signed className="font-semibold" />.{" "}
+                {t("task.onHandNow")} <QuantityDisplay value={saved.onHand} className="font-semibold" />.
               </p>
-              <div className="flex gap-2">
-                <Button variant="primary" className="h-11" onClick={clearSession}>
-                  Issue next product
-                </Button>
-                <Button variant="ghost" className="h-11" onClick={() => router.push("/stock")}>
-                  Back to Stock
-                </Button>
-              </div>
-            </div>
+            </Banner>
           ) : null}
         </div>
 
         <aside className="wc-receive-side">
-          <div className="rounded-[var(--r-lg)] border border-[var(--border-strong)] bg-[var(--surface)] p-4 text-[12px]">
-            <h3 className="wc-section-label mb-2">Source</h3>
-            <p className="text-[var(--foreground)]">Main · Default</p>
-            <p className="mt-1 text-[var(--muted)]">
-              Stock out always draws from the operational MAIN / DEFAULT storage. Transit storage is never a
-              stock-out source.
-            </p>
-            <h3 className="wc-section-label mb-2 mt-4">How it works</h3>
+          {line ? (
+            <div className="flex flex-col gap-3 rounded-[var(--r-lg)] border border-[var(--border-strong)] bg-[var(--surface)] p-4">
+              <div>
+                <div className="wc-section-label">{t("task.selectedItem")}</div>
+                <div className="text-[14px] font-semibold">{line.name}</div>
+                <div className="mono text-[12px] text-[var(--muted)]">{line.sku}</div>
+              </div>
+              <div className="flex flex-col gap-1">
+                <span className="text-[12px] text-[var(--muted)]">{t("task.atDefault", { storage: DEFAULT_STORAGE_LABEL })}</span>
+                {storage.status === "ready" ? (
+                  <StockTriad onHand={storage.onHand} reserved={storage.reserved} available={storage.available} compact />
+                ) : (
+                  <p className="text-[12px] text-[var(--muted)]">
+                    {storage.status === "error" ? t("task.balanceUnavailable") : t("task.balanceLoading")}
+                  </p>
+                )}
+              </div>
+            </div>
+          ) : null}
+          <div className="rounded-[var(--r-lg)] border border-[var(--border-strong)] bg-[var(--surface)] p-4 text-[13px]">
+            <StorageRow direction="out" />
+            <h2 className="wc-section-label mb-2 mt-4">{t("task.howItWorks")}</h2>
             <ul className="flex list-disc flex-col gap-1 pl-4 text-[var(--muted)]">
-              <li>Pick the product and the strategy first — before any scanning.</li>
-              <li>FEFO issues the stock closest to expiry first; FIFO issues the oldest-received stock first.</li>
-              <li>Each scan verifies that the physical item matches the selected product.</li>
-              <li>Scanning only counts locally. Nothing is deducted until you Save.</li>
-              <li>Save is one backend-confirmed deduction for the whole session.</li>
-              <li>Expired lots are never selected, even by FEFO.</li>
+              <li>{t("task.outHow1")}</li>
+              <li>{t("task.outHow2")}</li>
+              <li>{t("task.outHow3")}</li>
+              <li>{t("task.outHow4")}</li>
+              <li>{t("task.outHow5")}</li>
             </ul>
           </div>
 
-          <label className="flex items-center gap-[6px] text-[11px] text-[var(--muted)]">
+          <label className="flex items-center gap-[6px] text-[12px] text-[var(--muted)]">
             <input type="checkbox" checked={soundOn} onChange={(e) => setSoundOn(e.target.checked)} />
-            audible scan feedback
+            {t("task.audibleFeedback")}
           </label>
         </aside>
       </div>
+
+      {line ? (
+        <ReviewSheet
+          open={reviewOpen}
+          onOpenChange={setReviewOpen}
+          title={t("task.reviewOutTitle")}
+          description={t("review.checkBefore")}
+          confirmLabel={t("task.confirmMinus", { q: formatQtyDelta(`-${countQty}`) })}
+          onConfirm={save}
+          pending={saveMut.isPending}
+          confirmDisabled={!draft.payload || line.count <= 0 || mismatch}
+          error={reviewError ? <Banner tone="danger" title={reviewError}>{t("review.failedKept")}</Banner> : undefined}
+          returnFocusRef={scanner.inputProps.ref}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="inline-flex items-center gap-1 rounded-[var(--r-sm)] bg-[var(--warning-subtle)] px-2 py-1 text-[12px] font-semibold text-[var(--warning)]">
+              <ArrowUpFromLine aria-hidden className="h-3.5 w-3.5" />
+              {t("task.removesStock")}
+            </span>
+            <span className="mono text-[12px] text-[var(--muted)]">{line.sku}</span>
+          </div>
+          <div>
+            <div className="text-[15px] font-semibold">{line.name}</div>
+            <div className="text-[26px] font-semibold">
+              <QuantityDisplay value={`-${countQty}`} signed />
+            </div>
+          </div>
+          <div className="grid grid-cols-1 gap-2 min-[480px]:grid-cols-2">
+            <ReviewCell label={t("task.source")}>
+              <span className="mono">{DEFAULT_STORAGE_LABEL}</span>
+            </ReviewCell>
+            <ReviewCell label={t("task.onHandAt", { storage: DEFAULT_STORAGE_LABEL })}>
+              {storage.status === "ready" && afterQty ? (
+                <QuantityChange before={storage.onHand} after={afterQty} estimate />
+              ) : (
+                <span className="text-[var(--muted)]">—</span>
+              )}
+            </ReviewCell>
+          </div>
+          <ReviewCell label={t("task.strategy")}>{strategyLabel(line.strategy)}</ReviewCell>
+          <LotPreview storage={storage} strategy={line.strategy} />
+          {line.remark ? <ReviewCell label={t("task.noteLabel")}>{line.remark}</ReviewCell> : null}
+          <p className="text-[12px] text-[var(--muted)]">{t("review.estimateNote")}</p>
+        </ReviewSheet>
+      ) : null}
 
       <CameraBarcodeScanner
         open={cameraOpen}
@@ -581,7 +627,7 @@ export function StockOutConsole() {
           setCameraOpen(v);
           if (!v) requestAnimationFrame(() => scanner.focus());
         }}
-        title="Scan an item"
+        title={t("task.scanAnItem")}
         onDecode={(value) => {
           setCameraOpen(false);
           void handleScan(value);

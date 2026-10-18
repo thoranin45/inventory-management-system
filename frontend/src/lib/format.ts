@@ -1,11 +1,26 @@
 import { isDecimalString, type DecimalString } from "./decimal";
 
+/** The real minus sign (U+2212) the frozen Concept B spec uses for quantities. */
+export const MINUS = "−";
+
+/** Fractional digits of an inventory quantity (the backend stores 3). */
+export const QTY_SCALE = 3;
+
+const group = (int: string) => int.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+
+/** True when a quantity carries more decimals than the supported scale (shown in full, never rounded). */
+export function qtyScaleAnomaly(value: DecimalString | number | null | undefined): boolean {
+  if (value === null || value === undefined) return false;
+  const raw = typeof value === "number" ? String(value) : value.trim();
+  return isDecimalString(raw) && (raw.split(".")[1]?.length ?? 0) > QTY_SCALE;
+}
+
 /**
- * Approved 2-decimal presentation for quantities & money.
- *
- * Operates purely on the string form — no parseFloat, no precision loss.
- * Truncation/rounding: we round half-up on the 3rd fractional digit for
- * display only; the raw value is always preserved by callers.
+ * Concept B inventory quantity: fixed 3 decimals, EXACT. Pure string handling
+ * (no parseFloat): shorter values are padded ("5" → "5.000", "0.001" →
+ * "0.001"); nothing is ever rounded or truncated, so a value with more than
+ * 3 decimals keeps every digit (see `qtyScaleAnomaly`). Negative values use
+ * the real minus sign. Not for money (`formatMoney`) or counts (`formatCount`).
  */
 export function formatQty(value: DecimalString | number | null | undefined): string {
   if (value === null || value === undefined || value === "") return "—";
@@ -14,9 +29,36 @@ export function formatQty(value: DecimalString | number | null | undefined): str
 
   const neg = raw.startsWith("-");
   const abs = neg ? raw.slice(1) : raw;
+  const [int, frac = ""] = abs.split(".");
+  const digits = frac.length >= QTY_SCALE ? frac : frac.padEnd(QTY_SCALE, "0");
+  const zero = /^0*$/.test(int + frac);
+  return (neg && !zero ? MINUS : "") + group(int) + "." + digits;
+}
+
+/**
+ * A quantity change with an explicit sign: "+12.000", "−0.005", "0.000"
+ * (zero has no sign). Exact, like `formatQty`.
+ */
+export function formatQtyDelta(value: DecimalString | null | undefined): string {
+  const q = formatQty(value);
+  if (q === "—" || !isDecimalString((value ?? "").trim())) return q;
+  if (q.startsWith(MINUS) || /^[0.,]+$/.test(q)) return q;
+  return "+" + q;
+}
+
+/**
+ * Money: 2 decimals, rounded half-up on the 3rd digit (string/BigInt maths),
+ * with the currency symbol. Unchanged by the Concept B quantity policy.
+ */
+export function formatMoney(value: DecimalString | number | null | undefined, symbol = "฿"): string {
+  if (value === null || value === undefined || value === "") return "—";
+  const raw = typeof value === "number" ? String(value) : value.trim();
+  if (!isDecimalString(raw)) return symbol + String(value);
+
+  const neg = raw.startsWith("-");
+  const abs = neg ? raw.slice(1) : raw;
   let [int, frac = ""] = abs.split(".");
 
-  // round to 2 dp, half-up, using string/BigInt math
   if (frac.length > 2) {
     const keep = frac.slice(0, 2);
     const nextDigit = frac.charCodeAt(2) - 48;
@@ -29,13 +71,8 @@ export function formatQty(value: DecimalString | number | null | undefined): str
     frac = (frac + "00").slice(0, 2);
   }
 
-  const intGrouped = int.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  return (neg && intGrouped !== "0" ? "-" : "") + intGrouped + "." + frac;
-}
-
-export function formatMoney(value: DecimalString | number | null | undefined, symbol = "฿"): string {
-  const q = formatQty(value);
-  return q === "—" ? q : symbol + q;
+  const intGrouped = group(int);
+  return symbol + (neg && intGrouped !== "0" ? "-" : "") + intGrouped + "." + frac;
 }
 
 /** Whole-number counts (queues, badges) — never decimals. */

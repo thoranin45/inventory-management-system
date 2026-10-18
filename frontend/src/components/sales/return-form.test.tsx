@@ -392,11 +392,11 @@ describe("ReturnDrawer — the running total follows the quantity rule (over-pre
     open();
     await userEvent.type(qtyFor(/Green Tea 200g/), "1.234");
     expect(rawTotal()).toBe("1.234");
-    expect(returning()).toBe("Returning 1.23");
+    expect(returning()).toBe("Returning 1.234"); // D-R4-1: exact 3 dp (was the flagged 1.23)
     await userEvent.clear(qtyFor(/Green Tea 200g/));
     await userEvent.type(qtyFor(/Green Tea 200g/), "1.5");
     expect(rawTotal()).toBe("1.500");
-    expect(returning()).toBe("Returning 1.50");
+    expect(returning()).toBe("Returning 1.500");
   });
 
   it("correcting 0.0009 to 0.009 restores the total and sends the corrected value as typed", async () => {

@@ -2,18 +2,22 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Camera, ChevronRight, ScanLine, TriangleAlert } from "lucide-react";
+import { Camera, ScanLine, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
+import { Banner, EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { ExpiryBadge } from "@/components/ui/expiry-badge";
 import { QuantityDisplay } from "@/components/ui/quantity-display";
+import { ReviewCell, ReviewSheet } from "@/components/ui/review-sheet";
 import { ProgressRing } from "@/components/work/progress-ring";
 import { CameraBarcodeScanner } from "@/components/work/camera-barcode-scanner";
 import { useScanner } from "@/components/work/use-scanner";
 import { isApiError } from "@/lib/api/errors";
 import { compareDecimals, subtractDecimals, sumDecimals } from "@/lib/decimal";
+import { formatQtyDelta } from "@/lib/format";
+import { useT } from "@/lib/i18n/client";
 import { resolveBarcode, useProductLookup } from "@/lib/query/sales";
 import { useBatchExpiryMap, useReceiveTransfer, useTransfer, useWarehouseNames } from "@/lib/query/transfers";
 import { useTransferReceiptDraft } from "@/lib/transfer-receipt-draft";
@@ -29,6 +33,7 @@ import { TransferRoute } from "./transfer-route";
 import { TransferReceiveLine, validateTransferReceiveLine } from "./transfer-receive-line";
 
 export function TransferReceivingConsole({ transferId }: { transferId: number }) {
+  const t = useT();
   const detailQ = useTransfer(transferId);
   const detail = detailQ.data;
 
@@ -46,6 +51,9 @@ export function TransferReceivingConsole({ transferId }: { transferId: number })
   const [sessionReceipts, setSessionReceipts] = React.useState<TransferReceiptResponse[]>([]);
   const [highlightItemId, setHighlightItemId] = React.useState<number | null>(null);
   const [cameraOpen, setCameraOpen] = React.useState(false);
+  // R4 review before commit: opening it sends nothing; Confirm runs `submit`
+  const [reviewOpen, setReviewOpen] = React.useState(false);
+  const openerRef = React.useRef<HTMLButtonElement | null>(null);
 
   const detailRef = React.useRef(detail);
   React.useEffect(() => {
@@ -54,54 +62,55 @@ export function TransferReceivingConsole({ transferId }: { transferId: number })
 
   /* barcode assist — read-only line identification, never a receive mutation.
      Shared verbatim by the hardware/manual scanner AND the camera. */
-  const handleAssistScan = React.useCallback(async (code: string) => {
-    try {
-      const res = await resolveBarcode(code, "stock_in");
-      const matches = (detailRef.current?.items ?? []).filter((i) => i.product_id === res.product.id);
-      if (matches.length === 0) {
-        toast.error(`${res.product.product_name} is not on this transfer.`);
-        return;
+  const handleAssistScan = React.useCallback(
+    async (code: string) => {
+      try {
+        const res = await resolveBarcode(code, "stock_in");
+        const matches = (detailRef.current?.items ?? []).filter((i) => i.product_id === res.product.id);
+        if (matches.length === 0) {
+          toast.error(t("receive.notOnTransfer", { name: res.product.product_name }));
+          return;
+        }
+        const open = matches.find(
+          (i) => compareDecimals(subtractDecimals(i.dispatched_quantity ?? "0", i.received_quantity ?? "0", 3), "0") > 0,
+        );
+        if (!open) {
+          toast.info(t("receive.fullyReceived", { name: res.product.product_name }));
+          return;
+        }
+        if (matches.length > 1) toast.info(t("receive.manyLines", { name: res.product.product_name, n: matches.length }));
+        setHighlightItemId(open.id);
+        const el = document.getElementById(`trl-${open.id}-qty`);
+        el?.scrollIntoView({ block: "center", behavior: "smooth" });
+        (el as HTMLInputElement | null)?.focus();
+      } catch (e) {
+        toast.error(isApiError(e) && e.status === 404 ? t("receive.unknownBarcode", { code }) : t("receive.resolveFailed"));
       }
-      const open = matches.find(
-        (i) => compareDecimals(subtractDecimals(i.dispatched_quantity ?? "0", i.received_quantity ?? "0", 3), "0") > 0,
-      );
-      if (!open) {
-        toast.info(`${res.product.product_name} is already fully received.`);
-        return;
-      }
-      if (matches.length > 1) toast.info(`${res.product.product_name} has ${matches.length} lines — jumped to the first with stock in transit.`);
-      setHighlightItemId(open.id);
-      const el = document.getElementById(`trl-${open.id}-qty`);
-      el?.scrollIntoView({ block: "center", behavior: "smooth" });
-      (el as HTMLInputElement | null)?.focus();
-    } catch (e) {
-      toast.error(isApiError(e) && e.status === 404 ? `Unknown barcode ${code}.` : "Could not resolve that barcode.");
-    }
-  }, []);
+    },
+    [t],
+  );
 
-  const scanner = useScanner({ onScan: handleAssistScan });
+  // the assist scanner is off while the review is open
+  const scanner = useScanner({ onScan: handleAssistScan, disabled: reviewOpen });
 
-  if (detailQ.isLoading) return <LoadingState label="Loading receiving console…" />;
+  if (detailQ.isLoading) return <LoadingState label={t("receive.loading")} />;
   if (detailQ.isError) return <ErrorState error={detailQ.error} onRetry={() => void detailQ.refetch()} />;
-  if (!detail) return <EmptyState message="Transfer not found." />;
+  if (!detail) return <EmptyState message={t("receive.transferNotFound")} />;
 
   const status = detail.status.toUpperCase();
   const receivable = (RECEIVABLE_TRANSFER_STATUSES as readonly string[]).includes(status) && !detail.legacy_completed;
-  const wh = (id: number) => whNames[id] ?? `Warehouse #${id}`;
+  const wh = (id: number) => whNames[id] ?? t("receive.warehouseFallback", { id });
 
   if (!receivable) {
     return (
       <div className="flex flex-col gap-4">
-        <Breadcrumb transferNumber={detail.transfer_number} />
         <div className="rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--surface)] p-6">
           <div className="flex items-center gap-2">
             <StatusBadge status={status} />
-            <span className="text-[13px] text-[var(--muted)]">
-              {detail.transfer_number} is not in transit — nothing to receive.
-            </span>
+            <span className="text-[13px] text-[var(--muted)]">{t("receive.transferNotReceivable", { number: detail.transfer_number })}</span>
           </div>
           <Button asChild className="mt-4" variant="secondary">
-            <Link href="/transfers">Back to transfers</Link>
+            <Link href="/transfers">{t("receive.backToTransfers")}</Link>
           </Button>
         </div>
       </div>
@@ -138,43 +147,65 @@ export function TransferReceivingConsole({ transferId }: { transferId: number })
       { id: transferId, payload: draft.payload },
       {
         onSuccess: (data) => {
+          setReviewOpen(false);
           setSessionReceipts((prev) => addReceiptOnce(prev, data));
-          toast.success(`Receipt ${data.receipt_number.replace(/^TRR-/, "").slice(0, 8)}… recorded`, {
-            description:
-              data.transfer.status === "COMPLETED" ? "Transfer fully received." : "Transfer partially received.",
+          toast.success(t("receive.receiptRecorded", { ref: data.receipt_number.replace(/^TRR-/, "").slice(0, 8) }), {
+            description: t(data.transfer.status === "COMPLETED" ? "receive.transferFull" : "receive.transferPartial"),
           });
           setHighlightItemId(null);
           void detailQ.refetch();
         },
         onError: (error, isMismatch) => {
-          if (isMismatch) return;
+          if (isMismatch) {
+            setReviewOpen(false); // the recovery banner takes over
+            return;
+          }
           const msg = isApiError(error) ? error.message : "";
           const rid = isApiError(error) ? error.requestId : undefined;
-          const copy = TRANSFER_ERROR_COPY[msg] ?? (isApiError(error) ? error.userMessage : "The receipt was rejected.");
-          toast.error("Receipt rejected", { description: rid ? `${copy} · Request ${rid}` : copy });
+          const copy = TRANSFER_ERROR_COPY[msg] ?? (isApiError(error) ? error.userMessage : t("receive.rejectedFallback"));
+          toast.error(t("receive.rejected"), { description: rid ? `${copy} · ${t("task.requestRef", { id: rid })}` : copy });
         },
       },
     );
   };
 
+  const openReview = (e: React.MouseEvent<HTMLButtonElement>) => {
+    if (!canReceive) return;
+    openerRef.current = e.currentTarget;
+    receive.reset?.();
+    setReviewOpen(true);
+  };
+
   const receiveError =
     receive.isError && isApiError(receive.error) && receive.error.message !== KEY_MISMATCH_MESSAGE ? receive.error : null;
+  const errorBlock = receiveError ? (
+    <Banner tone="danger" title={TRANSFER_ERROR_COPY[receiveError.message] ?? receiveError.userMessage}>
+      {receiveError.requestId ? (
+        <span className="text-[12px] text-[var(--muted)]">
+          {t("common.requestId")} <span className="mono select-all">{receiveError.requestId}</span>
+        </span>
+      ) : null}
+    </Banner>
+  ) : null;
+
+  const included = detail.items.filter((it) => {
+    const q = (draft.lines[it.id]?.quantity ?? "").trim();
+    return q !== "" && Number(q) > 0 && !validateTransferReceiveLine(q, figs(it).outstanding);
+  });
 
   return (
     <div className="flex flex-col gap-4">
-      <Breadcrumb transferNumber={detail.transfer_number} />
-
       <div className="wc-receive-layout">
         <div className="wc-receive-main flex min-w-0 flex-col gap-3">
           <div className="wc-work-head">
             <div>
-              <div className="mono text-[16px] font-bold">{detail.transfer_number}</div>
-              <div className="text-[12px] text-[var(--muted)]">
-                {wh(detail.source_warehouse_id)} → {wh(detail.destination_warehouse_id)} · {detail.items.length} lines
+              <h1 className="mono text-[18px] font-semibold">{detail.transfer_number}</h1>
+              <div className="text-[13px] text-[var(--muted)]">
+                {wh(detail.source_warehouse_id)} → {wh(detail.destination_warehouse_id)} · {t("receive.linesCount", { n: detail.items.length })}
               </div>
             </div>
             <div className="ml-auto">
-              <ProgressRing done={totals.received} total={totals.total} label="Received to date" />
+              <ProgressRing done={totals.received} total={totals.total} label={t("receive.receivedToDate")} />
             </div>
           </div>
 
@@ -191,16 +222,16 @@ export function TransferReceivingConsole({ transferId }: { transferId: number })
             <ScanLine aria-hidden className="h-4 w-4 flex-none text-[var(--muted)]" />
             <input
               {...scanner.inputProps}
-              placeholder="Scan a barcode to jump to its line…"
-              aria-label="Barcode assist"
-              className="min-h-11 w-full min-w-0 bg-transparent text-[13px] outline-none"
+              placeholder={t("receive.assistPlaceholder")}
+              aria-label={t("receive.assistLabel")}
+              className="min-h-11 w-full min-w-0 bg-transparent text-[16px] outline-none min-[768px]:text-[13px]"
             />
             <Button
               type="button"
               variant="secondary"
               size="icon"
-              aria-label="Scan with camera"
-              title="Scan with the device camera"
+              aria-label={t("task.scanWithCamera")}
+              title={t("task.scanWithCameraTitle")}
               onClick={() => {
                 if (typeof document !== "undefined") (document.activeElement as HTMLElement | null)?.blur();
                 setCameraOpen(true);
@@ -233,33 +264,31 @@ export function TransferReceivingConsole({ transferId }: { transferId: number })
 
         <aside className="wc-receive-side">
           <div className="rounded-[var(--r-lg)] border border-[var(--border-strong)] bg-[var(--surface)] p-4">
-            <h3 className="wc-section-label mb-2">This receipt</h3>
+            <h2 className="wc-section-label mb-2">{t("receive.thisReceipt")}</h2>
 
             {mismatch ? (
-              <div
-                role="alert"
-                className="mb-3 flex flex-col gap-2 rounded-[var(--r-sm)] border border-[color-mix(in_srgb,var(--danger)_35%,transparent)] bg-[var(--danger-subtle)] p-2 text-[12px]"
-              >
-                <span className="flex items-start gap-2 text-[var(--danger)]">
-                  <TriangleAlert aria-hidden className="h-4 w-4 flex-none" />
-                  {TRANSFER_ERROR_COPY[KEY_MISMATCH_MESSAGE]}
-                </span>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => {
-                    draft.startNewDraft();
-                    submission.clearMismatch();
-                  }}
-                >
-                  Start a new receipt
-                </Button>
-              </div>
+              <Banner
+                tone="danger"
+                title={TRANSFER_ERROR_COPY[KEY_MISMATCH_MESSAGE]}
+                className="mb-3"
+                actions={
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => {
+                      draft.startNewDraft();
+                      submission.clearMismatch();
+                    }}
+                  >
+                    {t("receive.startNew")}
+                  </Button>
+                }
+              />
             ) : null}
 
             <div className="flex flex-col gap-1 text-[12px]">
               {selectedCount === 0 ? (
-                <p className="text-[var(--muted)]">Enter a quantity on one or more lines to build a receipt.</p>
+                <p className="text-[var(--muted)]">{t("receive.enterQty")}</p>
               ) : (
                 detail.items.map((it) => {
                   const q = (draft.lines[it.id]?.quantity ?? "").trim();
@@ -272,7 +301,7 @@ export function TransferReceivingConsole({ transferId }: { transferId: number })
                         {it.batch_id != null ? ` · b#${it.batch_id}` : ""}
                       </span>
                       <span className={bad ? "text-[var(--danger)]" : "font-medium"}>
-                        {bad ? "invalid" : <QuantityDisplay value={q} />}
+                        {bad ? t("receive.invalid") : <QuantityDisplay value={q} />}
                       </span>
                     </div>
                   );
@@ -281,63 +310,43 @@ export function TransferReceivingConsole({ transferId }: { transferId: number })
             </div>
 
             <div className="mt-3 flex items-center gap-3 border-t border-[var(--border)] pt-3">
-              <ProgressRing
-                done={sumDecimals([totals.received, receivingNow], 3)}
-                total={totals.total}
-                size={40}
-                label="Received after this receipt"
-              />
+              <ProgressRing done={sumDecimals([totals.received, receivingNow], 3)} total={totals.total} size={40} label={t("receive.receivedAfter")} />
               <div className="text-[12px]">
                 <div>
-                  Receiving now <QuantityDisplay value={receivingNow} className="font-semibold" />
+                  {t("receive.receivingNow")} <QuantityDisplay value={receivingNow} className="font-semibold" />
                 </div>
-                <div className="text-[var(--muted)]">
-                  {selectedCount} line{selectedCount === 1 ? "" : "s"} in this receipt
-                </div>
+                <div className="text-[var(--muted)]">{t("receive.linesInReceipt", { n: selectedCount })}</div>
               </div>
             </div>
 
-            {receiveError ? (
-              <p role="alert" className="mt-3 rounded-[var(--r-sm)] bg-[var(--danger-subtle)] p-2 text-[12px] text-[var(--danger)]">
-                {TRANSFER_ERROR_COPY[receiveError.message] ?? receiveError.userMessage}
-                {receiveError.requestId ? (
-                  <span className="mt-1 block text-[11px] text-[var(--muted)]">
-                    Request ID: <span className="mono select-all">{receiveError.requestId}</span>
-                  </span>
-                ) : null}
-              </p>
-            ) : null}
+            {receiveError && !reviewOpen ? <div className="mt-3">{errorBlock}</div> : null}
 
-            <Button variant="primary" className="mt-3 h-11 w-full" disabled={!canReceive} onClick={submit}>
-              {receive.isPending ? "Submitting…" : "Receive"}
+            <Button variant="primary" className="mt-3 h-11 w-full" disabled={!canReceive} onClick={openReview}>
+              <ShieldCheck aria-hidden className="h-4 w-4" />
+              {receive.isPending ? t("receive.submitting") : t("receive.reviewReceipt")}
             </Button>
-            <p className="mt-2 text-[11px] text-[var(--muted)]">
-              Partial receipts are allowed — outstanding stock stays in transit until every line is fully received, when
-              the transfer completes automatically. The Idempotency-Key is generated once and reused on retry.
-            </p>
+            <p className="mt-2 text-[12px] text-[var(--muted)]">{t("receive.transferPartialNote")}</p>
           </div>
 
           <div className="wc-receive-history">
             <section>
-              <h3 className="wc-section-label mb-2">Receipts this session</h3>
+              <h3 className="wc-section-label mb-2">{t("receive.historyTitle")}</h3>
               <div className="rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--surface)] p-3">
                 {sessionReceipts.length === 0 ? (
-                  <p className="text-[12px] text-[var(--muted)]">No receipts recorded in this session yet.</p>
+                  <p className="text-[12px] text-[var(--muted)]">{t("receive.historyEmpty")}</p>
                 ) : (
                   <ul className="flex flex-col divide-y divide-[var(--border)]">
                     {sessionReceipts.map((r) => (
                       <li key={r.receipt_number} className="py-[9px] text-[12px] first:pt-0 last:pb-0">
                         <div className="flex flex-wrap items-baseline justify-between gap-2">
                           <span className="mono font-medium">{r.receipt_number}</span>
-                          <span className="text-[var(--muted)]">→ {r.transfer.status}</span>
+                          <StatusBadge status={r.transfer.status} />
                         </div>
                       </li>
                     ))}
                   </ul>
                 )}
-                <p className="mt-2 border-t border-[var(--border)] pt-2 text-[11px] text-[var(--faint)]">
-                  The API does not return individual historical transfer receipts.
-                </p>
+                <p className="mt-2 border-t border-[var(--border)] pt-2 text-[12px] text-[var(--faint)]">{t("receive.transferHistoryNote")}</p>
               </div>
             </section>
           </div>
@@ -346,12 +355,59 @@ export function TransferReceivingConsole({ transferId }: { transferId: number })
 
       <div className="wc-receive-dock">
         <div className="text-[12px] font-semibold">
-          {selectedCount} line{selectedCount === 1 ? "" : "s"} · <QuantityDisplay value={receivingNow} />
+          {t("receive.linesInReceipt", { n: selectedCount })} · <QuantityDisplay value={receivingNow} />
         </div>
-        <Button variant="primary" className="h-11 flex-none px-5" disabled={!canReceive} onClick={submit}>
-          {receive.isPending ? "Submitting…" : "Receive"}
+        <Button variant="primary" className="h-11 flex-none px-5" disabled={!canReceive} onClick={openReview}>
+          {receive.isPending ? t("receive.submitting") : t("receive.review")}
         </Button>
       </div>
+
+      <ReviewSheet
+        open={reviewOpen}
+        onOpenChange={setReviewOpen}
+        title={t("receive.confirmTitle", { number: detail.transfer_number })}
+        description={t("review.checkBefore")}
+        confirmLabel={t("receive.confirmReceipt", { q: formatQtyDelta(receivingNow) })}
+        onConfirm={submit}
+        pending={receive.isPending}
+        confirmDisabled={!draft.payload || mismatch}
+        error={errorBlock ? <>{errorBlock}<p className="mt-1 text-[12px] text-[var(--muted)]">{t("review.failedKept")}</p></> : undefined}
+        returnFocusRef={openerRef}
+      >
+        <ul className="flex flex-col divide-y divide-[var(--border)] rounded-[var(--r-sm)] border border-[var(--border)]">
+          {included.map((it) => {
+            const q = (draft.lines[it.id]?.quantity ?? "").trim();
+            const product = lookup[it.product_id];
+            const info = it.batch_id != null ? batchExpiry[it.batch_id] : undefined;
+            return (
+              <li key={it.id} className="flex flex-col gap-1 px-3 py-2">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="min-w-0 truncate text-[13px] font-semibold">{product?.product_name ?? `#${it.product_id}`}</span>
+                  <QuantityDisplay value={q} signed className="font-semibold text-[var(--success)]" />
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-2 text-[12px] text-[var(--muted)]">
+                  <span className="mono">
+                    {[product?.sku, it.batch_id != null ? t("receive.batchFallback", { id: it.batch_id }) : null]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </span>
+                  {info ? <ExpiryBadge days={info.days_to_expiry} isoDate={info.expiry_date} /> : null}
+                  <span>
+                    {t("receive.inTransitAfter")} <QuantityDisplay value={subtractDecimals(figs(it).outstanding, q, 3)} />
+                  </span>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+        <div className="grid grid-cols-1 gap-2 min-[480px]:grid-cols-2">
+          <ReviewCell label={t("receive.receivingNow")}>
+            <QuantityDisplay value={receivingNow} />
+          </ReviewCell>
+          <ReviewCell label={t("receive.destination")}>{wh(detail.destination_warehouse_id)}</ReviewCell>
+        </div>
+        <p className="text-[12px] text-[var(--muted)]">{t("receive.serverChecks")}</p>
+      </ReviewSheet>
 
       <CameraBarcodeScanner
         open={cameraOpen}
@@ -359,26 +415,12 @@ export function TransferReceivingConsole({ transferId }: { transferId: number })
           setCameraOpen(v);
           if (!v) scanner.focus();
         }}
-        title="Scan a barcode"
+        title={t("receive.scanABarcode")}
         onDecode={(value) => {
           setCameraOpen(false);
           void handleAssistScan(value);
         }}
       />
     </div>
-  );
-}
-
-function Breadcrumb({ transferNumber }: { transferNumber: string }) {
-  return (
-    <nav className="flex items-center gap-1 text-[12px] text-[var(--muted)]" aria-label="Breadcrumb">
-      <Link href="/transfers" className="font-medium hover:text-[var(--foreground)]">
-        Transfers
-      </Link>
-      <ChevronRight aria-hidden className="h-3 w-3" />
-      <span className="mono text-[var(--foreground)]">{transferNumber}</span>
-      <ChevronRight aria-hidden className="h-3 w-3" />
-      <span>Receive</span>
-    </nav>
   );
 }

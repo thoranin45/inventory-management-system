@@ -47,6 +47,12 @@ beforeEach(() => {
 
 const sugarQty = () => screen.getAllByLabelText("Receive now")[1]; // coffee, sugar, tea order
 const coffeeQty = () => screen.getAllByLabelText("Receive now")[0];
+const reviewBtn = () => screen.getAllByRole("button", { name: /^Review receipt$/i })[0];
+// R4: Review opens the sheet (sends nothing); only Confirm posts
+async function reviewAndConfirm(user: ReturnType<typeof userEvent.setup>) {
+  if (!screen.queryByRole("dialog")) await user.click(reviewBtn());
+  await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^confirm receipt/i }));
+}
 
 describe("ReceivingConsole — line rendering + guards", () => {
   it("renders a receive line per PO item with ordered / received / remaining", () => {
@@ -54,7 +60,7 @@ describe("ReceivingConsole — line rendering + guards", () => {
     expect(screen.getByText("Arabica Whole Bean 1kg")).toBeInTheDocument();
     expect(screen.getByText("Refined Sugar Sack 25kg")).toBeInTheDocument();
     expect(screen.getAllByLabelText("Receive now")).toHaveLength(3);
-    expect(screen.getAllByRole("button", { name: /^Receive$/i })[0]).toBeDisabled();
+    expect(reviewBtn()).toBeDisabled();
   });
 
   it("blocks a quantity above the line's remaining (client guard, backend still authoritative)", async () => {
@@ -62,7 +68,7 @@ describe("ReceivingConsole — line rendering + guards", () => {
     render(<ReceivingConsole poId={1} />);
     await user.type(sugarQty(), "99");
     expect(screen.getByText(/Only 15.000 remaining/i)).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: /^Receive$/i })[0]).toBeDisabled();
+    expect(reviewBtn()).toBeDisabled();
   });
 });
 
@@ -73,9 +79,8 @@ describe("ReceivingConsole — partial receive with a persisted Idempotency-Key"
     render(<ReceivingConsole poId={1} />);
 
     await user.type(sugarQty(), "5");
-    const receiveBtn = screen.getAllByRole("button", { name: /^Receive$/i })[0];
-    expect(receiveBtn).toBeEnabled();
-    await user.click(receiveBtn);
+    expect(reviewBtn()).toBeEnabled();
+    await reviewAndConfirm(user);
 
     expect(receiveMutate).toHaveBeenCalledTimes(1);
     const [args] = receiveMutate.mock.calls[0];
@@ -85,7 +90,7 @@ describe("ReceivingConsole — partial receive with a persisted Idempotency-Key"
 
     expect(await screen.findByText(purchaseOrderReceiveResponse.data.receipt_number)).toBeInTheDocument();
     // draft cleared → Receive disabled again
-    expect(screen.getAllByRole("button", { name: /^Receive$/i })[0]).toBeDisabled();
+    expect(reviewBtn()).toBeDisabled();
   });
 
   it("a multi-line receipt sends one atomic payload sorted by product_id", async () => {
@@ -99,7 +104,7 @@ describe("ReceivingConsole — partial receive with a persisted Idempotency-Key"
     await user.type(screen.getAllByLabelText("Expiry date")[0], "2027-06-01");
     await user.type(sugarQty(), "5");
 
-    await user.click(screen.getAllByRole("button", { name: /^Receive$/i })[0]);
+    await reviewAndConfirm(user);
     const [args] = receiveMutate.mock.calls[0];
     expect(args.payload.items).toEqual([
       { product_id: 1, quantity: "2.000", lot_no: "LOT-CF", mfg_date: "2026-06-01", expiry_date: "2027-06-01" },
@@ -122,7 +127,7 @@ describe("ReceivingConsole — backend rejections", () => {
     );
     render(<ReceivingConsole poId={1} />);
     await user.type(sugarQty(), "5");
-    await user.click(screen.getAllByRole("button", { name: /^Receive$/i })[0]);
+    await reviewAndConfirm(user);
 
     // surfaced (message + request id), nothing recorded, no fake progress
     expect(toast.error).toHaveBeenCalledWith(
@@ -142,7 +147,7 @@ describe("ReceivingConsole — backend rejections", () => {
     );
     render(<ReceivingConsole poId={1} />);
     await user.type(sugarQty(), "5");
-    await user.click(screen.getAllByRole("button", { name: /^Receive$/i })[0]);
+    await reviewAndConfirm(user);
 
     const alert = await screen.findByRole("alert");
     expect(within(alert).getByText(/already submitted with different quantities/i)).toBeInTheDocument();
@@ -166,7 +171,7 @@ describe("ReceivingConsole — non-receivable PO", () => {
 /* ------------------- R3.0 characterization (pre-refactor) ------------------- */
 
 describe("ReceivingConsole — characterization (R3.0)", () => {
-  const receiveButton = () => screen.getAllByRole("button", { name: /^Receive$/i })[0];
+  const receiveButton = reviewBtn;
   const field = (id: string) => document.getElementById(id) as HTMLInputElement;
   const MISMATCH = "Idempotency-Key already used with a different payload";
 
@@ -174,7 +179,7 @@ describe("ReceivingConsole — characterization (R3.0)", () => {
     const user = userEvent.setup();
     render(<ReceivingConsole poId={1} />);
     await user.type(sugarQty(), "5.5");
-    await user.click(receiveButton());
+    await reviewAndConfirm(user);
     expect(receiveMutate.mock.calls[0][0]).toEqual({
       id: 1,
       idempotencyKey: expect.stringMatching(/^po-rcpt-/),
@@ -192,7 +197,7 @@ describe("ReceivingConsole — characterization (R3.0)", () => {
     expect(receiveButton()).toBeDisabled();
     fireEvent.change(field("rl-1-exp"), { target: { value: "2027-01-01" } });
     expect(receiveButton()).toBeEnabled();
-    await user.click(receiveButton());
+    await reviewAndConfirm(user);
     expect(receiveMutate.mock.calls[0][0].payload).toEqual({
       items: [{ product_id: 1, quantity: "2.000", lot_no: "LOT-9", mfg_date: "2026-01-01", expiry_date: "2027-01-01" }],
     });
@@ -211,8 +216,8 @@ describe("ReceivingConsole — characterization (R3.0)", () => {
     receiveMutate.mockImplementation((_a, opts) => opts.onError(new ApiError({ status: 503, message: "down", requestId: "r1" })));
     render(<ReceivingConsole poId={1} />);
     await user.type(sugarQty(), "5");
-    await user.click(receiveButton());
-    await user.click(receiveButton());
+    await reviewAndConfirm(user);
+    await reviewAndConfirm(user);
     expect(receiveMutate).toHaveBeenCalledTimes(2);
     expect(receiveMutate.mock.calls[1][0]).toEqual(receiveMutate.mock.calls[0][0]);
     expect(sugarQty()).toHaveValue("5");
@@ -222,12 +227,12 @@ describe("ReceivingConsole — characterization (R3.0)", () => {
     const user = userEvent.setup();
     const first = render(<ReceivingConsole poId={1} />);
     await user.type(sugarQty(), "4");
-    await user.click(receiveButton());
+    await reviewAndConfirm(user);
     const k1 = receiveMutate.mock.calls[0][0].idempotencyKey;
     first.unmount();
     render(<ReceivingConsole poId={1} />);
     expect(sugarQty()).toHaveValue("4");
-    await user.click(receiveButton());
+    await reviewAndConfirm(user);
     expect(receiveMutate.mock.calls[1][0].idempotencyKey).toBe(k1);
   });
 
@@ -236,11 +241,11 @@ describe("ReceivingConsole — characterization (R3.0)", () => {
     receiveMutate.mockImplementation((_a, opts) => opts.onSuccess(purchaseOrderReceiveResponse.data));
     render(<ReceivingConsole poId={1} />);
     await user.type(sugarQty(), "5");
-    await user.click(receiveButton());
+    await reviewAndConfirm(user);
     const k1 = receiveMutate.mock.calls[0][0].idempotencyKey;
     expect(sugarQty()).toHaveValue("");
     await user.type(sugarQty(), "5");
-    await user.click(receiveButton()); // the backend replays the same receipt
+    await reviewAndConfirm(user); // the backend replays the same receipt
     expect(receiveMutate.mock.calls[1][0].idempotencyKey).not.toBe(k1);
     const receipt = purchaseOrderReceiveResponse.data.receipt_number;
     expect(screen.getAllByText((_, el) => el?.textContent === receipt && el.children.length === 0)).toHaveLength(1);
@@ -251,7 +256,7 @@ describe("ReceivingConsole — characterization (R3.0)", () => {
     receiveMutate.mockImplementationOnce((_a, opts) => opts.onError(new ApiError({ status: 422, message: MISMATCH, requestId: "r" })));
     render(<ReceivingConsole poId={1} />);
     await user.type(sugarQty(), "5");
-    await user.click(receiveButton());
+    await reviewAndConfirm(user);
     expect(await screen.findByText(/already submitted with different quantities/i)).toBeInTheDocument();
     expect(toast.error).not.toHaveBeenCalled();
   });
@@ -263,7 +268,7 @@ describe("ReceivingConsole — characterization (R3.0)", () => {
     );
     render(<ReceivingConsole poId={1} />);
     await user.type(sugarQty(), "5");
-    await user.click(receiveButton());
+    await reviewAndConfirm(user);
     expect(screen.queryByText(/already submitted with different quantities/i)).toBeNull();
     expect(toast.error).toHaveBeenCalledWith("Receipt rejected", expect.anything());
   });
@@ -273,11 +278,11 @@ describe("ReceivingConsole — characterization (R3.0)", () => {
     receiveMutate.mockImplementationOnce((_a, opts) => opts.onError(new ApiError({ status: 409, message: MISMATCH, requestId: "r" })));
     render(<ReceivingConsole poId={1} />);
     await user.type(sugarQty(), "5");
-    await user.click(receiveButton());
+    await reviewAndConfirm(user);
     expect(receiveButton()).toBeDisabled(); // blocked until the operator decides
     const k1 = receiveMutate.mock.calls[0][0].idempotencyKey;
     await user.click(screen.getByRole("button", { name: /start a new receipt/i }));
-    await user.click(receiveButton());
+    await reviewAndConfirm(user);
     expect(receiveMutate.mock.calls[1][0]).toEqual({ ...receiveMutate.mock.calls[0][0], idempotencyKey: expect.any(String) });
     expect(receiveMutate.mock.calls[1][0].idempotencyKey).not.toBe(k1);
   });
@@ -357,19 +362,123 @@ describe("ReceivingConsole — characterization (R3.0)", () => {
     vi.stubGlobal("fetch", fetchMock);
     try {
       render(
-        <LanguageProvider initialLocale="th">
+        <LanguageProvider initialLocale="en">
           <LanguageSwitch />
           <ReceivingConsole poId={1} />
         </LanguageProvider>,
       );
       await user.type(sugarQty(), "5");
       const input = sugarQty();
-      await user.click(screen.getByRole("button", { name: "EN" }));
       await user.click(screen.getByRole("button", { name: "ไทย" }));
+      await user.click(screen.getByRole("button", { name: "EN" }));
       expect(sugarQty()).toBe(input);
       expect(input).toHaveValue("5");
       expect(receiveMutate).not.toHaveBeenCalled();
       expect(fetchMock.mock.calls.every((c) => (c as unknown[])[0] === "/api/prefs/language")).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+/* ------------------- R4 review before commit (D-R4-4) ------------------- */
+
+describe("ReceivingConsole — R4 review before commit", () => {
+  it("opening the review sends nothing and lists each included line, its lot and dates, and the total", async () => {
+    const user = userEvent.setup();
+    render(<ReceivingConsole poId={1} />);
+    await user.type(coffeeQty(), "2");
+    await user.type(document.getElementById("rl-1-lot") as HTMLInputElement, "LOT-CF");
+    fireEvent.change(document.getElementById("rl-1-mfg") as HTMLInputElement, { target: { value: "2026-06-01" } });
+    fireEvent.change(document.getElementById("rl-1-exp") as HTMLInputElement, { target: { value: "2027-06-01" } });
+    await user.type(sugarQty(), "5");
+    await user.click(reviewBtn());
+    const dialog = screen.getByRole("dialog");
+    expect(receiveMutate).not.toHaveBeenCalled();
+    expect(within(dialog).getByText("Arabica Whole Bean 1kg")).toBeInTheDocument();
+    expect(within(dialog).getByText("Refined Sugar Sack 25kg")).toBeInTheDocument();
+    expect(within(dialog).getByText("LOT-CF")).toBeInTheDocument();
+    expect(dialog.textContent).toMatch(/2026-06-01.*2027-06-01/);
+    expect(within(dialog).getByText("+2.000")).toBeInTheDocument();
+    expect(within(dialog).getByText("+5.000")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Confirm receipt +7.000" })).toBeInTheDocument();
+    // the untouched tea line is not part of this receipt
+    expect(within(dialog).queryByText("Green Tea 200g")).toBeNull();
+  });
+
+  it("Back to edit keeps entries and the key; the later confirm sends the same request once", async () => {
+    const user = userEvent.setup();
+    render(<ReceivingConsole poId={1} />);
+    await user.type(sugarQty(), "5");
+    await user.click(reviewBtn());
+    await user.click(screen.getByRole("button", { name: "Back to edit" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(sugarQty()).toHaveValue("5");
+    expect(receiveMutate).not.toHaveBeenCalled();
+    await reviewAndConfirm(user);
+    expect(receiveMutate).toHaveBeenCalledTimes(1);
+    expect(receiveMutate.mock.calls[0][0].payload).toEqual({ items: [{ product_id: 3, quantity: "5.000" }] });
+  });
+
+  it("Escape closes the review and returns focus to the Review button", async () => {
+    const user = userEvent.setup();
+    render(<ReceivingConsole poId={1} />);
+    await user.type(sugarQty(), "5");
+    await user.click(reviewBtn());
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(reviewBtn()).toHaveFocus();
+  });
+
+  it("while the review is open the barcode assist neither resolves nor receives", async () => {
+    const user = userEvent.setup();
+    render(<ReceivingConsole poId={1} />);
+    await user.type(sugarQty(), "5");
+    await user.click(reviewBtn());
+    await user.keyboard("8800000000003{Enter}");
+    expect(resolveBarcode).not.toHaveBeenCalled();
+    expect(receiveMutate).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("success closes the review; a mismatch closes it and shows the recovery banner", async () => {
+    const user = userEvent.setup();
+    receiveMutate.mockImplementationOnce((_a, opts) => opts.onSuccess(purchaseOrderReceiveResponse.data));
+    render(<ReceivingConsole poId={1} />);
+    await user.type(sugarQty(), "5");
+    await reviewAndConfirm(user);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    receiveMutate.mockImplementationOnce((_a, opts) =>
+      opts.onError(new ApiError({ status: 409, message: "Idempotency-Key already used with a different payload", requestId: "m" })),
+    );
+    await user.type(sugarQty(), "4");
+    await reviewAndConfirm(user);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("button", { name: /start a new receipt/i })).toBeInTheDocument();
+  });
+
+  it("a non-mismatch failure keeps the sheet open for a retry", async () => {
+    const user = userEvent.setup();
+    receiveMutate.mockImplementation((_a, opts) => opts.onError(new ApiError({ status: 503, message: "down", requestId: "r1" })));
+    render(<ReceivingConsole poId={1} />);
+    await user.type(sugarQty(), "5");
+    await reviewAndConfirm(user);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(toast.error).toHaveBeenCalledWith("Receipt rejected", expect.anything());
+  });
+
+  it("is translated: Thai review button, line labels and the Buddhist-era date hint", () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 204 })));
+    try {
+      render(
+        <LanguageProvider initialLocale="th">
+          <ReceivingConsole poId={1} />
+        </LanguageProvider>,
+      );
+      expect(screen.getAllByRole("button", { name: "ตรวจสอบใบรับ" })[0]).toBeDisabled();
+      expect(screen.getAllByText("ค้างรับ").length).toBeGreaterThan(0);
+      fireEvent.change(document.getElementById("rl-1-exp") as HTMLInputElement, { target: { value: "2027-09-30" } });
+      expect(screen.getAllByText(/30 ก\.ย\. 2570/).length).toBeGreaterThan(0);
     } finally {
       vi.unstubAllGlobals();
     }

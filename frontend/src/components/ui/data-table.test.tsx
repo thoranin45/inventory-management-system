@@ -88,3 +88,40 @@ describe("DataTable — states", () => {
     expect(screen.getByText("Nothing.")).toBeInTheDocument();
   });
 });
+
+describe("DataTable — Concept B tablet layout (D-R4-5)", () => {
+  const mockWidth = (width: number) =>
+    vi.spyOn(window, "matchMedia").mockImplementation((q: string) => ({
+      matches: Number(/max-width: ([\d.]+)px/.exec(q)?.[1] ?? Infinity) >= width,
+      media: q,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+  const cards = (r: (typeof rows)[number]) => ({ title: `Card ${r.sku}`, meta: <span>qty {r.qty}</span> });
+
+  it("opt-in 'table' keeps the table on iPad (834 px)", () => {
+    mockWidth(834);
+    render(<DataTable columns={columns} rows={rows} getRowKey={(r) => String(r.id)} renderCard={cards} tabletLayout="table" />);
+    expect(screen.getByRole("table")).toBeInTheDocument();
+    vi.restoreAllMocks();
+  });
+
+  it("opt-in 'table' still uses cards on a phone (390 px)", () => {
+    mockWidth(390);
+    render(<DataTable columns={columns} rows={rows} getRowKey={(r) => String(r.id)} renderCard={cards} tabletLayout="table" />);
+    expect(screen.queryByRole("table")).toBeNull();
+    expect(screen.getByText("Card B")).toBeInTheDocument();
+    vi.restoreAllMocks();
+  });
+
+  it("the default is unchanged: cards on iPad for every other screen", () => {
+    mockWidth(834);
+    render(<DataTable columns={columns} rows={rows} getRowKey={(r) => String(r.id)} renderCard={cards} />);
+    expect(screen.queryByRole("table")).toBeNull();
+    vi.restoreAllMocks();
+  });
+});

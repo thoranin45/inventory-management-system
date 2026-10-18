@@ -62,6 +62,7 @@ export function DataTable<Row>({
   onSort,
   pagination,
   className,
+  tabletLayout = "cards",
 }: {
   columns: Column<Row>[];
   rows: Row[];
@@ -77,9 +78,17 @@ export function DataTable<Row>({
   onSort?: (field: string) => void;
   pagination?: DataTablePagination;
   className?: string;
+  /**
+   * Concept B (D-R4-5): "table" keeps the dense table on iPad (768–1023 px,
+   * secondary columns hidden) and switches to cards only on phones. The
+   * default keeps the existing ≤1023 px card layout for every other screen.
+   */
+  tabletLayout?: "cards" | "table";
 }) {
   const t = useT();
-  const isMobile = useMediaQuery("(max-width: 1023.98px)");
+  const belowDesktop = useMediaQuery("(max-width: 1023.98px)");
+  const phone = useMediaQuery("(max-width: 767.98px)");
+  const isMobile = tabletLayout === "table" ? phone : belowDesktop;
   const compact = useMediaQuery("(max-width: 1199.98px)");
   const [internalSort, setInternalSort] = React.useState<{ key: string; order: "asc" | "desc" } | null>(null);
 
@@ -236,8 +245,11 @@ export function DataTable<Row>({
       {pagination && !isLoading && !error && rows.length > 0 ? (
         <div className="flex flex-wrap items-center justify-between gap-3 text-[12px] text-[var(--muted)]">
           <span className="tnum">
-            {(pagination.page - 1) * pagination.pageSize + 1}–
-            {Math.min(pagination.page * pagination.pageSize, pagination.totalItems)} of {pagination.totalItems}
+            {t("common.rangeOf", {
+              from: (pagination.page - 1) * pagination.pageSize + 1,
+              to: Math.min(pagination.page * pagination.pageSize, pagination.totalItems),
+              total: pagination.totalItems,
+            })}
           </span>
           <div className="flex items-center gap-1">
             <Button

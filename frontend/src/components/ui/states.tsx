@@ -1,5 +1,5 @@
 import * as React from "react";
-import { AlertTriangle, Inbox, Loader2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Info, Inbox, Loader2, XCircle } from "lucide-react";
 
 import { isApiError } from "@/lib/api/errors";
 import { cn } from "@/lib/utils";
@@ -105,6 +105,47 @@ export function ErrorState({
           <Msg k="common.tryAgain" />
         </Button>
       ) : null}
+    </div>
+  );
+}
+
+const BANNER_TONE = {
+  good: { icon: CheckCircle2, cls: "border-[color-mix(in_srgb,var(--success)_35%,transparent)] bg-[var(--success-subtle)]", ink: "text-[var(--success)]" },
+  warning: { icon: AlertTriangle, cls: "border-[color-mix(in_srgb,var(--warning)_35%,transparent)] bg-[var(--warning-subtle)]", ink: "text-[var(--warning)]" },
+  danger: { icon: XCircle, cls: "border-[color-mix(in_srgb,var(--danger)_40%,transparent)] bg-[var(--danger-subtle)]", ink: "text-[var(--danger)]" },
+  info: { icon: Info, cls: "border-[color-mix(in_srgb,var(--accent)_30%,transparent)] bg-[var(--accent-subtle)]", ink: "text-[var(--accent)]" },
+} as const;
+
+/**
+ * Concept B banner: icon + title (never colour alone), optional body and
+ * actions. Danger banners are alerts; the others are polite status messages.
+ */
+export function Banner({
+  tone,
+  title,
+  children,
+  actions,
+  className,
+}: {
+  tone: keyof typeof BANNER_TONE;
+  title: React.ReactNode;
+  children?: React.ReactNode;
+  actions?: React.ReactNode;
+  className?: string;
+}) {
+  const t = BANNER_TONE[tone];
+  const Icon = t.icon;
+  return (
+    <div
+      role={tone === "danger" ? "alert" : "status"}
+      className={cn("flex flex-col gap-2 rounded-[var(--r-md)] border p-3 text-[13px] text-[var(--foreground)]", t.cls, className)}
+    >
+      <div className={cn("flex items-start gap-2 font-semibold", t.ink)}>
+        <Icon aria-hidden className="mt-[1px] h-4 w-4 flex-none" />
+        <span>{title}</span>
+      </div>
+      {children ? <div className="pl-6">{children}</div> : null}
+      {actions ? <div className="flex flex-wrap gap-2 pl-6">{actions}</div> : null}
     </div>
   );
 }

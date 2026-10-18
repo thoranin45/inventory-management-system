@@ -3,16 +3,26 @@
 import * as React from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Camera, CheckCircle2, ChevronRight, PackagePlus, ScanLine, TriangleAlert, Undo2 } from "lucide-react";
+import { ArrowDownToLine, BookOpen, Camera, PackagePlus, ScanLine, ShieldCheck, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Combobox, type ComboboxItem } from "@/components/ui/combobox";
-import { QuantityDisplay } from "@/components/ui/quantity-display";
+import { DateField } from "@/components/ui/date-field";
+import { LotChip } from "@/components/ui/lot-chip";
+import { QuantityChange, QuantityDisplay } from "@/components/ui/quantity-display";
+import { ReviewCell, ReviewSheet } from "@/components/ui/review-sheet";
+import { Banner } from "@/components/ui/states";
+import { StepIndicator } from "@/components/ui/step-indicator";
+import { StockTriad } from "@/components/ui/stock-triad";
 import { CameraBarcodeScanner } from "@/components/work/camera-barcode-scanner";
 import { useBeep } from "@/components/work/use-beep";
 import { isApiError } from "@/lib/api/errors";
-import { businessToday, EXPIRY_STATE_LABEL, expiryState } from "@/lib/business-date";
+import { businessToday, expiryState, type ExpiryState } from "@/lib/business-date";
+import { sumDecimals } from "@/lib/decimal";
+import { formatQtyDelta } from "@/lib/format";
+import { useT } from "@/lib/i18n/client";
+import type { MessageKey } from "@/lib/i18n/translate";
 import { useProducts } from "@/lib/query/hooks";
 import { useProduct } from "@/lib/query/products";
 import { useSaveStockInSession } from "@/lib/query/stock";
@@ -28,6 +38,8 @@ import {
   type StockInSaveBody,
 } from "@/lib/api/schemas/stock-in";
 import { useScanCountSession, type ScanFeedback } from "./use-scan-count-session";
+import { DEFAULT_STORAGE_LABEL, StorageRow, useDefaultStorage } from "./stock-task-parts";
+import { TrailList } from "./task-trail";
 
 /* --------------------------------------------------------------- session -- */
 
@@ -70,26 +82,22 @@ function buildPayload(lines: Record<number, SessionLine>): StockInSaveBody | nul
 }
 
 const FIELD_CLS =
-  "h-11 w-full rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-[15px] tabular-nums outline-hidden focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-[var(--focus)] disabled:opacity-60";
+  "h-11 w-full rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-[15px] tabular-nums outline-hidden focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-[var(--focus)] disabled:opacity-60 max-[767.98px]:h-[46px] max-[767.98px]:text-[16px]";
 
-const hitTrailText = (code: string) => `barcode ${code} +1`;
+/** the trail stores the scanned code; the wording is rendered in the UI language */
+const hitTrailText = (code: string) => code;
 
-function feedbackText(feedback: Exclude<ScanFeedback, { kind: "idle" }>): string {
-  switch (feedback.kind) {
-    case "match":
-      return `Matched — scanned ${feedback.count}`;
-    case "wrong":
-      return `Wrong product — that barcode is ${feedback.productName}. Count unchanged.`;
-    case "unknown":
-      return `Barcode read ${feedback.code} — product not registered. Nothing was counted.`;
-    case "error":
-      return feedback.userMessage ?? "Could not read that barcode. Nothing was counted.";
-  }
-}
+const EXPIRY_STATE_KEY: Record<ExpiryState, MessageKey> = {
+  expired: "task.expiryExpired",
+  "same-day": "task.expirySameDay",
+  near: "task.expiryNear",
+  ok: "task.expiryOk",
+};
 
 /* --------------------------------------------------------------- console -- */
 
 export function StockInConsole() {
+  const t = useT();
   const router = useRouter();
   const { beepOk, beepBad, beepDone, enabled: soundOn, setEnabled: setSoundOn } = useBeep();
 
@@ -104,12 +112,29 @@ export function StockInConsole() {
   // a reused key whose stored request differs forces a new session (no silent new key)
   const submission = useIdempotentSubmission({ draft, mutate: saveMut.mutate, isMismatch: isLooseKeyMismatch });
   const { mismatch } = submission;
-  const [saved, setSaved] = React.useState<{ qty: string; onHand: string; name: string; lot: string | null } | null>(
+  const [saved, setSaved] = React.useState<{ qty: string; onHand: string; name: string; lot: string | null; productId: number } | null>(
     null,
   );
   const [cameraOpen, setCameraOpen] = React.useState(false);
+  // R4 review before commit: opening it sends nothing; Confirm runs `save`
+  const [reviewOpen, setReviewOpen] = React.useState(false);
+  const [reviewError, setReviewError] = React.useState<string | null>(null);
 
   const phase: "setup" | "scanning" | "saved" = saved ? "saved" : line?.started ? "scanning" : "setup";
+  const storage = useDefaultStorage(line ? line.productId : null);
+
+  const feedbackText = (feedback: Exclude<ScanFeedback, { kind: "idle" }>): string => {
+    switch (feedback.kind) {
+      case "match":
+        return t("task.matchedIn", { n: feedback.count });
+      case "wrong":
+        return t("task.wrongProduct", { name: feedback.productName });
+      case "unknown":
+        return t("task.unknownBarcode", { code: feedback.code });
+      case "error":
+        return feedback.userMessage ?? t("task.scanReadError");
+    }
+  };
 
   /* ------------------------------- SETUP: product picker ---------------- */
   const [term, setTerm] = React.useState("");
@@ -129,7 +154,7 @@ export function StockInConsole() {
     .map((p) => ({
       id: p.id,
       label: p.product_name,
-      sublabel: [p.sku, p.track_batch ? (p.track_expiry ? "batch + expiry" : "batch") : "non-batch"].join(" · "),
+      sublabel: [p.sku, t(p.track_batch ? (p.track_expiry ? "task.trackBatchExpiry" : "task.trackBatch") : "task.trackNone")].join(" · "),
     }));
 
   const pickProduct = (item: ComboboxItem | null) => {
@@ -208,11 +233,12 @@ export function StockInConsole() {
   const expState = line?.expiry_date ? expiryState(line.expiry_date) : null;
 
   /* ------------------------------- SCAN SESSION ------------------------- */
-  // each scan verifies the item (read-only "stock_in" lookup); nothing moves until Save
+  // each scan verifies the item (read-only "stock_in" lookup); nothing moves until Save.
+  // While the review sheet is open the scanner is off: the count cannot change under review.
   const { feedback, setFeedback, resolving, bump, handleScan, scanner } = useScanCountSession({
     draft,
     purpose: "stock_in",
-    scanning: phase === "scanning",
+    scanning: phase === "scanning" && !reviewOpen,
     busy: saveMut.isPending,
     beepOk,
     beepBad,
@@ -220,7 +246,7 @@ export function StockInConsole() {
   });
 
   const undoLast = () => {
-    bump(-1, "undo -1");
+    bump(-1, "");
     setFeedback({ kind: "idle" });
     requestAnimationFrame(() => scanner.focus());
   };
@@ -243,79 +269,89 @@ export function StockInConsole() {
   /* ------------------------------- SAVE (one authoritative mutation) --- */
   const overExpected =
     !!line?.expected && line.count > Number(line.expected) ? { expected: line.expected, count: line.count } : null;
+  const canReview = !!draft.payload && !!line && line.count > 0 && !saveMut.isPending && !mismatch;
 
   const save = () => {
     const body = draft.payload;
     if (!body || !line || line.count <= 0 || saveMut.isPending) return;
+    setReviewError(null);
     // success consumes the draft — next session gets a fresh key
     submission.submit(
       { body },
       {
         onSuccess: (res) => {
           beepDone();
+          setReviewOpen(false);
           setSaved({
             qty: res.savedQuantity,
             onHand: res.currentStock,
             name: line.name,
             lot: res.lotNo,
+            productId: line.productId,
           });
         },
         onError: (e, isMismatch) => {
           beepBad();
-          if (isMismatch) return;
+          if (isMismatch) {
+            // the existing recovery panel takes over: start a new session
+            setReviewOpen(false);
+            return;
+          }
           const backend = isApiError(e) ? e.message : "";
           const copy =
-            STOCK_IN_ERROR_COPY[backend] ??
-            (isApiError(e) ? e.userMessage : "The stock-in was rejected. Nothing was saved.");
-          toast.error("Save failed", { description: rid(e) ? `${copy} · Request ${rid(e)}` : copy });
+            STOCK_IN_ERROR_COPY[backend] ?? (isApiError(e) ? e.userMessage : t("task.inRejected"));
+          const withId = rid(e) ? `${copy} · ${t("task.requestRef", { id: rid(e)! })}` : copy;
+          setReviewError(withId);
+          toast.error(t("task.saveFailed"), { description: withId });
         },
       },
     );
   };
 
+  const openReview = () => {
+    if (!canReview) return;
+    setReviewError(null);
+    setReviewOpen(true);
+  };
+
+  const steps = [t("task.stepDetails"), t("task.stepScan"), t("task.stepReview"), t("task.stepDone")];
+  const stepIndex = phase === "saved" ? 3 : reviewOpen ? 2 : phase === "scanning" ? 1 : 0;
+  const countQty = line ? String(line.count) : "0";
+  const afterQty = storage.status === "ready" ? sumDecimals([storage.onHand, countQty], 3) : null;
+
   /* --------------------------------------------------------- render ---- */
   return (
     <div className="flex flex-col gap-4">
-      <nav className="flex items-center gap-1 text-[12px] text-[var(--muted)]" aria-label="Breadcrumb">
-        <Link href="/stock" className="font-medium hover:text-[var(--foreground)]">
-          Stock
-        </Link>
-        <ChevronRight aria-hidden className="h-3 w-3" />
-        <span className="text-[var(--foreground)]">Stock In</span>
-      </nav>
-
       <div className="wc-receive-layout">
         <div className="wc-receive-main flex min-w-0 flex-col gap-3">
           <div className="wc-work-head">
             <div>
-              <div className="flex items-center gap-2 text-[16px] font-bold">
+              <h1 className="flex items-center gap-2 text-[18px] font-semibold">
                 <PackagePlus aria-hidden className="h-[18px] w-[18px] text-[var(--accent)]" />
-                Stock In
-              </div>
-              <div className="text-[12px] text-[var(--muted)]">
-                {phase === "setup"
-                  ? "Choose a product, then scan its items. Scanning only counts — nothing is saved until you Save."
-                  : phase === "scanning"
-                    ? "Scan each physical item. Each scan verifies it matches the selected product."
-                    : "Stock saved."}
+                {t("nav.stockIn")}
+              </h1>
+              <div className="text-[13px] text-[var(--muted)]">
+                {phase === "setup" ? t("task.inSetupHint") : phase === "scanning" ? t("task.inScanHint") : t("task.inSavedHint")}
               </div>
             </div>
           </div>
+
+          <StepIndicator steps={steps} current={stepIndex} />
 
           {/* ---------------------------------------------------- SETUP -- */}
           {phase === "setup" ? (
             <div className="flex flex-col gap-3 rounded-[var(--r-lg)] border border-[var(--border-strong)] bg-[var(--surface)] p-4">
               <label className="flex flex-col gap-1 text-[12px] text-[var(--muted)]">
-                Product
+                {t("task.product")}
                 <Combobox
-                  ariaLabel="Search products"
+                  ariaLabel={t("task.searchProducts")}
                   value={line ? { id: line.productId, label: line.name, sublabel: line.sku } : null}
                   onChange={pickProduct}
                   onSearch={setTerm}
                   items={comboItems}
                   loading={productQ.isFetching}
-                  placeholder="Search products by name or SKU…"
-                  emptyText={debounced.trim().length < 2 ? "Type at least 2 characters" : "No products match"}
+                  placeholder={t("task.searchPlaceholder")}
+                  emptyText={debounced.trim().length < 2 ? t("task.typeTwo") : t("task.noProducts")}
                 />
               </label>
 
@@ -323,9 +359,9 @@ export function StockInConsole() {
                 <>
                   {line.trackBatch ? (
                     <label className="flex flex-col gap-1 text-[12px] text-[var(--muted)]">
-                      Lot number
+                      {t("task.lotNumber")}
                       <input
-                        className={FIELD_CLS}
+                        className={`${FIELD_CLS} mono`}
                         value={line.lot_no}
                         onChange={(e) => patch({ lot_no: e.target.value })}
                         autoComplete="off"
@@ -335,32 +371,28 @@ export function StockInConsole() {
                   ) : null}
 
                   {line.trackExpiry ? (
-                    <div className="grid grid-cols-2 gap-3">
-                      <label className="flex flex-col gap-1 text-[12px] text-[var(--muted)]">
-                        Manufacturing date
-                        <input
-                          type="date"
-                          className={FIELD_CLS}
-                          value={line.mfg_date}
-                          max={businessToday()}
-                          onChange={(e) => patch({ mfg_date: e.target.value })}
-                        />
-                      </label>
-                      <label className="flex flex-col gap-1 text-[12px] text-[var(--muted)]">
-                        Expiry date
-                        <input
-                          type="date"
-                          className={FIELD_CLS}
-                          value={line.expiry_date}
-                          onChange={(e) => patch({ expiry_date: e.target.value })}
-                        />
-                      </label>
+                    <div className="grid grid-cols-1 gap-3 min-[480px]:grid-cols-2">
+                      <DateField
+                        id="stock-in-mfg"
+                        label={t("task.mfgDate")}
+                        value={line.mfg_date}
+                        max={businessToday()}
+                        onChange={(v) => patch({ mfg_date: v })}
+                        inputClassName={FIELD_CLS}
+                      />
+                      <DateField
+                        id="stock-in-exp"
+                        label={t("task.expiryDate")}
+                        value={line.expiry_date}
+                        onChange={(v) => patch({ expiry_date: v })}
+                        inputClassName={FIELD_CLS}
+                      />
                     </div>
                   ) : null}
 
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 gap-3 min-[480px]:grid-cols-2">
                     <label className="flex flex-col gap-1 text-[12px] text-[var(--muted)]">
-                      Expected quantity (optional)
+                      {t("task.expectedQty")}
                       <input
                         inputMode="decimal"
                         className={FIELD_CLS}
@@ -370,39 +402,28 @@ export function StockInConsole() {
                       />
                     </label>
                     <label className="flex flex-col gap-1 text-[12px] text-[var(--muted)]">
-                      Note (optional)
+                      {t("task.note")}
                       <input
                         className={FIELD_CLS}
                         value={line.remark}
                         onChange={(e) => patch({ remark: e.target.value })}
                         maxLength={255}
-                        placeholder="e.g. opening count"
+                        placeholder={t("task.inNotePlaceholder")}
                       />
                     </label>
                   </div>
 
                   {expState && expState !== "ok" ? (
-                    <p
-                      role="status"
-                      className="flex items-start gap-2 rounded-[var(--r-sm)] border border-[color-mix(in_srgb,var(--warning)_35%,transparent)] bg-[var(--warning-subtle)] p-2 text-[12px] text-[var(--warning)]"
-                    >
-                      <TriangleAlert aria-hidden className="h-4 w-4 flex-none" />
-                      {EXPIRY_STATE_LABEL[expState]} — accepted, not blocked.
-                    </p>
+                    <Banner tone="warning" title={`${t(EXPIRY_STATE_KEY[expState])} — ${t("task.acceptedNotBlocked")}`} />
                   ) : null}
 
-                  <Button
-                    variant="primary"
-                    className="h-11"
-                    disabled={!setupValid}
-                    onClick={startScanning}
-                  >
-                    Start scanning
+                  <Button variant="primary" className="h-11" disabled={!setupValid} onClick={startScanning}>
+                    {t("task.startScanning")}
                   </Button>
                 </>
               ) : (
-                <p className="rounded-[var(--r-md)] border border-dashed border-[var(--border)] p-5 text-center text-[12.5px] text-[var(--muted)]">
-                  Pick the product you are stocking in. You choose it before scanning.
+                <p className="rounded-[var(--r-md)] border border-dashed border-[var(--border)] p-5 text-center text-[13px] text-[var(--muted)]">
+                  {t("task.inPickHint")}
                 </p>
               )}
             </div>
@@ -412,16 +433,16 @@ export function StockInConsole() {
           {phase === "scanning" && line ? (
             <div className="flex flex-col gap-3 rounded-[var(--r-lg)] border border-[var(--border-strong)] bg-[var(--surface)] p-4">
               <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-[14px] font-semibold">{line.name}</div>
-                  <div className="mt-[3px] flex flex-wrap items-center gap-x-3 text-[11.5px] text-[var(--muted)]">
+                <div className="min-w-0">
+                  <div className="text-[15px] font-semibold">{line.name}</div>
+                  <div className="mt-[3px] flex flex-wrap items-center gap-x-3 text-[12px] text-[var(--muted)]">
                     <span className="mono">{line.sku}</span>
-                    {line.trackBatch ? <span>lot {line.lot_no || "—"}</span> : <span>non-batch</span>}
-                    {line.trackExpiry && line.expiry_date ? <span>exp {line.expiry_date}</span> : null}
+                    {line.trackBatch ? <span className="mono">{t("task.lotShort", { lot: line.lot_no || "—" })}</span> : <span>{t("task.trackNone")}</span>}
+                    {line.trackExpiry && line.expiry_date ? <span>{t("task.expShort", { date: line.expiry_date })}</span> : null}
                   </div>
                 </div>
                 <Button variant="ghost" size="sm" onClick={clearSession} disabled={saveMut.isPending}>
-                  Clear session
+                  {t("task.clearSession")}
                 </Button>
               </div>
 
@@ -430,25 +451,19 @@ export function StockInConsole() {
                 <ScanLine aria-hidden className="h-4 w-4 flex-none text-[var(--muted)]" />
                 <input
                   {...scanner.inputProps}
-                  placeholder={resolving ? "Reading…" : "Scan an item…"}
-                  aria-label="Barcode scan input"
-                  className="min-h-11 w-full min-w-0 bg-transparent text-[15px] tabular-nums outline-none"
+                  placeholder={resolving ? t("task.reading") : t("task.scanPlaceholder")}
+                  aria-label={t("task.scanInput")}
+                  className="min-h-11 w-full min-w-0 bg-transparent text-[16px] tabular-nums outline-none"
                 />
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  onClick={scanner.submit}
-                  disabled={resolving || saveMut.isPending}
-                >
-                  Enter
+                <Button type="button" variant="secondary" size="sm" onClick={scanner.submit} disabled={resolving || saveMut.isPending}>
+                  {t("task.enter")}
                 </Button>
                 <Button
                   type="button"
                   variant="secondary"
                   size="icon"
-                  aria-label="Scan with camera"
-                  title="Scan with the device camera"
+                  aria-label={t("task.scanWithCamera")}
+                  title={t("task.scanWithCameraTitle")}
                   onClick={() => {
                     if (typeof document !== "undefined") (document.activeElement as HTMLElement | null)?.blur();
                     setCameraOpen(true);
@@ -462,142 +477,177 @@ export function StockInConsole() {
               {/* count + inline feedback */}
               <div className="flex items-center justify-between gap-3">
                 <div className="text-[13px]">
-                  <span className="text-[var(--muted)]">Scanned </span>
-                  <span className="text-[18px] font-bold tabular-nums">{line.count}</span>
-                  {line.expected ? (
-                    <span className="text-[var(--muted)]"> of {line.expected} expected</span>
-                  ) : null}
+                  <span className="text-[var(--muted)]">{t("task.scanned")} </span>
+                  <span className="text-[20px] font-bold tabular-nums">{line.count}</span>
+                  {line.expected ? <span className="text-[var(--muted)]"> {t("task.ofExpected", { n: line.expected })}</span> : null}
                 </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={undoLast}
-                  disabled={line.count === 0 || saveMut.isPending}
-                >
-                  <Undo2 aria-hidden className="h-3.5 w-3.5" /> Undo last scan
+                <Button variant="ghost" size="sm" onClick={undoLast} disabled={line.count === 0 || saveMut.isPending}>
+                  <Undo2 aria-hidden className="h-3.5 w-3.5" /> {t("task.undoLastScan")}
                 </Button>
               </div>
 
               {feedback.kind !== "idle" ? (
-                <p
-                  role="status"
-                  className={
-                    feedback.kind === "match"
-                      ? "flex items-center gap-2 rounded-[var(--r-sm)] border border-[color-mix(in_srgb,var(--success)_35%,transparent)] bg-[var(--success-subtle)] p-2 text-[12px] text-[var(--success)]"
-                      : "flex items-center gap-2 rounded-[var(--r-sm)] border border-[color-mix(in_srgb,var(--danger)_35%,transparent)] bg-[var(--danger-subtle)] p-2 text-[12px] text-[var(--danger)]"
-                  }
-                >
-                  {feedback.kind === "match" ? (
-                    <CheckCircle2 aria-hidden className="h-4 w-4 flex-none" />
-                  ) : (
-                    <TriangleAlert aria-hidden className="h-4 w-4 flex-none" />
-                  )}
-                  {feedbackText(feedback)}
-                </p>
+                <Banner tone={feedback.kind === "match" ? "good" : "danger"} title={feedbackText(feedback)} />
               ) : null}
 
               {overExpected ? (
-                <p className="flex items-center gap-2 rounded-[var(--r-sm)] border border-[color-mix(in_srgb,var(--warning)_35%,transparent)] bg-[var(--warning-subtle)] p-2 text-[12px] text-[var(--warning)]">
-                  <TriangleAlert aria-hidden className="h-4 w-4 flex-none" />
-                  Over expected quantity — {overExpected.count} of {overExpected.expected}. You can still save.
-                </p>
+                <Banner tone="warning" title={t("task.overExpected", { count: overExpected.count, expected: overExpected.expected })} />
               ) : null}
 
               {mismatch ? (
-                <div className="flex flex-col gap-2 rounded-[var(--r-sm)] border border-[color-mix(in_srgb,var(--danger)_45%,transparent)] bg-[var(--danger-subtle)] p-3 text-[12px] text-[var(--danger)]">
-                  <span className="font-semibold">This session can no longer be saved.</span>
-                  <span>
-                    Its Idempotency-Key was already used for a different quantity or lot. Start a new stock-in session
-                    to continue — a new key is issued only for a genuinely new session.
-                  </span>
-                  <Button variant="secondary" size="sm" className="self-start" onClick={clearSession}>
-                    Start new stock-in session
-                  </Button>
-                </div>
+                <Banner
+                  tone="danger"
+                  title={t("task.inMismatchTitle")}
+                  actions={
+                    <Button variant="secondary" size="sm" onClick={clearSession}>
+                      {t("task.inStartNew")}
+                    </Button>
+                  }
+                >
+                  {t("task.inMismatchBody")}
+                </Banner>
               ) : null}
 
-              <Button
-                variant="primary"
-                className="h-11"
-                disabled={!draft.payload || line.count <= 0 || saveMut.isPending || mismatch}
-                onClick={save}
-              >
-                {saveMut.isPending ? "Saving…" : `Save ${line.count} ${line.count === 1 ? "item" : "items"}`}
-              </Button>
-              {saveMut.isError && !mismatch ? (
-                <p className="text-[12px] text-[var(--danger)]">
-                  {isApiError(saveMut.error) ? saveMut.error.userMessage : "Save failed."}{" "}
-                  {rid(saveMut.error) ? `· Request ${rid(saveMut.error)}` : null} The count and key are kept — press
-                  Save to retry.
-                </p>
-              ) : null}
+              <div className="wc-task-action flex flex-col gap-2">
+                <Button variant="primary" className="h-11" disabled={!canReview} onClick={openReview}>
+                  <ShieldCheck aria-hidden className="h-4 w-4" />
+                  {saveMut.isPending ? t("task.saving") : t("task.reviewIn", { n: line.count })}
+                </Button>
+                {saveMut.isError && !mismatch && !reviewOpen ? (
+                  <p className="text-[12px] text-[var(--danger)]">
+                    {isApiError(saveMut.error) ? saveMut.error.userMessage : t("task.saveFailed")}{" "}
+                    {rid(saveMut.error) ? `· ${t("task.requestRef", { id: rid(saveMut.error)! })}` : null} {t("task.keptRetry")}
+                  </p>
+                ) : null}
+              </div>
 
-              {line.trail.length ? (
-                <section>
-                  <h3 className="wc-section-label mb-1">This session</h3>
-                  <ul className="flex flex-col gap-[2px] text-[11.5px] text-[var(--muted)]">
-                    {line.trail.map((t) => (
-                      <li key={t.id} className="tabular-nums">
-                        {t.kind === "hit" ? "✓" : "↶"} {t.at} · {t.text}
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              ) : null}
+              <TrailList trail={line.trail} />
             </div>
           ) : null}
 
           {/* --------------------------------------------------- SAVED -- */}
           {phase === "saved" && saved ? (
-            <div className="flex flex-col gap-3 rounded-[var(--r-lg)] border border-[color-mix(in_srgb,var(--success)_40%,transparent)] bg-[var(--success-subtle)] p-4">
-              <div className="flex items-center gap-2 text-[14px] font-semibold text-[var(--success)]">
-                <CheckCircle2 aria-hidden className="h-5 w-5" />
-                Stock saved
-              </div>
-              <p className="text-[12.5px] text-[var(--foreground)]">
+            <Banner
+              tone="good"
+              title={t("task.inSaved")}
+              actions={
+                <>
+                  <Button variant="primary" className="h-11" onClick={clearSession}>
+                    {t("task.scanNext")}
+                  </Button>
+                  <Button variant="secondary" className="h-11" asChild>
+                    <Link href={`/inventory/ledger?product_id=${saved.productId}`}>
+                      <BookOpen aria-hidden className="h-4 w-4" />
+                      {t("review.viewInLedger")}
+                    </Link>
+                  </Button>
+                  <Button variant="ghost" className="h-11" onClick={() => router.push("/stock")}>
+                    {t("task.backToStock")}
+                  </Button>
+                </>
+              }
+            >
+              <p className="text-[13px]">
                 {saved.name}
-                {saved.lot ? ` · lot ${saved.lot}` : ""} — added{" "}
-                <span className="font-semibold">
-                  <QuantityDisplay value={saved.qty} />
-                </span>
-                . On hand <QuantityDisplay value={saved.onHand} />.
+                {saved.lot ? <> · {t("task.lotShort", { lot: saved.lot })}</> : null} — {t("task.added")}{" "}
+                <QuantityDisplay value={saved.qty} className="font-semibold" />. {t("task.onHandNow")}{" "}
+                <QuantityDisplay value={saved.onHand} className="font-semibold" />.
               </p>
-              <div className="flex gap-2">
-                <Button variant="primary" className="h-11" onClick={clearSession}>
-                  Scan next product
-                </Button>
-                <Button variant="ghost" className="h-11" onClick={() => router.push("/stock")}>
-                  Back to Stock
-                </Button>
-              </div>
-            </div>
+            </Banner>
           ) : null}
         </div>
 
         <aside className="wc-receive-side">
-          <div className="rounded-[var(--r-lg)] border border-[var(--border-strong)] bg-[var(--surface)] p-4 text-[12px]">
-            <h3 className="wc-section-label mb-2">Destination</h3>
-            <p className="text-[var(--foreground)]">Main · Default</p>
-            <p className="mt-1 text-[var(--muted)]">
-              Stock in always lands in the operational MAIN / DEFAULT storage. Transit storage is never a
-              stock-in target.
-            </p>
-            <h3 className="wc-section-label mb-2 mt-4">How it works</h3>
+          {line ? (
+            <div className="flex flex-col gap-3 rounded-[var(--r-lg)] border border-[var(--border-strong)] bg-[var(--surface)] p-4">
+              <div>
+                <div className="wc-section-label">{t("task.selectedItem")}</div>
+                <div className="text-[14px] font-semibold">{line.name}</div>
+                <div className="mono text-[12px] text-[var(--muted)]">{line.sku}</div>
+              </div>
+              <div className="flex flex-col gap-1">
+                <span className="text-[12px] text-[var(--muted)]">{t("task.atDefault", { storage: DEFAULT_STORAGE_LABEL })}</span>
+                {storage.status === "ready" ? (
+                  <StockTriad onHand={storage.onHand} reserved={storage.reserved} available={storage.available} compact />
+                ) : (
+                  <p className="text-[12px] text-[var(--muted)]">
+                    {storage.status === "error" ? t("task.balanceUnavailable") : t("task.balanceLoading")}
+                  </p>
+                )}
+              </div>
+            </div>
+          ) : null}
+          <div className="rounded-[var(--r-lg)] border border-[var(--border-strong)] bg-[var(--surface)] p-4 text-[13px]">
+            <StorageRow direction="in" />
+            <h2 className="wc-section-label mb-2 mt-4">{t("task.howItWorks")}</h2>
             <ul className="flex list-disc flex-col gap-1 pl-4 text-[var(--muted)]">
-              <li>Pick the product first — before any scanning.</li>
-              <li>Each scan verifies that the physical item matches the selected product.</li>
-              <li>Scanning only counts locally. No stock moves until you Save.</li>
-              <li>Save is one backend-confirmed movement for the whole session.</li>
-              <li>Expired or same-day lots are accepted and flagged, not blocked.</li>
+              <li>{t("task.inHow1")}</li>
+              <li>{t("task.inHow2")}</li>
+              <li>{t("task.inHow3")}</li>
+              <li>{t("task.inHow4")}</li>
+              <li>{t("task.inHow5")}</li>
             </ul>
           </div>
 
-          <label className="flex items-center gap-[6px] text-[11px] text-[var(--muted)]">
+          <label className="flex items-center gap-[6px] text-[12px] text-[var(--muted)]">
             <input type="checkbox" checked={soundOn} onChange={(e) => setSoundOn(e.target.checked)} />
-            audible scan feedback
+            {t("task.audibleFeedback")}
           </label>
         </aside>
       </div>
+
+      {line ? (
+        <ReviewSheet
+          open={reviewOpen}
+          onOpenChange={setReviewOpen}
+          title={t("task.reviewInTitle")}
+          description={t("review.checkBefore")}
+          confirmLabel={t("task.confirmPlus", { q: formatQtyDelta(countQty) })}
+          onConfirm={save}
+          pending={saveMut.isPending}
+          confirmDisabled={!draft.payload || line.count <= 0 || mismatch}
+          error={reviewError ? <Banner tone="danger" title={reviewError}>{t("review.failedKept")}</Banner> : undefined}
+          returnFocusRef={scanner.inputProps.ref}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="inline-flex items-center gap-1 rounded-[var(--r-sm)] bg-[var(--success-subtle)] px-2 py-1 text-[12px] font-semibold text-[var(--success)]">
+              <ArrowDownToLine aria-hidden className="h-3.5 w-3.5" />
+              {t("task.addsStock")}
+            </span>
+            <span className="mono text-[12px] text-[var(--muted)]">{line.sku}</span>
+          </div>
+          <div>
+            <div className="text-[15px] font-semibold">{line.name}</div>
+            <div className="text-[26px] font-semibold">
+              <QuantityDisplay value={countQty} signed />
+            </div>
+          </div>
+          <div className="grid grid-cols-1 gap-2 min-[480px]:grid-cols-2">
+            <ReviewCell label={t("task.destination")}>
+              <span className="mono">{DEFAULT_STORAGE_LABEL}</span>
+            </ReviewCell>
+            <ReviewCell label={t("task.onHandAt", { storage: DEFAULT_STORAGE_LABEL })}>
+              {storage.status === "ready" && afterQty ? (
+                <QuantityChange before={storage.onHand} after={afterQty} estimate />
+              ) : (
+                <span className="text-[var(--muted)]">—</span>
+              )}
+            </ReviewCell>
+          </div>
+          {line.trackBatch ? (
+            <ReviewCell label={t("task.newLot")}>
+              <LotChip lot={line.lot_no || null} />
+              {line.trackExpiry ? (
+                <div className="mt-1 text-[12px] font-normal text-[var(--muted)]">
+                  {t("task.mfgDate")} {line.mfg_date || "—"} · {t("task.expiryDate")} {line.expiry_date || "—"}
+                </div>
+              ) : null}
+            </ReviewCell>
+          ) : null}
+          {line.remark ? <ReviewCell label={t("task.noteLabel")}>{line.remark}</ReviewCell> : null}
+          <p className="text-[12px] text-[var(--muted)]">{t("review.estimateNote")}</p>
+        </ReviewSheet>
+      ) : null}
 
       <CameraBarcodeScanner
         open={cameraOpen}
@@ -605,7 +655,7 @@ export function StockInConsole() {
           setCameraOpen(v);
           if (!v) requestAnimationFrame(() => scanner.focus());
         }}
-        title="Scan an item"
+        title={t("task.scanAnItem")}
         onDecode={(value) => {
           setCameraOpen(false);
           void handleScan(value);

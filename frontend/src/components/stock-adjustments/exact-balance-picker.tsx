@@ -3,6 +3,9 @@
 import * as React from "react";
 
 import { QuantityDisplay } from "@/components/ui/quantity-display";
+import { LocalDate } from "@/components/ui/local-date";
+import { LotChip } from "@/components/ui/lot-chip";
+import { useT } from "@/lib/i18n/client";
 import type { StockBalanceRow } from "@/lib/api/schemas/stock";
 import type { Warehouse } from "@/lib/api/schemas/warehouses";
 
@@ -75,27 +78,27 @@ export function ExactBalancePicker({
   selectedKey: string | null;
   onPick: (option: BalanceOption) => void;
 }) {
+  const t = useT();
   if (loading) {
-    return <p className="text-[12.5px] text-[var(--muted)]">Loading this product&apos;s lots…</p>;
+    return <p className="text-[13px] text-[var(--muted)]">{t("adjust.lotsLoading")}</p>;
   }
   if (error) {
     return (
-      <p role="alert" className="text-[12.5px] text-[var(--danger)]">
-        Couldn&apos;t load this product&apos;s lots. Try again in a moment.
+      <p role="alert" className="text-[13px] text-[var(--danger)]">
+        {t("adjust.lotsError")}
       </p>
     );
   }
   if (options.length === 0) {
     return (
-      <p className="rounded-[var(--r-md)] border border-dashed border-[var(--border)] p-4 text-center text-[12.5px] text-[var(--muted)]">
-        No lot of this product has a stock record at an active location. Receive the lot first (Batch In or a PO
-        receipt) — an adjustment never creates a new lot balance.
+      <p className="rounded-[var(--r-md)] border border-dashed border-[var(--border)] p-4 text-center text-[13px] text-[var(--muted)]">
+        {t("adjust.lotsNone")}
       </p>
     );
   }
   return (
     <fieldset className="flex flex-col gap-2">
-      <legend className="mb-1 text-[12px] text-[var(--muted)]">Lot and location (exact balance)</legend>
+      <legend className="mb-1 text-[12px] text-[var(--muted)]">{t("adjust.lotsLegend")}</legend>
       {options.map((o) => {
         const active = o.key === selectedKey;
         return (
@@ -111,32 +114,38 @@ export function ExactBalancePicker({
                 : "border-[var(--border-strong)] bg-[var(--surface)] hover:border-[var(--accent)]")
             }
           >
-            <span className="flex flex-col">
-              <span className="text-[13.5px] font-semibold">
-                <span className="mono">{o.lotNo}</span>
+            <span className="flex min-w-0 flex-col gap-1">
+              <span className="flex flex-wrap items-center gap-2 text-[14px] font-semibold">
+                <LotChip lot={o.lotNo} />
                 {o.isExpired ? (
-                  <span className="ml-2 rounded-[var(--r-full)] bg-[var(--danger-subtle)] px-2 py-[1px] text-[10.5px] font-semibold uppercase text-[var(--danger)]">
-                    Expired
+                  <span className="rounded-[var(--r-full)] bg-[var(--danger-subtle)] px-2 py-[1px] text-[12px] font-semibold text-[var(--danger)]">
+                    {t("adjust.expired")}
                   </span>
                 ) : null}
               </span>
-              <span className="text-[11.5px] text-[var(--muted)]">
+              <span className="text-[12px] text-[var(--muted)]">
                 {o.warehouseLabel} · {o.locationLabel}
-                {o.expiryDate ? ` · exp ${o.expiryDate}` : ""}
+                {o.expiryDate ? (
+                  <>
+                    {" · "}
+                    {t("adjust.exp")} <LocalDate iso={o.expiryDate} isoInEnglish />
+                  </>
+                ) : null}
               </span>
             </span>
-            <span className="grid grid-cols-3 gap-3 text-[11.5px] tabular-nums">
+            {/* phrasing content only — a button cannot hold the <dl> StockTriad */}
+            <span className="grid grid-cols-3 gap-3 text-[12px] tabular-nums">
               <span className="flex flex-col">
-                <span className="text-[var(--faint)]">On hand</span>
+                <span className="text-[var(--muted)]">{t("qty.onHand")}</span>
                 <QuantityDisplay value={o.onHand} className="font-semibold" />
               </span>
               <span className="flex flex-col">
-                <span className="text-[var(--faint)]">Reserved</span>
+                <span className="text-[var(--muted)]">{t("qty.reserved")}</span>
                 <QuantityDisplay value={o.reserved} />
               </span>
               <span className="flex flex-col">
-                <span className="text-[var(--faint)]">Available</span>
-                <QuantityDisplay value={o.available} />
+                <span className="text-[var(--muted)]">{t("qty.available")}</span>
+                <QuantityDisplay value={o.available} className="font-semibold" />
               </span>
             </span>
           </button>

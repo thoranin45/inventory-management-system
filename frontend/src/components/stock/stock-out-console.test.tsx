@@ -28,7 +28,21 @@ const OTHER = { id: 6, sku: "WH-TEA", product_name: "Tea 1kg", is_active: true, 
 const resolveBarcode = vi.fn();
 vi.mock("@/lib/query/sales", () => ({ resolveBarcode: (...a: unknown[]) => resolveBarcode(...a) }));
 
+// R4.3: the review's before → after estimate reads the MAIN / DEFAULT balance
+const MAIN_BALANCE = {
+  id: 1, product_id: 5, warehouse_id: 1, location_id: 11, batch_id: null, batch_lot_no: null,
+  on_hand_qty: "10.000", reserved_qty: "0.000", available_qty: "10.000", is_transit: false,
+  batch_expiry_date: null, days_to_expiry: null, is_expired: false, as_of_date: "2026-10-17",
+};
+let stockRows: unknown[] = [MAIN_BALANCE];
+vi.mock("@/lib/query/warehouses", () => ({
+  useWarehouses: () => ({
+    data: [{ id: 1, warehouse_code: "MAIN", locations: [{ id: 11, location_code: "DEFAULT" }] }],
+    isError: false,
+  }),
+}));
 vi.mock("@/lib/query/hooks", () => ({
+  useAllProductStock: () => ({ data: { items: stockRows }, isLoading: false, isError: false }),
   useProducts: () => ({ data: { items: [PRODUCT, OTHER] }, isFetching: false }),
 }));
 
@@ -39,6 +53,15 @@ vi.mock("@/lib/query/stock", () => ({
 }));
 
 import { StockOutConsole } from "./stock-out-console";
+
+/* R4 review before commit (D-R4-4): Save is now Review, then an explicit Confirm. */
+const reviewButton = (n?: number) =>
+  screen.getByRole("button", { name: n === undefined ? /review stock out/i : new RegExp(`review stock out \\(${n}\\)`, "i") });
+/** open the review (unless a failed confirm left it open) and confirm — the existing save */
+async function reviewAndConfirm(user: ReturnType<typeof userEvent.setup>) {
+  if (!screen.queryByRole("dialog")) await user.click(reviewButton());
+  await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^confirm /i }));
+}
 import { LanguageProvider } from "@/lib/i18n/client";
 import { LanguageSwitch } from "@/components/shell/language-switch";
 
@@ -97,6 +120,7 @@ beforeEach(() => {
   // — a left-over queued value from one test would otherwise silently shift
   // which response the NEXT test's resolveBarcode call receives.
   vi.resetAllMocks();
+  stockRows = [MAIN_BALANCE];
   clock = 1_700_000_000_000;
   nowSpy = vi.spyOn(Date, "now").mockImplementation(() => clock);
   try {
@@ -120,21 +144,21 @@ describe("StockOutConsole — setup", () => {
     expect(screen.queryByRole("button", { name: /start scanning/i })).not.toBeInTheDocument();
     await pick(user, /Coffee 1kg/);
     expect(screen.getByRole("button", { name: /start scanning/i })).toBeEnabled();
-    expect(screen.getByRole("button", { name: /เข้าก่อน ออกก่อน/i })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: /^FIFO/i })).toHaveAttribute("aria-pressed", "false");
   });
 
   it("shows the fetched availability once a product is picked", async () => {
     const user = userEvent.setup();
     render(<StockOutConsole />);
     await pick(user, /Coffee 1kg/);
-    expect(await screen.findByText("20.00")).toBeInTheDocument();
+    expect(await screen.findByText("20.000")).toBeInTheDocument();
   });
 
   it("lets the operator switch strategy before starting, and the choice sticks", async () => {
     const user = userEvent.setup();
     render(<StockOutConsole />);
     await pick(user, /Coffee 1kg/);
-    const fifoButton = screen.getByRole("button", { name: /เข้าก่อน ออกก่อน \(FIFO\)/i });
+    const fifoButton = screen.getByRole("button", { name: /^FIFO/i });
     await user.click(fifoButton);
     expect(fifoButton).toHaveAttribute("aria-pressed", "true");
   });
@@ -147,7 +171,7 @@ describe("StockOutConsole — pending-operation safety (no silent product/strate
     await pick(user, /Coffee 1kg/);
     await startScanning(user);
 
-    expect(screen.queryByRole("button", { name: /เข้าก่อน ออกก่อน/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^FIFO/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: /search products/i })).not.toBeInTheDocument();
     // the only way to touch product/strategy again is to abandon the session
     expect(screen.getByRole("button", { name: /clear session/i })).toBeInTheDocument();
@@ -233,7 +257,7 @@ describe("StockOutConsole — scan session", () => {
     expect(await screen.findByText(/Matched — ready to issue 2/i)).toBeInTheDocument();
 
     expect(await screen.findByText(/Over the last-known available quantity/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /issue 2 items/i })).toBeEnabled();
+    expect(reviewButton(2)).toBeEnabled();
   });
 
   it("ignores a bounced repeat of the same barcode inside the dedupe window", async () => {
@@ -278,7 +302,7 @@ describe("StockOutConsole — save-once", () => {
     render(<StockOutConsole />);
     await pick(user, /Coffee 1kg/);
     if (strategy === "fifo") {
-      await user.click(screen.getByRole("button", { name: /เข้าก่อน ออกก่อน \(FIFO\)/i }));
+      await user.click(screen.getByRole("button", { name: /^FIFO/i }));
     }
     await startScanning(user);
     resolveBarcode.mockResolvedValueOnce(lookupResult(PRODUCT));
@@ -289,7 +313,7 @@ describe("StockOutConsole — save-once", () => {
     const user = userEvent.setup();
     await toCountOne(user, "fefo");
 
-    await user.click(screen.getByRole("button", { name: /issue 1 item/i }));
+    await reviewAndConfirm(user);
     expect(saveMutate).toHaveBeenCalledTimes(1);
     const [args] = saveMutate.mock.calls[0];
     expect(args.body).toEqual({ endpoint: "stock/out-fefo", json: { product_id: 5, quantity: "1" } });
@@ -301,7 +325,7 @@ describe("StockOutConsole — save-once", () => {
     const user = userEvent.setup();
     await toCountOne(user, "fifo");
 
-    await user.click(screen.getByRole("button", { name: /issue 1 item/i }));
+    await reviewAndConfirm(user);
     const [args] = saveMutate.mock.calls[0];
     expect(args.body.endpoint).toBe("stock/out-fifo");
   });
@@ -312,7 +336,7 @@ describe("StockOutConsole — save-once", () => {
       opts.onSuccess({ product_id: 5, product_name: "Coffee 1kg", previous_stock: "20.000", current_stock: "19.000", difference: "-1.000" }),
     );
     await toCountOne(user);
-    await user.click(screen.getByRole("button", { name: /issue 1 item/i }));
+    await reviewAndConfirm(user);
 
     expect(await screen.findByText("Stock issued")).toBeInTheDocument();
     expect(screen.getByText(/On hand/)).toBeInTheDocument();
@@ -326,8 +350,8 @@ describe("StockOutConsole — save-once", () => {
     );
     await toCountOne(user);
 
-    await user.click(screen.getByRole("button", { name: /issue 1 item/i }));
-    await user.click(screen.getByRole("button", { name: /issue 1 item/i }));
+    await reviewAndConfirm(user);
+    await reviewAndConfirm(user);
 
     expect(saveMutate).toHaveBeenCalledTimes(2);
     const k1 = saveMutate.mock.calls[0][0].idempotencyKey;
@@ -345,12 +369,12 @@ describe("StockOutConsole — save-once", () => {
       ),
     );
     await toCountOne(user);
-    await user.click(screen.getByRole("button", { name: /issue 1 item/i }));
+    await reviewAndConfirm(user);
 
     expect(await screen.findByText(/can no longer be saved/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /start new stock-out session/i })).toBeInTheDocument();
     // Save is blocked until a new session is explicitly started
-    expect(screen.getByRole("button", { name: /issue 1 item/i })).toBeDisabled();
+    expect(reviewButton(1)).toBeDisabled();
   });
 
   it("duplicate-submit prevention: Save is disabled while a mutation is pending", async () => {
@@ -373,7 +397,7 @@ describe("StockOutConsole — reload / lost-response safety", () => {
     // Fire a Save and never resolve it — exactly what a lost response /
     // network timeout looks like from the console's point of view: the
     // mutation promise just never settles.
-    await user.click(screen.getByRole("button", { name: /issue 1 item/i }));
+    await reviewAndConfirm(user);
     expect(saveMutate).toHaveBeenCalledTimes(1);
     const firstKey = saveMutate.mock.calls[0][0].idempotencyKey;
 
@@ -386,11 +410,11 @@ describe("StockOutConsole — reload / lost-response safety", () => {
     // The reloaded console rehydrates mid-session — still on the scan
     // screen, same count, not reset to the setup picker.
     expect(screen.getByText("1", { selector: "span.font-bold" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /issue 1 item/i })).toBeEnabled();
+    expect(reviewButton(1)).toBeEnabled();
 
     // Retrying after the reload must reuse the exact same key — an
     // unresolved operation must never silently acquire a new one.
-    await user.click(screen.getByRole("button", { name: /issue 1 item/i }));
+    await reviewAndConfirm(user);
     const secondKey = saveMutate.mock.calls[1][0].idempotencyKey;
     expect(secondKey).toBe(firstKey);
   });
@@ -421,7 +445,7 @@ describe("StockOutConsole — availability race (stale lookup never wins)", () =
     const optionB = await screen.findByRole("option", { name: /Tea 1kg/ });
     await user.click(within(optionB).getByRole("button"));
 
-    expect(await screen.findByText("7.00")).toBeInTheDocument(); // B's own availability
+    expect(await screen.findByText("7.000")).toBeInTheDocument(); // B's own availability
 
     // NOW let A's stale lookup resolve.
     await act(async () => {
@@ -430,9 +454,9 @@ describe("StockOutConsole — availability race (stale lookup never wins)", () =
     });
 
     // A's stale value must never appear anywhere, and B's must still be shown.
-    expect(screen.queryByText("99.00")).not.toBeInTheDocument();
-    expect(screen.getByText("7.00")).toBeInTheDocument();
-    expect(screen.getByText("Tea 1kg")).toBeInTheDocument();
+    expect(screen.queryByText("99.000")).not.toBeInTheDocument();
+    expect(screen.getByText("7.000")).toBeInTheDocument();
+    expect(screen.getAllByText("Tea 1kg").length).toBeGreaterThan(0); // R4: also in the side card
   });
 
   it("a pending availability lookup resolving after unmount does not throw or warn", async () => {
@@ -467,7 +491,6 @@ describe("StockOutConsole — availability race (stale lookup never wins)", () =
 /* ------------------- R3.0 characterization (pre-refactor) ------------------- */
 
 describe("StockOutConsole — characterization (R3.0)", () => {
-  const saveButton = (n: number) => screen.getByRole("button", { name: new RegExp(`issue ${n} items?`, "i") });
 
   async function countScans(user: ReturnType<typeof userEvent.setup>, n: number) {
     for (let i = 1; i <= n; i++) {
@@ -479,7 +502,7 @@ describe("StockOutConsole — characterization (R3.0)", () => {
 
   async function sessionAt(user: ReturnType<typeof userEvent.setup>, n: number, strategy: "fefo" | "fifo" = "fefo") {
     await pick(user, /Coffee 1kg/);
-    if (strategy === "fifo") await user.click(screen.getByRole("button", { name: /\(FIFO\)/i }));
+    if (strategy === "fifo") await user.click(screen.getByRole("button", { name: /^FIFO/i }));
     await startScanning(user);
     await countScans(user, n);
   }
@@ -488,12 +511,12 @@ describe("StockOutConsole — characterization (R3.0)", () => {
     const user = userEvent.setup();
     render(<StockOutConsole />);
     await pick(user, /Coffee 1kg/);
-    await user.click(screen.getByRole("button", { name: /\(FIFO\)/i }));
+    await user.click(screen.getByRole("button", { name: /^FIFO/i }));
     await user.type(screen.getByPlaceholderText("0.000"), "9");
     await user.type(screen.getByPlaceholderText("e.g. order pick"), "  pick 7  ");
     await startScanning(user);
     await countScans(user, 3);
-    await user.click(saveButton(3));
+    await reviewAndConfirm(user);
     expect(saveMutate.mock.calls[0][0]).toEqual({
       body: { endpoint: "stock/out-fifo", json: { product_id: 5, quantity: "3", remark: "pick 7" } },
       idempotencyKey: expect.stringMatching(/^stockout-/),
@@ -509,12 +532,12 @@ describe("StockOutConsole — characterization (R3.0)", () => {
     );
     render(<StockOutConsole />);
     await sessionAt(user, 1);
-    await user.click(saveButton(1));
+    await reviewAndConfirm(user);
     expect(screen.queryByText(/can no longer be saved/i)).not.toBeInTheDocument();
     saveMutate.mockImplementationOnce((_a, opts) =>
       opts.onError(new ApiError({ status: 409, message: "x Different Payload x", requestId: "r" })),
     );
-    await user.click(saveButton(1));
+    await reviewAndConfirm(user);
     expect(await screen.findByText(/can no longer be saved/i)).toBeInTheDocument();
     expect(saveMutate.mock.calls[0][0].idempotencyKey).toBe(saveMutate.mock.calls[1][0].idempotencyKey);
   });
@@ -526,12 +549,12 @@ describe("StockOutConsole — characterization (R3.0)", () => {
     );
     render(<StockOutConsole />);
     await sessionAt(user, 1, "fifo");
-    await user.click(saveButton(1));
+    await reviewAndConfirm(user);
     const k1 = saveMutate.mock.calls[0][0].idempotencyKey;
     await user.click(await screen.findByRole("button", { name: /start new stock-out session/i }));
     expect(screen.queryByLabelText("Barcode scan input")).not.toBeInTheDocument();
     await sessionAt(user, 1);
-    await user.click(saveButton(1));
+    await reviewAndConfirm(user);
     expect(saveMutate.mock.calls[1][0].body.endpoint).toBe("stock/out-fefo");
     expect(saveMutate.mock.calls[1][0].idempotencyKey).not.toBe(k1);
   });
@@ -543,11 +566,11 @@ describe("StockOutConsole — characterization (R3.0)", () => {
     );
     render(<StockOutConsole />);
     await sessionAt(user, 1);
-    await user.click(saveButton(1));
+    await reviewAndConfirm(user);
     const k1 = saveMutate.mock.calls[0][0].idempotencyKey;
     await user.click(screen.getByRole("button", { name: /issue next product/i }));
     await sessionAt(user, 1);
-    await user.click(saveButton(1));
+    await reviewAndConfirm(user);
     expect(saveMutate.mock.calls[1][0].idempotencyKey).not.toBe(k1);
   });
 
@@ -557,23 +580,94 @@ describe("StockOutConsole — characterization (R3.0)", () => {
     vi.stubGlobal("fetch", fetchMock);
     try {
       render(
-        <LanguageProvider initialLocale="th">
+        <LanguageProvider initialLocale="en">
           <LanguageSwitch />
           <StockOutConsole />
         </LanguageProvider>,
       );
       await sessionAt(user, 2, "fifo");
       const scanInput = screen.getByLabelText("Barcode scan input");
-      await user.click(screen.getByRole("button", { name: "EN" }));
       await user.click(screen.getByRole("button", { name: "ไทย" }));
+      await user.click(screen.getByRole("button", { name: "EN" }));
       expect(screen.getByLabelText("Barcode scan input")).toBe(scanInput);
       expect(saveMutate).not.toHaveBeenCalled();
       expect(resolveBarcode).toHaveBeenCalledTimes(3);
       expect(fetchMock.mock.calls.every((c) => (c as unknown[])[0] === "/api/prefs/language")).toBe(true);
-      await user.click(saveButton(2));
+      await reviewAndConfirm(user);
       expect(saveMutate.mock.calls[0][0].body).toEqual({ endpoint: "stock/out-fifo", json: { product_id: 5, quantity: "2" } });
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+/* ------------------- R4 review before commit + lot preview (D-R4-3/4) ------------------- */
+
+describe("StockOutConsole — R4 review and lot preview", () => {
+  const lot = (id: number, lotNo: string, expiry: string | null, over: Record<string, unknown> = {}) => ({
+    ...MAIN_BALANCE, id, batch_id: id, batch_lot_no: lotNo, batch_expiry_date: expiry, days_to_expiry: 100,
+    on_hand_qty: "5.000", available_qty: "5.000", ...over,
+  });
+
+  async function scanningWith(user: ReturnType<typeof userEvent.setup>, n: number) {
+    render(<StockOutConsole />);
+    await pick(user, /Coffee 1kg/);
+    await startScanning(user);
+    for (let i = 1; i <= n; i++) {
+      resolveBarcode.mockResolvedValueOnce(lookupResult(PRODUCT));
+      await scan(user, PRODUCT.barcode);
+      expect(await screen.findByText(new RegExp(`Matched — ready to issue ${i}`, "i"))).toBeInTheDocument();
+    }
+  }
+
+  it("FEFO preview lists eligible lots by expiry, excludes expired lots and never promises a split", async () => {
+    stockRows = [
+      lot(2, "LOT-LATE", "2027-12-01"),
+      lot(3, "LOT-EXPIRED", "2026-01-01", { is_expired: true }),
+      lot(4, "LOT-SOON", "2027-01-01"),
+    ];
+    const user = userEvent.setup();
+    render(<StockOutConsole />);
+    await pick(user, /Coffee 1kg/);
+    const list = screen.getByText("Eligible lots, earliest expiry first").nextElementSibling as HTMLElement;
+    expect(within(list).getAllByText(/^LOT-/).map((e) => e.textContent)).toEqual(["LOT-SOON", "LOT-LATE"]);
+    expect(screen.queryByText("LOT-EXPIRED")).toBeNull();
+    expect(screen.getByText("Preview only — the server selects the final lots.")).toBeInTheDocument();
+  });
+
+  it("FIFO lists the same lots but states that no FIFO order can be shown", async () => {
+    stockRows = [lot(2, "LOT-B", "2027-12-01"), lot(4, "LOT-A", "2027-01-01")];
+    const user = userEvent.setup();
+    render(<StockOutConsole />);
+    await pick(user, /Coffee 1kg/);
+    await user.click(screen.getByRole("button", { name: /^FIFO/i }));
+    expect(screen.getByText("Eligible lots")).toBeInTheDocument();
+    expect(screen.getByText(/FIFO order is not shown/)).toBeInTheDocument();
+    expect(screen.getByText("Preview only — the server selects the final lots.")).toBeInTheDocument();
+  });
+
+  it("the review shows the removal, the strategy and the labelled estimate, and sends nothing until Confirm", async () => {
+    const user = userEvent.setup();
+    await scanningWith(user, 2);
+    await user.click(reviewButton(2));
+    const dialog = screen.getByRole("dialog", { name: "Confirm stock out" });
+    expect(within(dialog).getByText("Removes stock")).toBeInTheDocument();
+    expect(within(dialog).getByText("−2.000")).toBeInTheDocument();
+    expect(dialog.textContent).toMatch(/10\.000.*8\.000.*estimate/);
+    expect(within(dialog).getByText("Preview only — the server selects the final lots.")).toBeInTheDocument();
+    expect(saveMutate).not.toHaveBeenCalled();
+    await user.click(within(dialog).getByRole("button", { name: "Confirm −2.000" }));
+    expect(saveMutate).toHaveBeenCalledTimes(1);
+    expect(saveMutate.mock.calls[0][0].body).toEqual({ endpoint: "stock/out-fefo", json: { product_id: 5, quantity: "2" } });
+  });
+
+  it("while the review is open a hardware scan neither counts nor confirms", async () => {
+    const user = userEvent.setup();
+    await scanningWith(user, 1);
+    await user.click(reviewButton(1));
+    clock += 5_000;
+    await user.keyboard(`${PRODUCT.barcode}{Enter}`);
+    expect(saveMutate).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 });

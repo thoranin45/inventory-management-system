@@ -46,7 +46,13 @@ beforeEach(() => {
 });
 
 const qty = () => screen.getAllByLabelText("Receive now"); // coffee (item 1), sugar (item 2)
-const receiveBtn = () => screen.getAllByRole("button", { name: /^Receive$/i })[0];
+const reviewBtn = () => screen.getAllByRole("button", { name: /^Review receipt$/i })[0];
+// R4: Review opens the sheet (sends nothing); only Confirm posts
+async function reviewAndConfirm(user: ReturnType<typeof userEvent.setup>) {
+  if (!screen.queryByRole("dialog")) await user.click(reviewBtn());
+  await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^confirm receipt/i }));
+}
+const receiveBtn = reviewBtn;
 
 describe("TransferReceivingConsole — lines + guards", () => {
   it("renders a line per transfer item, the route, and a disabled Receive", () => {
@@ -75,7 +81,7 @@ describe("TransferReceivingConsole — receive with a persisted Idempotency-Key"
 
     await user.type(qty()[1], "3"); // sugar (transfer_item_id 2)
     expect(receiveBtn()).toBeEnabled();
-    await user.click(receiveBtn());
+    await reviewAndConfirm(user);
 
     const [args] = receiveMutate.mock.calls[0];
     expect(args.id).toBe(1);
@@ -92,7 +98,7 @@ describe("TransferReceivingConsole — receive with a persisted Idempotency-Key"
     render(<TransferReceivingConsole transferId={1} />);
     await user.type(qty()[0], "5");
     await user.type(qty()[1], "4");
-    await user.click(receiveBtn());
+    await reviewAndConfirm(user);
     expect(receiveMutate.mock.calls[0][0].payload.items).toEqual([
       { transfer_item_id: 1, quantity: "5.000" },
       { transfer_item_id: 2, quantity: "4.000" },
@@ -110,7 +116,7 @@ describe("TransferReceivingConsole — rejections", () => {
     );
     render(<TransferReceivingConsole transferId={1} />);
     await user.type(qty()[1], "3");
-    await user.click(receiveBtn());
+    await reviewAndConfirm(user);
     expect(toast.error).toHaveBeenCalledWith(
       "Receipt rejected",
       expect.objectContaining({ description: expect.stringMatching(/still in transit.*req-over/i) }),
@@ -127,7 +133,7 @@ describe("TransferReceivingConsole — rejections", () => {
     );
     render(<TransferReceivingConsole transferId={1} />);
     await user.type(qty()[1], "3");
-    await user.click(receiveBtn());
+    await reviewAndConfirm(user);
     const alert = await screen.findByRole("alert");
     expect(within(alert).getByText(/already submitted with different quantities/i)).toBeInTheDocument();
     await user.click(within(alert).getByRole("button", { name: /start a new receipt/i }));
@@ -145,7 +151,7 @@ describe("TransferReceivingConsole — expired in transit / not receivable", () 
     expect(screen.getByText(/Expired in transit — receive required/i)).toBeInTheDocument();
     await user.type(qty()[0], "5"); // coffee, the expired line
     expect(receiveBtn()).toBeEnabled();
-    await user.click(receiveBtn());
+    await reviewAndConfirm(user);
     expect(receiveMutate).toHaveBeenCalledTimes(1);
   });
 
@@ -167,7 +173,7 @@ describe("TransferReceivingConsole — characterization (R3.0)", () => {
     render(<TransferReceivingConsole transferId={1} />);
     await user.type(qty()[1], "1.5");
     await user.type(qty()[0], "2");
-    await user.click(receiveBtn());
+    await reviewAndConfirm(user);
     expect(receiveMutate.mock.calls[0][0]).toEqual({
       id: 1,
       idempotencyKey: expect.stringMatching(/^tr-rcpt-/),
@@ -193,13 +199,13 @@ describe("TransferReceivingConsole — characterization (R3.0)", () => {
     receiveMutate.mockImplementation((_a, opts) => opts.onError(new ApiError({ status: 503, message: "down", requestId: "r" })));
     const first = render(<TransferReceivingConsole transferId={1} />);
     await user.type(qty()[0], "2");
-    await user.click(receiveBtn());
-    await user.click(receiveBtn());
+    await reviewAndConfirm(user);
+    await reviewAndConfirm(user);
     expect(receiveMutate.mock.calls[1][0]).toEqual(receiveMutate.mock.calls[0][0]);
     first.unmount();
     render(<TransferReceivingConsole transferId={1} />);
     expect(qty()[0]).toHaveValue("2");
-    await user.click(receiveBtn());
+    await reviewAndConfirm(user);
     expect(receiveMutate.mock.calls[2][0]).toEqual(receiveMutate.mock.calls[0][0]);
   });
 
@@ -208,11 +214,11 @@ describe("TransferReceivingConsole — characterization (R3.0)", () => {
     receiveMutate.mockImplementation((_a, opts) => opts.onSuccess(transferReceiptResponse));
     render(<TransferReceivingConsole transferId={1} />);
     await user.type(qty()[0], "2");
-    await user.click(receiveBtn());
+    await reviewAndConfirm(user);
     const k1 = receiveMutate.mock.calls[0][0].idempotencyKey;
     expect(qty()[0]).toHaveValue("");
     await user.type(qty()[0], "2");
-    await user.click(receiveBtn());
+    await reviewAndConfirm(user);
     expect(receiveMutate.mock.calls[1][0].idempotencyKey).not.toBe(k1);
     const receipt = transferReceiptResponse.receipt_number;
     expect(screen.getAllByText((_, el) => el?.textContent === receipt && el.children.length === 0)).toHaveLength(1);
@@ -225,12 +231,12 @@ describe("TransferReceivingConsole — characterization (R3.0)", () => {
     );
     render(<TransferReceivingConsole transferId={1} />);
     await user.type(qty()[0], "2");
-    await user.click(receiveBtn());
+    await reviewAndConfirm(user);
     expect(toast.error).toHaveBeenCalledWith("Receipt rejected", expect.anything());
     expect(screen.queryByRole("button", { name: /start a new receipt/i })).toBeNull();
 
     receiveMutate.mockImplementationOnce((_a, opts) => opts.onError(new ApiError({ status: 500, message: MISMATCH, requestId: "r" })));
-    await user.click(receiveBtn());
+    await reviewAndConfirm(user);
     expect(await screen.findByRole("button", { name: /start a new receipt/i })).toBeInTheDocument();
   });
 
@@ -239,10 +245,10 @@ describe("TransferReceivingConsole — characterization (R3.0)", () => {
     receiveMutate.mockImplementationOnce((_a, opts) => opts.onError(new ApiError({ status: 409, message: MISMATCH, requestId: "r" })));
     render(<TransferReceivingConsole transferId={1} />);
     await user.type(qty()[0], "2");
-    await user.click(receiveBtn());
+    await reviewAndConfirm(user);
     expect(receiveBtn()).toBeDisabled();
     await user.click(screen.getByRole("button", { name: /start a new receipt/i }));
-    await user.click(receiveBtn());
+    await reviewAndConfirm(user);
     expect(receiveMutate.mock.calls[1][0].payload).toEqual(receiveMutate.mock.calls[0][0].payload);
     expect(receiveMutate.mock.calls[1][0].idempotencyKey).not.toBe(receiveMutate.mock.calls[0][0].idempotencyKey);
   });
@@ -302,19 +308,77 @@ describe("TransferReceivingConsole — characterization (R3.0)", () => {
     vi.stubGlobal("fetch", fetchMock);
     try {
       render(
-        <LanguageProvider initialLocale="th">
+        <LanguageProvider initialLocale="en">
           <LanguageSwitch />
           <TransferReceivingConsole transferId={1} />
         </LanguageProvider>,
       );
       await user.type(qty()[0], "2");
       const input = qty()[0];
-      await user.click(screen.getByRole("button", { name: "EN" }));
       await user.click(screen.getByRole("button", { name: "ไทย" }));
+      await user.click(screen.getByRole("button", { name: "EN" }));
       expect(qty()[0]).toBe(input);
       expect(input).toHaveValue("2");
       expect(receiveMutate).not.toHaveBeenCalled();
       expect(fetchMock.mock.calls.every((c) => (c as unknown[])[0] === "/api/prefs/language")).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+/* ------------------- R4 review before commit (D-R4-4) ------------------- */
+
+describe("TransferReceivingConsole — R4 review before commit", () => {
+  it("opening the review sends nothing and lists the included line, its in-transit after and the destination", async () => {
+    const user = userEvent.setup();
+    render(<TransferReceivingConsole transferId={1} />);
+    await user.type(qty()[0], "1");
+    await user.click(reviewBtn());
+    const dialog = screen.getByRole("dialog");
+    expect(receiveMutate).not.toHaveBeenCalled();
+    expect(within(dialog).getByText("+1.000")).toBeInTheDocument();
+    expect(within(dialog).getByText("Destination")).toBeInTheDocument();
+    expect(within(dialog).getByText(/in transit after/)).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Confirm receipt +1.000" })).toBeInTheDocument();
+  });
+
+  it("Back to edit keeps the entry; Escape returns focus; only Confirm posts", async () => {
+    const user = userEvent.setup();
+    render(<TransferReceivingConsole transferId={1} />);
+    await user.type(qty()[0], "1");
+    await user.click(reviewBtn());
+    await user.click(screen.getByRole("button", { name: "Back to edit" }));
+    expect(qty()[0]).toHaveValue("1");
+    await user.click(reviewBtn());
+    await user.keyboard("{Escape}");
+    expect(reviewBtn()).toHaveFocus();
+    expect(receiveMutate).not.toHaveBeenCalled();
+    await reviewAndConfirm(user);
+    expect(receiveMutate).toHaveBeenCalledTimes(1);
+  });
+
+  it("while the review is open the barcode assist neither resolves nor receives", async () => {
+    const user = userEvent.setup();
+    render(<TransferReceivingConsole transferId={1} />);
+    await user.type(qty()[0], "1");
+    await user.click(reviewBtn());
+    await user.keyboard("8800000000001{Enter}");
+    expect(resolveBarcode).not.toHaveBeenCalled();
+    expect(receiveMutate).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("is translated: Thai review button and the system-transit route", () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 204 })));
+    try {
+      render(
+        <LanguageProvider initialLocale="th">
+          <TransferReceivingConsole transferId={1} />
+        </LanguageProvider>,
+      );
+      expect(screen.getAllByRole("button", { name: "ตรวจสอบใบรับ" })[0]).toBeDisabled();
+      expect(screen.getByText("ระหว่างขนส่ง (ระบบ)")).toBeInTheDocument();
     } finally {
       vi.unstubAllGlobals();
     }

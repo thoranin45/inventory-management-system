@@ -16,6 +16,10 @@ vi.mock("@/lib/query/hooks", () => ({
   useProducts: (...a: unknown[]) => useProducts(...a),
   useInTransitStock: (...a: unknown[]) => useInTransitStock(...a),
 }));
+// R4.2: in-transit rows name their product through the existing product lookup
+vi.mock("@/lib/query/sales", () => ({
+  useProductLookup: () => ({ data: { 1: { id: 1, sku: "MILK-001", product_name: "Fresh Milk 1L" } } }),
+}));
 vi.mock("@/lib/query/master-data", () => ({
   useAllCategories: () => ({ data: [{ id: 9, category_name: "Dairy" }, { id: 10, category_name: "Bakery" }] }),
 }));
@@ -33,6 +37,7 @@ vi.mock("@/components/stock/barcode-lookup-sheet", () => ({
 }));
 
 import { StockView } from "./stock-view";
+import { LanguageProvider } from "@/lib/i18n/client";
 
 const MILK = {
   id: 1,
@@ -146,21 +151,32 @@ describe("StockView — product-centric list (reuses GET /products, not raw bala
     expect(screen.getByText(/no server-side filter exists for stock status/i)).toBeInTheDocument();
   });
 
-  it("Lot/Batch: shows the lot number for a single-lot batch-tracked product, and 'ไม่ติดตาม Lot' for a non-batch product", () => {
+  it("Lot/Batch: shows the lot number for a single-lot batch-tracked product, and 'Lot not tracked' for a non-batch product", () => {
     render(<StockView />);
     expect(screen.getByText("LOT-2026-08-01")).toBeInTheDocument();
-    expect(screen.getByText("ไม่ติดตาม Lot")).toBeInTheDocument();
+    // R4: this label was hard-coded Thai in every language; it now follows the UI language
+    expect(screen.getByText("Lot not tracked")).toBeInTheDocument();
   });
 
   it("Expiry: track_expiry=false never shows a misleading expiry warning", () => {
     render(<StockView />);
+    expect(screen.getByText("Expiry not tracked")).toBeInTheDocument();
+  });
+
+  it("the not-tracked labels are Thai in Thai", () => {
+    render(
+      <LanguageProvider initialLocale="th">
+        <StockView />
+      </LanguageProvider>,
+    );
+    expect(screen.getByText("ไม่ติดตามล็อต")).toBeInTheDocument();
     expect(screen.getByText("ไม่ติดตามวันหมดอายุ")).toBeInTheDocument();
   });
 
   it("Available / On Hand / Reserved render the backend-authoritative values (no frontend recalculation)", () => {
     render(<StockView />);
-    expect(screen.getAllByText("125.00").length).toBeGreaterThan(0); // available + on-hand share the value here
-    expect(screen.getByText("10.00")).toBeInTheDocument(); // reserved
+    expect(screen.getAllByText("125.000").length).toBeGreaterThan(0); // available + on-hand share the value here
+    expect(screen.getByText("10.000")).toBeInTheDocument(); // reserved
   });
 
   it("row activation opens the Product Detail Drawer with the full enriched row", async () => {

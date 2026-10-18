@@ -9,7 +9,7 @@ export const metadata: Metadata = { title: "Stock Adjustment Approvals" };
 export default function StockAdjustmentApprovalsPage() {
   return (
     <Suspense fallback={<LoadingState label="Loading approvals…" />}>
-      <StockAdjustmentRequestList scope="approvals" title="Stock Adjustment Approvals" />
+      <StockAdjustmentRequestList scope="approvals" />
     </Suspense>
   );
 }

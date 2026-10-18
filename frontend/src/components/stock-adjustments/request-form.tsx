@@ -1,15 +1,20 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, ChevronRight, ClipboardList, TriangleAlert } from "lucide-react";
+import { CheckCircle2, ClipboardList, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Combobox, type ComboboxItem } from "@/components/ui/combobox";
 import { QuantityDisplay } from "@/components/ui/quantity-display";
+import { StockTriad } from "@/components/ui/stock-triad";
+import { Banner } from "@/components/ui/states";
 import { isApiError } from "@/lib/api/errors";
+import { subtractDecimals } from "@/lib/decimal";
+import { formatQty, formatQtyDelta } from "@/lib/format";
+import { useI18n } from "@/lib/i18n/client";
+import { DICTIONARIES, type MessageKey, type MessageVars } from "@/lib/i18n/translate";
 import { useAllProductStock, useProducts } from "@/lib/query/hooks";
 import { useWarehouses } from "@/lib/query/warehouses";
 import { useIdempotentDraft } from "@/lib/idempotent-draft";
@@ -22,6 +27,8 @@ import {
   BATCH_REASON_CODES,
   batchAdjustmentErrorCopy,
   buildCreateAdjustmentRequestBody,
+  compareQty,
+  isQty,
   REASON_CODES,
   REASON_LABELS,
   type CreateAdjustmentRequestBody,
@@ -80,8 +87,25 @@ function buildPayload(lines: Record<number, RequestLine>): CreateAdjustmentReque
   });
 }
 
+/**
+ * The shared validation rules (schema / logic modules) report English text;
+ * this maps each known message to its dictionary key for display. The rules
+ * themselves are untouched; an unknown message is shown as-is.
+ */
+function ruleMessage(message: string): { key: MessageKey; vars?: MessageVars } | null {
+  if (message === "Quantity must be a number") return { key: "adjust.errQtyNumber" };
+  if (message === "At most 3 decimal places") return { key: "receive.errQtyScale" };
+  if (message.startsWith("Expiry write-off is only for a lot")) return { key: "adjust.errExpiryOnly" };
+  const lower = /^(.*) must lower the quantity: requested must be below observed\.$/.exec(message);
+  if (lower) {
+    const code = (Object.keys(REASON_LABELS) as ReasonCode[]).find((c) => REASON_LABELS[c].label === lower[1]);
+    if (code) return { key: "adjust.errMustLower", vars: { code } };
+  }
+  return null;
+}
+
 const FIELD_CLS =
-  "h-11 w-full rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-[15px] tabular-nums outline-hidden focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-[var(--focus)] disabled:opacity-60";
+  "h-11 w-full rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-[16px] tabular-nums outline-hidden focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-[var(--focus)] disabled:opacity-60 min-[768px]:text-[15px]";
 
 function SelectionNotice({
   selection,
@@ -92,10 +116,11 @@ function SelectionNotice({
   onRetry: () => void;
   onUseRefreshed: (option: BalanceOption) => void;
 }) {
+  const { t } = useI18n();
   if (selection.kind === "checking") {
     return (
       <p role="status" className="text-[12px] text-[var(--muted)]">
-        Checking the latest balance for this lot…
+        {t("adjust.checkingBalance")}
       </p>
     );
   }
@@ -106,29 +131,20 @@ function SelectionNotice({
     >
       {selection.kind === "error" ? (
         <>
-          <span>Couldn&apos;t refresh this lot&apos;s balance, so it can&apos;t be submitted yet.</span>
+          <span>{t("adjust.refreshFailed")}</span>
           <Button variant="secondary" size="sm" className="self-start" onClick={onRetry}>
-            Refresh balance
+            {t("adjust.refreshBalance")}
           </Button>
         </>
       ) : selection.kind === "missing" ? (
-        <span>
-          The selected lot is no longer available at that location (removed, in transit or an inactive location).
-          Pick a lot again.
-        </span>
+        <span>{t("adjust.lotMissing")}</span>
       ) : (
         <>
           <span>
-            This lot&apos;s balance changed since you picked it (now on hand {selection.option.onHand}, reserved{" "}
-            {selection.option.reserved}). Using the refreshed balance resets the observed quantity to the new on-hand.
+            {t("adjust.lotChanged", { onHand: formatQty(selection.option.onHand), reserved: formatQty(selection.option.reserved) })}
           </span>
-          <Button
-            variant="secondary"
-            size="sm"
-            className="self-start"
-            onClick={() => onUseRefreshed(selection.option)}
-          >
-            Use refreshed balance
+          <Button variant="secondary" size="sm" className="self-start" onClick={() => onUseRefreshed(selection.option)}>
+            {t("adjust.useRefreshed")}
           </Button>
         </>
       )}
@@ -138,6 +154,7 @@ function SelectionNotice({
 
 export function StockAdjustmentRequestForm() {
   const router = useRouter();
+  const { t, locale } = useI18n();
 
   const draft = useIdempotentDraft<RequestLine, CreateAdjustmentRequestBody>({
     scope: "stock-adjustment-request:session",
@@ -239,11 +256,20 @@ export function StockAdjustmentRequestForm() {
   const { ruleError, belowReserved, observedError, requestedError, valid } = adjustmentChecks(line, selection);
 
   const reasonOptions: readonly ReasonCode[] = line?.trackBatch ? BATCH_REASON_CODES : REASON_CODES;
+  const reasonText = (code: ReasonCode) => (locale === "th" ? REASON_LABELS[code].labelTh : REASON_LABELS[code].label);
+  const localize = (message: string) => {
+    const m = ruleMessage(message);
+    if (!m) return message;
+    const vars = m.vars?.code ? { reason: reasonText(m.vars.code as ReasonCode) } : m.vars;
+    return t(m.key, vars);
+  };
 
-  const diff =
-    line && line.observed && line.requested && !Number.isNaN(Number(line.observed)) && !Number.isNaN(Number(line.requested))
-      ? Number(line.requested) - Number(line.observed)
-      : null;
+  // exact decimal difference; only once both sides are complete quantities
+  const diff = line && isQty(line.observed) && isQty(line.requested) ? subtractDecimals(line.requested.trim(), line.observed.trim(), 3) : null;
+  const diffSign = line && diff != null ? compareQty(line.requested, line.observed) : 0;
+
+  // the selected exact lot balance (batch) — shown as an on hand / reserved / available triad
+  const pickedOption = line?.trackBatch && selection?.kind === "ok" ? selection.option : null;
 
   const startNew = () => {
     draft.commitSuccess();
@@ -268,8 +294,8 @@ export function StockAdjustmentRequestForm() {
           const copy =
             ADJUSTMENT_REQUEST_ERROR_COPY[backend] ??
             batchAdjustmentErrorCopy(backend) ??
-            (isApiError(e) ? e.userMessage : "The request could not be submitted.");
-          toast.error("Submit failed", { description: rid(e) ? `${copy} · Request ${rid(e)}` : copy });
+            (isApiError(e) ? e.userMessage : t("adjust.submitFallback"));
+          toast.error(t("adjust.submitFailed"), { description: rid(e) ? `${copy} · ${t("task.requestRef", { id: rid(e)! })}` : copy });
         },
       },
     );
@@ -277,41 +303,31 @@ export function StockAdjustmentRequestForm() {
 
   return (
     <div className="flex flex-col gap-4">
-      <nav className="flex items-center gap-1 text-[12px] text-[var(--muted)]" aria-label="Breadcrumb">
-        <Link href="/stock-adjustments/mine" className="font-medium hover:text-[var(--foreground)]">
-          Stock Adjustments
-        </Link>
-        <ChevronRight aria-hidden className="h-3 w-3" />
-        <span className="text-[var(--foreground)]">New request</span>
-      </nav>
-
       <div className="wc-receive-layout">
         <div className="wc-receive-main flex min-w-0 flex-col gap-3">
           <div className="wc-work-head">
             <div>
-              <div className="flex items-center gap-2 text-[16px] font-bold">
+              <h1 className="flex items-center gap-2 text-[18px] font-semibold">
                 <ClipboardList aria-hidden className="h-[18px] w-[18px] text-[var(--accent)]" />
-                New stock adjustment request
-              </div>
-              <div className="text-[12px] text-[var(--muted)]">
-                Submitting never changes inventory — an admin reviews and decides.
-              </div>
+                {t("adjust.formTitle")}
+              </h1>
+              <div className="text-[13px] text-[var(--muted)]">{t("adjust.formSubtitle")}</div>
             </div>
           </div>
 
           {phase === "form" ? (
             <div className="flex flex-col gap-3 rounded-[var(--r-lg)] border border-[var(--border-strong)] bg-[var(--surface)] p-4">
               <label className="flex flex-col gap-1 text-[12px] text-[var(--muted)]">
-                Product
+                {t("adjust.product")}
                 <Combobox
-                  ariaLabel="Search products"
+                  ariaLabel={t("adjust.searchProducts")}
                   value={line ? { id: line.productId, label: line.name, sublabel: line.sku } : null}
                   onChange={pickProduct}
                   onSearch={setTerm}
                   items={comboItems}
                   loading={productQ.isFetching}
-                  placeholder="Search products by name or SKU…"
-                  emptyText={debounced.trim().length < 2 ? "Type at least 2 characters" : "No products match"}
+                  placeholder={t("adjust.searchPlaceholder")}
+                  emptyText={debounced.trim().length < 2 ? t("adjust.typeTwo") : t("adjust.noProducts")}
                 />
               </label>
 
@@ -322,159 +338,172 @@ export function StockAdjustmentRequestForm() {
                       options={batchOptions}
                       loading={stockQ.isLoading || directoryQ.isLoading}
                       error={stockQ.isError || directoryQ.isError}
-                      selectedKey={
-                        line.batchId != null ? `${line.warehouseId}:${line.locationId}:${line.batchId}` : null
-                      }
+                      selectedKey={line.batchId != null ? `${line.warehouseId}:${line.locationId}:${line.batchId}` : null}
                       onPick={pickBalance}
                     />
                   ) : null}
 
                   {line.trackBatch && line.batchId == null ? null : (
-                  <>
-                  <div className="grid grid-cols-2 gap-3">
-                    <label className="flex flex-col gap-1 text-[12px] text-[var(--muted)]">
-                      Observed quantity
-                      <input
-                        inputMode="decimal"
-                        className={FIELD_CLS}
-                        value={line.observed}
-                        onChange={(e) => patch({ observed: e.target.value })}
-                        placeholder="0.000"
-                      />
-                    </label>
-                    <label className="flex flex-col gap-1 text-[12px] text-[var(--muted)]">
-                      Requested (corrected) quantity
-                      <input
-                        inputMode="decimal"
-                        className={FIELD_CLS}
-                        value={line.requested}
-                        onChange={(e) => patch({ requested: e.target.value })}
-                        placeholder="0.000"
-                      />
-                    </label>
-                  </div>
-                  {observedError ? (
-                    <p role="alert" className="text-[12px] text-[var(--danger)]">
-                      Observed: {observedError}
-                    </p>
-                  ) : null}
-                  {requestedError ? (
-                    <p role="alert" className="text-[12px] text-[var(--danger)]">
-                      Requested: {requestedError}
-                    </p>
-                  ) : null}
-
-                  {/* before/after preview — live, client-side, no network round-trip */}
-                  <div
-                    className="flex items-center justify-between rounded-[var(--r-sm)] border border-[var(--border)] bg-[var(--sunken)] px-3 py-2 text-[13px]"
-                    role="status"
-                  >
-                    <span className="text-[var(--muted)]">Observed → Requested</span>
-                    <span className="font-semibold tabular-nums">
-                      {line.observed ? <QuantityDisplay value={line.observed} /> : "—"}
-                      {" → "}
-                      {line.requested ? <QuantityDisplay value={line.requested} /> : "—"}
-                      {diff != null ? (
-                        <span className={diff < 0 ? "ml-2 text-[var(--danger)]" : "ml-2 text-[var(--success)]"}>
-                          ({diff > 0 ? "+" : ""}
-                          {diff.toFixed(3)})
-                        </span>
+                    <>
+                      {pickedOption ? (
+                        <div className="flex flex-col gap-1">
+                          <span className="text-[12px] text-[var(--muted)]">{t("adjust.selectedBalance")}</span>
+                          <StockTriad
+                            compact
+                            onHand={pickedOption.onHand}
+                            reserved={pickedOption.reserved}
+                            available={pickedOption.available}
+                          />
+                        </div>
                       ) : null}
-                    </span>
-                  </div>
 
-                  <fieldset className="flex flex-col gap-2">
-                    <legend className="mb-1 text-[12px] text-[var(--muted)]">Reason</legend>
-                    {reasonOptions.map((code) => {
-                      const copy = REASON_LABELS[code];
-                      const active = line.reasonCode === code;
-                      const disabled = code === "EXPIRY_WRITE_OFF" && !line.batchExpired;
-                      return (
-                        <button
-                          key={code}
-                          type="button"
-                          disabled={disabled}
-                          title={disabled ? "Only for a lot that expired before today" : undefined}
-                          onClick={() => patch({ reasonCode: code })}
-                          className={
-                            "flex flex-col items-start gap-[2px] rounded-[var(--r-sm)] border px-3 py-2 text-left transition-colors " +
-                            (active
-                              ? "border-[var(--accent)] bg-[var(--accent-subtle)]"
-                              : "border-[var(--border-strong)] bg-[var(--surface)] hover:border-[var(--accent)]")
+                      <div className="grid grid-cols-1 gap-3 min-[480px]:grid-cols-2">
+                        <label className="flex flex-col gap-1 text-[12px] text-[var(--muted)]">
+                          {t("adjust.observedQty")}
+                          <input
+                            inputMode="decimal"
+                            className={FIELD_CLS}
+                            value={line.observed}
+                            onChange={(e) => patch({ observed: e.target.value })}
+                            placeholder="0.000"
+                            aria-invalid={observedError ? true : undefined}
+                          />
+                        </label>
+                        <label className="flex flex-col gap-1 text-[12px] text-[var(--muted)]">
+                          {t("adjust.requestedQty")}
+                          <input
+                            inputMode="decimal"
+                            className={FIELD_CLS}
+                            value={line.requested}
+                            onChange={(e) => patch({ requested: e.target.value })}
+                            placeholder="0.000"
+                            aria-invalid={requestedError ? true : undefined}
+                          />
+                        </label>
+                      </div>
+                      {observedError ? (
+                        <p role="alert" className="text-[12px] text-[var(--danger)]">
+                          {t("adjust.observedError", { msg: localize(observedError) })}
+                        </p>
+                      ) : null}
+                      {requestedError ? (
+                        <p role="alert" className="text-[12px] text-[var(--danger)]">
+                          {t("adjust.requestedError", { msg: localize(requestedError) })}
+                        </p>
+                      ) : null}
+
+                      {/* before/after preview — live, client-side, no network round-trip */}
+                      <div
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--r-sm)] border border-[var(--border)] bg-[var(--surface-sunken)] px-3 py-2 text-[13px]"
+                        role="status"
+                      >
+                        <span className="text-[var(--muted)]">{t("adjust.observedToRequested")}</span>
+                        <span className="font-semibold tabular-nums">
+                          {line.observed ? <QuantityDisplay value={line.observed} /> : "—"}
+                          {" → "}
+                          {line.requested ? <QuantityDisplay value={line.requested} /> : "—"}
+                          {diff != null ? (
+                            <span
+                              className={
+                                diffSign < 0 ? "ml-2 text-[var(--danger)]" : diffSign > 0 ? "ml-2 text-[var(--success)]" : "ml-2 text-[var(--muted)]"
+                              }
+                            >
+                              ({formatQtyDelta(diff)})
+                            </span>
+                          ) : null}
+                        </span>
+                      </div>
+
+                      <fieldset className="flex flex-col gap-2">
+                        <legend className="mb-1 text-[12px] text-[var(--muted)]">{t("adjust.reason")}</legend>
+                        {reasonOptions.map((code) => {
+                          const copy = REASON_LABELS[code];
+                          const active = line.reasonCode === code;
+                          const disabled = code === "EXPIRY_WRITE_OFF" && !line.batchExpired;
+                          return (
+                            <button
+                              key={code}
+                              type="button"
+                              disabled={disabled}
+                              title={disabled ? t("adjust.expiryOnlyTitle") : undefined}
+                              onClick={() => patch({ reasonCode: code })}
+                              className={
+                                "flex min-h-11 flex-col items-start gap-[2px] rounded-[var(--r-sm)] border px-3 py-2 text-left transition-colors disabled:opacity-60 " +
+                                (active
+                                  ? "border-[var(--accent)] bg-[var(--accent-subtle)]"
+                                  : "border-[var(--border-strong)] bg-[var(--surface)] hover:border-[var(--accent)]")
+                              }
+                              aria-pressed={active}
+                            >
+                              <span className="text-[14px] font-semibold">{locale === "th" ? copy.labelTh : copy.label}</span>
+                              <span className="text-[12px] text-[var(--muted)]">{locale === "th" ? copy.label : copy.labelTh}</span>
+                            </button>
+                          );
+                        })}
+                      </fieldset>
+
+                      {ruleError ? (
+                        <p role="alert" className="text-[12px] text-[var(--danger)]">
+                          {localize(ruleError)}
+                        </p>
+                      ) : null}
+                      {belowReserved ? (
+                        <p role="alert" className={`text-[12px] ${line.trackBatch ? "text-[var(--danger)]" : "text-[var(--warning)]"}`}>
+                          {t("adjust.belowReserved", { reserved: formatQty(line.reserved) })}
+                        </p>
+                      ) : null}
+
+                      <label className="flex flex-col gap-1 text-[12px] text-[var(--muted)]">
+                        {t(line.reasonCode === "OTHER" ? "adjust.noteRequired" : "adjust.noteOptional")}
+                        <input
+                          className={FIELD_CLS}
+                          value={line.notes}
+                          onChange={(e) => patch({ notes: e.target.value })}
+                          maxLength={500}
+                          placeholder={t("adjust.notePlaceholder")}
+                        />
+                      </label>
+
+                      {selection && selection.kind !== "ok" ? (
+                        <SelectionNotice
+                          selection={selection}
+                          onRetry={() => {
+                            void stockQ.refetch();
+                            void directoryQ.refetch();
+                          }}
+                          onUseRefreshed={pickBalance}
+                        />
+                      ) : null}
+
+                      {mismatch ? (
+                        <Banner
+                          tone="danger"
+                          title={t("adjust.mismatchTitle")}
+                          actions={
+                            <Button variant="secondary" size="sm" onClick={startNew}>
+                              {t("adjust.startNew")}
+                            </Button>
                           }
-                          aria-pressed={active}
                         >
-                          <span className="text-[13.5px] font-semibold">{copy.labelTh}</span>
-                          <span className="text-[11px] text-[var(--muted)]">{copy.label}</span>
-                        </button>
-                      );
-                    })}
-                  </fieldset>
+                          {t("adjust.mismatchBody")}
+                        </Banner>
+                      ) : null}
 
-                  {ruleError ? (
-                    <p role="alert" className="text-[12px] text-[var(--danger)]">
-                      {ruleError}
-                    </p>
-                  ) : null}
-                  {belowReserved ? (
-                    <p role="alert" className={`text-[12px] ${line.trackBatch ? "text-[var(--danger)]" : "text-[var(--warning)]"}`}>
-                      Requested quantity is below the {line.reserved} reserved by open orders on this balance — it
-                      can&apos;t be approved until those reservations change.
-                    </p>
-                  ) : null}
-
-                  <label className="flex flex-col gap-1 text-[12px] text-[var(--muted)]">
-                    Note {line.reasonCode === "OTHER" ? "(required)" : "(optional)"}
-                    <input
-                      className={FIELD_CLS}
-                      value={line.notes}
-                      onChange={(e) => patch({ notes: e.target.value })}
-                      maxLength={500}
-                      placeholder="e.g. counted 38 during weekly stocktake"
-                    />
-                  </label>
-
-                  {selection && selection.kind !== "ok" ? (
-                    <SelectionNotice
-                      selection={selection}
-                      onRetry={() => {
-                        void stockQ.refetch();
-                        void directoryQ.refetch();
-                      }}
-                      onUseRefreshed={pickBalance}
-                    />
-                  ) : null}
-
-                  {mismatch ? (
-                    <div className="flex flex-col gap-2 rounded-[var(--r-sm)] border border-[color-mix(in_srgb,var(--danger)_45%,transparent)] bg-[var(--danger-subtle)] p-3 text-[12px] text-[var(--danger)]">
-                      <span className="font-semibold">This draft can no longer be submitted.</span>
-                      <span>Its Idempotency-Key was already used for a different request. Start a new one.</span>
-                      <Button variant="secondary" size="sm" className="self-start" onClick={startNew}>
-                        Start new request
+                      <Button variant="primary" className="h-11" disabled={!valid || createMut.isPending || mismatch} onClick={submit}>
+                        {createMut.isPending ? t("receive.submitting") : t("adjust.submitRequest")}
                       </Button>
-                    </div>
-                  ) : null}
-
-                  <Button
-                    variant="primary"
-                    className="h-11"
-                    disabled={!valid || createMut.isPending || mismatch}
-                    onClick={submit}
-                  >
-                    {createMut.isPending ? "Submitting…" : "Submit request"}
-                  </Button>
-                  </>
+                    </>
                   )}
                   {createMut.isError && !mismatch ? (
                     <p className="text-[12px] text-[var(--danger)]">
-                      {isApiError(createMut.error) ? createMut.error.userMessage : "Submit failed."}{" "}
-                      {rid(createMut.error) ? `· Request ${rid(createMut.error)}` : null} Press Submit to retry.
+                      {isApiError(createMut.error) ? createMut.error.userMessage : t("adjust.submitFailedShort")}{" "}
+                      {rid(createMut.error) ? `· ${t("task.requestRef", { id: rid(createMut.error)! })}` : null} {t("adjust.pressSubmit")}
                     </p>
                   ) : null}
                 </>
               ) : (
-                <p className="rounded-[var(--r-md)] border border-dashed border-[var(--border)] p-5 text-center text-[12.5px] text-[var(--muted)]">
-                  Pick the product you counted or inspected.
+                <p className="rounded-[var(--r-md)] border border-dashed border-[var(--border)] p-5 text-center text-[13px] text-[var(--muted)]">
+                  {t("adjust.pickProduct")}
                 </p>
               )}
             </div>
@@ -484,18 +513,20 @@ export function StockAdjustmentRequestForm() {
             <div className="flex flex-col gap-3 rounded-[var(--r-lg)] border border-[color-mix(in_srgb,var(--success)_40%,transparent)] bg-[var(--success-subtle)] p-4">
               <div className="flex items-center gap-2 text-[14px] font-semibold text-[var(--success)]">
                 <CheckCircle2 aria-hidden className="h-5 w-5" />
-                Request submitted
+                {t("adjust.submittedTitle")}
               </div>
-              <p className="text-[12.5px] text-[var(--foreground)]">
-                {submitted.referenceNumber ?? "Your request"} is {submitted.status.toLowerCase()}. No stock has
-                changed — an admin will review it.
+              <p className="text-[13px] text-[var(--foreground)]">
+                {t("adjust.submittedBody", {
+                  ref: submitted.referenceNumber ?? t("adjust.yourRequest"),
+                  status: submitted.status in DICTIONARIES.en.status ? t(`status.${submitted.status}` as MessageKey) : submitted.status,
+                })}
               </p>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <Button variant="primary" className="h-11" onClick={startNew}>
-                  Submit another
+                  {t("adjust.submitAnother")}
                 </Button>
                 <Button variant="ghost" className="h-11" onClick={() => router.push("/stock-adjustments/mine")}>
-                  View my requests
+                  {t("adjust.viewMine")}
                 </Button>
               </div>
             </div>
@@ -504,19 +535,18 @@ export function StockAdjustmentRequestForm() {
 
         <aside className="wc-receive-side">
           <div className="rounded-[var(--r-lg)] border border-[var(--border-strong)] bg-[var(--surface)] p-4 text-[12px]">
-            <h3 className="wc-section-label mb-2">How it works</h3>
+            <h2 className="wc-section-label mb-2">{t("adjust.howItWorks")}</h2>
             <ul className="flex list-disc flex-col gap-1 pl-4 text-[var(--muted)]">
-              <li>Submitting never changes inventory — only an admin&apos;s approval does.</li>
-              <li>Multiple pending requests for the same product are allowed; approval checks the live balance.</li>
-              <li>You can cancel your own request any time before it&apos;s decided.</li>
-              <li>For a batch-tracked product, pick the exact lot and location; damage, loss and expiry write-offs can only lower a lot.</li>
+              <li>{t("adjust.how1")}</li>
+              <li>{t("adjust.how2")}</li>
+              <li>{t("adjust.how3")}</li>
+              <li>{t("adjust.how4")}</li>
             </ul>
           </div>
           {line ? (
-            <div className="flex items-center gap-2 rounded-[var(--r-sm)] border border-[var(--border)] bg-[var(--sunken)] px-3 py-2 text-[11.5px] text-[var(--muted)]">
+            <div className="flex items-center gap-2 rounded-[var(--r-sm)] border border-[var(--border)] bg-[var(--surface-sunken)] px-3 py-2 text-[12px] text-[var(--muted)]">
               <TriangleAlert aria-hidden className="h-3.5 w-3.5 flex-none" />
-              Observed quantity is prefilled from the recorded on-hand quantity — correct it if your physical count
-              differs.
+              {t("adjust.prefillNote")}
             </div>
           ) : null}
         </aside>

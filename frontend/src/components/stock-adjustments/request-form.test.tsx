@@ -190,7 +190,7 @@ describe("StockAdjustmentRequestForm — characterization (R3.0)", () => {
     render(<StockAdjustmentRequestForm />);
     await pickProduct(user);
     await user.type(requested(), "9.9");
-    expect(screen.getByText("(-0.100)")).toBeInTheDocument();
+    expect(screen.getByText("(−0.100)")).toBeInTheDocument(); // R4 D-R4-1: real minus sign, exact decimal
   });
 
   it("non-batch: a request below the reserved quantity warns but stays submittable (batch requests are blocked instead)", async () => {
@@ -250,7 +250,7 @@ describe("StockAdjustmentRequestForm — characterization (R3.0)", () => {
     vi.stubGlobal("fetch", fetchMock);
     try {
       render(
-        <LanguageProvider initialLocale="th">
+        <LanguageProvider initialLocale="en">
           <LanguageSwitch />
           <StockAdjustmentRequestForm />
         </LanguageProvider>,
@@ -258,8 +258,8 @@ describe("StockAdjustmentRequestForm — characterization (R3.0)", () => {
       await pickProduct(user);
       await user.type(requested(), "8");
       const input = requested();
-      await user.click(screen.getByRole("button", { name: "EN" }));
       await user.click(screen.getByRole("button", { name: "ไทย" }));
+      await user.click(screen.getByRole("button", { name: "EN" }));
       expect(requested()).toBe(input);
       expect(input).toHaveValue("8");
       expect(createMutate).not.toHaveBeenCalled();

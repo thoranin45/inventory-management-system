@@ -14,7 +14,8 @@ vi.mock("next/headers", () => ({
 import { getLocale } from "./server";
 
 /** Values that are legitimately the same in both languages. */
-const SAME_IN_BOTH = new Set(["shell.homeLink"]);
+// "SKU" is a frozen term used verbatim in Thai copy too (it is also on the ratchet allow-list)
+const SAME_IN_BOTH = new Set(["shell.homeLink", "product.sku", "lookup.skuLabel"]);
 
 describe("i18n dictionaries", () => {
   it("Thai and English have exactly the same namespaces and keys", () => {

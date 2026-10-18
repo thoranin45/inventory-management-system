@@ -58,7 +58,20 @@ const DATED = {
 const resolveBarcode = vi.fn();
 vi.mock("@/lib/query/sales", () => ({ resolveBarcode: (...a: unknown[]) => resolveBarcode(...a) }));
 
+// R4.3: the review's before → after estimate reads the MAIN / DEFAULT balance
+const MAIN_BALANCE = {
+  id: 1, product_id: 5, warehouse_id: 1, location_id: 11, batch_id: null, batch_lot_no: null,
+  on_hand_qty: "10.000", reserved_qty: "0.000", available_qty: "10.000", is_transit: false,
+  batch_expiry_date: null, days_to_expiry: null, is_expired: false, as_of_date: "2026-10-17",
+};
+vi.mock("@/lib/query/warehouses", () => ({
+  useWarehouses: () => ({
+    data: [{ id: 1, warehouse_code: "MAIN", locations: [{ id: 11, location_code: "DEFAULT" }] }],
+    isError: false,
+  }),
+}));
 vi.mock("@/lib/query/hooks", () => ({
+  useAllProductStock: () => ({ data: { items: [MAIN_BALANCE] }, isLoading: false, isError: false }),
   useProducts: () => ({ data: { items: [NON_BATCH, BATCH, DATED] }, isFetching: false }),
 }));
 
@@ -74,6 +87,15 @@ vi.mock("@/lib/query/stock", () => ({
 }));
 
 import { StockInConsole } from "./stock-in-console";
+
+/* R4 review before commit (D-R4-4): Save is now Review, then an explicit Confirm. */
+const reviewButton = (n?: number) =>
+  screen.getByRole("button", { name: n === undefined ? /review stock in/i : new RegExp(`review stock in \\(${n}\\)`, "i") });
+/** open the review (unless a failed confirm left it open) and confirm — the existing save */
+async function reviewAndConfirm(user: ReturnType<typeof userEvent.setup>) {
+  if (!screen.queryByRole("dialog")) await user.click(reviewButton());
+  await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^confirm /i }));
+}
 import { LanguageProvider } from "@/lib/i18n/client";
 import { LanguageSwitch } from "@/components/shell/language-switch";
 
@@ -217,7 +239,7 @@ describe("StockInConsole — scan session", () => {
 
     await user.click(screen.getByRole("button", { name: /undo last scan/i }));
     expect(screen.getByText("1", { selector: "span.font-bold" })).toBeInTheDocument();
-    expect(screen.getByText(/↶ .* undo -1/)).toBeInTheDocument();
+    expect(screen.getByText(/↶ .* undo −1/)).toBeInTheDocument();
     expect(saveMutate).not.toHaveBeenCalled();
   });
 
@@ -236,7 +258,7 @@ describe("StockInConsole — scan session", () => {
     expect(await screen.findByText(/Matched — scanned 2/i)).toBeInTheDocument();
 
     expect(await screen.findByText(/Over expected quantity/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /save 2 items/i })).toBeEnabled();
+    expect(reviewButton(2)).toBeEnabled();
   });
 
   it("ignores a bounced repeat of the same barcode inside the dedupe window", async () => {
@@ -289,7 +311,7 @@ describe("StockInConsole — save-once", () => {
     const user = userEvent.setup();
     await toCountOne(user);
 
-    await user.click(screen.getByRole("button", { name: /save 1 item/i }));
+    await reviewAndConfirm(user);
     expect(saveMutate).toHaveBeenCalledTimes(1);
     const [args] = saveMutate.mock.calls[0];
     expect(args.body).toEqual({ endpoint: "stock/in", json: { product_id: 5, quantity: "1" } });
@@ -303,7 +325,7 @@ describe("StockInConsole — save-once", () => {
       opts.onSuccess({ productId: 5, productName: "Sea Salt 500g", savedQuantity: "1.000", currentStock: "9.000", lotNo: null }),
     );
     await toCountOne(user);
-    await user.click(screen.getByRole("button", { name: /save 1 item/i }));
+    await reviewAndConfirm(user);
 
     expect(await screen.findByText("Stock saved")).toBeInTheDocument();
     expect(screen.getByText(/On hand/)).toBeInTheDocument();
@@ -317,8 +339,8 @@ describe("StockInConsole — save-once", () => {
     );
     await toCountOne(user);
 
-    await user.click(screen.getByRole("button", { name: /save 1 item/i }));
-    await user.click(screen.getByRole("button", { name: /save 1 item/i }));
+    await reviewAndConfirm(user);
+    await reviewAndConfirm(user);
 
     expect(saveMutate).toHaveBeenCalledTimes(2);
     const k1 = saveMutate.mock.calls[0][0].idempotencyKey;
@@ -336,12 +358,12 @@ describe("StockInConsole — save-once", () => {
       ),
     );
     await toCountOne(user);
-    await user.click(screen.getByRole("button", { name: /save 1 item/i }));
+    await reviewAndConfirm(user);
 
     expect(await screen.findByText(/can no longer be saved/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /start new stock-in session/i })).toBeInTheDocument();
     // Save is blocked until a new session is started
-    expect(screen.getByRole("button", { name: /save 1 item/i })).toBeDisabled();
+    expect(reviewButton(1)).toBeDisabled();
   });
 });
 
@@ -355,7 +377,8 @@ describe("StockInConsole — deep-link preselect (?product=)", () => {
     // Product is selected (combobox switches from search input to a value
     // button) but scanning has not begun — the operator still confirms
     // "Start scanning" explicitly.
-    expect(await screen.findByText("Sea Salt 500g")).toBeInTheDocument();
+    // R4: the product also appears in the "Selected item" side card
+    expect((await screen.findAllByText("Sea Salt 500g")).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: /start scanning/i })).toBeEnabled();
     expect(screen.queryByLabelText("Barcode scan input")).not.toBeInTheDocument();
   });
@@ -370,7 +393,6 @@ describe("StockInConsole — deep-link preselect (?product=)", () => {
 /* ------------------- R3.0 characterization (pre-refactor) ------------------- */
 
 describe("StockInConsole — characterization (R3.0)", () => {
-  const saveButton = (n: number) => screen.getByRole("button", { name: new RegExp(`save ${n} items?`, "i") });
 
   async function countScans(user: ReturnType<typeof userEvent.setup>, product: { id: number; product_name: string }, n: number) {
     for (let i = 1; i <= n; i++) {
@@ -388,7 +410,7 @@ describe("StockInConsole — characterization (R3.0)", () => {
     await user.type(screen.getByPlaceholderText("e.g. opening count"), "  opening  ");
     await startScanning(user);
     await countScans(user, { id: 5, product_name: "Sea Salt 500g" }, 3);
-    await user.click(saveButton(3));
+    await reviewAndConfirm(user);
     expect(saveMutate).toHaveBeenCalledTimes(1);
     expect(saveMutate.mock.calls[0][0]).toEqual({
       body: { endpoint: "stock/in", json: { product_id: 5, quantity: "3", remark: "opening" } },
@@ -403,7 +425,7 @@ describe("StockInConsole — characterization (R3.0)", () => {
     await user.type(screen.getByPlaceholderText("LOT-…"), "  LOT-A  ");
     await startScanning(user);
     await countScans(user, { id: 6, product_name: "Lot Widget" }, 1);
-    await user.click(saveButton(1));
+    await reviewAndConfirm(user);
     expect(saveMutate.mock.calls[0][0].body).toEqual({
       endpoint: "batches",
       json: { product_id: 6, lot_no: "LOT-A", quantity: "1" },
@@ -421,7 +443,7 @@ describe("StockInConsole — characterization (R3.0)", () => {
     expect(screen.getByText(/accepted, not blocked/i)).toBeInTheDocument();
     await startScanning(user);
     await countScans(user, { id: 7, product_name: "Dated Widget" }, 1);
-    await user.click(saveButton(1));
+    await reviewAndConfirm(user);
     expect(saveMutate.mock.calls[0][0].body).toEqual({
       endpoint: "batches",
       json: { product_id: 7, lot_no: "LOT-OLD", quantity: "1", mfg_date: "2000-01-01", expiry_date: "2000-01-02" },
@@ -443,14 +465,14 @@ describe("StockInConsole — characterization (R3.0)", () => {
     await pick(user, /Sea Salt 500g/);
     await startScanning(user);
     await countScans(user, { id: 5, product_name: "Sea Salt 500g" }, 2);
-    await user.click(saveButton(2));
+    await reviewAndConfirm(user);
     const k1 = saveMutate.mock.calls[0][0].idempotencyKey;
     first.unmount();
 
     render(<StockInConsole />);
     expect(screen.getByLabelText("Barcode scan input")).toBeInTheDocument(); // still scanning
     expect(screen.getByText("2", { selector: "span.font-bold" })).toBeInTheDocument();
-    await user.click(saveButton(2));
+    await reviewAndConfirm(user);
     expect(saveMutate).toHaveBeenCalledTimes(2);
     expect(saveMutate.mock.calls[1][0]).toEqual(saveMutate.mock.calls[0][0]);
     expect(saveMutate.mock.calls[1][0].idempotencyKey).toBe(k1);
@@ -479,9 +501,10 @@ describe("StockInConsole — characterization (R3.0)", () => {
     await pick(user, /Sea Salt 500g/);
     await startScanning(user);
     await countScans(user, { id: 5, product_name: "Sea Salt 500g" }, 1);
-    await user.click(saveButton(1));
+    await reviewAndConfirm(user);
     expect(screen.queryByText(/can no longer be saved/i)).not.toBeInTheDocument();
-    expect(saveButton(1)).toBeEnabled();
+    // R4: the failure is shown inside the open review sheet, whose Confirm retries with the same key
+    expect(within(screen.getByRole("dialog")).getByRole("button", { name: /^confirm /i })).toBeEnabled();
   });
 
   it("the mismatch predicate is status 409 + /different payload/i (case-insensitive substring)", async () => {
@@ -493,7 +516,7 @@ describe("StockInConsole — characterization (R3.0)", () => {
     await pick(user, /Sea Salt 500g/);
     await startScanning(user);
     await countScans(user, { id: 5, product_name: "Sea Salt 500g" }, 1);
-    await user.click(saveButton(1));
+    await reviewAndConfirm(user);
     expect(await screen.findByText(/can no longer be saved/i)).toBeInTheDocument();
   });
 
@@ -506,7 +529,7 @@ describe("StockInConsole — characterization (R3.0)", () => {
     await pick(user, /Sea Salt 500g/);
     await startScanning(user);
     await countScans(user, { id: 5, product_name: "Sea Salt 500g" }, 1);
-    await user.click(saveButton(1));
+    await reviewAndConfirm(user);
     expect(screen.queryByText(/can no longer be saved/i)).not.toBeInTheDocument();
   });
 
@@ -519,7 +542,7 @@ describe("StockInConsole — characterization (R3.0)", () => {
     await pick(user, /Sea Salt 500g/);
     await startScanning(user);
     await countScans(user, { id: 5, product_name: "Sea Salt 500g" }, 1);
-    await user.click(saveButton(1));
+    await reviewAndConfirm(user);
     const k1 = saveMutate.mock.calls[0][0].idempotencyKey;
     await user.click(await screen.findByRole("button", { name: /start new stock-in session/i }));
 
@@ -528,7 +551,7 @@ describe("StockInConsole — characterization (R3.0)", () => {
     await pick(user, /Sea Salt 500g/);
     await startScanning(user);
     await countScans(user, { id: 5, product_name: "Sea Salt 500g" }, 1);
-    await user.click(saveButton(1));
+    await reviewAndConfirm(user);
     expect(saveMutate.mock.calls[1][0].idempotencyKey).not.toBe(k1);
   });
 
@@ -541,13 +564,13 @@ describe("StockInConsole — characterization (R3.0)", () => {
     await pick(user, /Sea Salt 500g/);
     await startScanning(user);
     await countScans(user, { id: 5, product_name: "Sea Salt 500g" }, 1);
-    await user.click(saveButton(1));
+    await reviewAndConfirm(user);
     const k1 = saveMutate.mock.calls[0][0].idempotencyKey;
     await user.click(screen.getByRole("button", { name: /scan next product/i }));
     await pick(user, /Sea Salt 500g/);
     await startScanning(user);
     await countScans(user, { id: 5, product_name: "Sea Salt 500g" }, 1);
-    await user.click(saveButton(1));
+    await reviewAndConfirm(user);
     expect(saveMutate.mock.calls[1][0].idempotencyKey).not.toBe(k1);
   });
 
@@ -556,7 +579,7 @@ describe("StockInConsole — characterization (R3.0)", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 204 })));
     try {
       render(
-        <LanguageProvider initialLocale="th">
+        <LanguageProvider initialLocale="en">
           <LanguageSwitch />
           <StockInConsole />
         </LanguageProvider>,
@@ -565,8 +588,8 @@ describe("StockInConsole — characterization (R3.0)", () => {
       await startScanning(user);
       await countScans(user, { id: 5, product_name: "Sea Salt 500g" }, 2);
       const scanInput = screen.getByLabelText("Barcode scan input");
-      await user.click(screen.getByRole("button", { name: "EN" }));
       await user.click(screen.getByRole("button", { name: "ไทย" }));
+      await user.click(screen.getByRole("button", { name: "EN" }));
       expect(screen.getByLabelText("Barcode scan input")).toBe(scanInput); // not remounted
       expect(screen.getByText("2", { selector: "span.font-bold" })).toBeInTheDocument();
       expect(saveMutate).not.toHaveBeenCalled();
@@ -574,7 +597,7 @@ describe("StockInConsole — characterization (R3.0)", () => {
       const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
       expect(fetchMock.mock.calls.every(([url]) => url === "/api/prefs/language")).toBe(true);
       saveMutate.mockImplementation(() => {});
-      await user.click(saveButton(2));
+      await reviewAndConfirm(user);
       expect(saveMutate.mock.calls[0][0].body).toEqual({ endpoint: "stock/in", json: { product_id: 5, quantity: "2" } });
     } finally {
       vi.unstubAllGlobals();
@@ -592,5 +615,113 @@ describe("StockInConsole — characterization: resolve purpose (R3.0)", () => {
     await scan(user, "880000000005");
     expect(await screen.findByText(/Matched — scanned 1/i)).toBeInTheDocument();
     expect(resolveBarcode).toHaveBeenCalledWith("880000000005", "stock_in");
+  });
+});
+
+/* ------------------- R4 review before commit (D-R4-4) ------------------- */
+
+describe("StockInConsole — R4 review before commit", () => {
+  async function scanningWith(user: ReturnType<typeof userEvent.setup>, n: number) {
+    render(<StockInConsole />);
+    await pick(user, /Sea Salt 500g/);
+    await startScanning(user);
+    for (let i = 1; i <= n; i++) {
+      resolvesTo({ id: 5, product_name: "Sea Salt 500g" });
+      await scan(user, "880000000005");
+      expect(await screen.findByText(new RegExp(`Matched — scanned ${i}`, "i"))).toBeInTheDocument();
+    }
+  }
+
+  it("opening the review sends nothing and shows direction, signed quantity and the labelled estimate", async () => {
+    const user = userEvent.setup();
+    await scanningWith(user, 2);
+    await user.click(reviewButton(2));
+    const dialog = screen.getByRole("dialog", { name: "Confirm stock in" });
+    expect(saveMutate).not.toHaveBeenCalled();
+    expect(within(dialog).getByText("Adds stock")).toBeInTheDocument();
+    expect(within(dialog).getByText("+2.000")).toBeInTheDocument();
+    // MAIN/DEFAULT on hand 10.000 → 12.000, labelled an estimate
+    expect(dialog.textContent).toMatch(/10\.000.*12\.000.*estimate/);
+    expect(within(dialog).getByText(/retrying reuses the same request key/i)).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Confirm +2.000" })).toBeInTheDocument();
+  });
+
+  it("Back to edit keeps the count and the key; the later confirm sends the same request", async () => {
+    const user = userEvent.setup();
+    await scanningWith(user, 1);
+    const key = window.sessionStorage.getItem(
+      `stock-in:session:${window.sessionStorage.getItem("stock-in:session:active")}`,
+    );
+    await user.click(reviewButton(1));
+    await user.click(screen.getByRole("button", { name: "Back to edit" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByText("1", { selector: "span.font-bold" })).toBeInTheDocument();
+    expect(saveMutate).not.toHaveBeenCalled();
+    expect(
+      window.sessionStorage.getItem(`stock-in:session:${window.sessionStorage.getItem("stock-in:session:active")}`),
+    ).toBe(key);
+    await reviewAndConfirm(user);
+    expect(saveMutate).toHaveBeenCalledTimes(1);
+    expect(saveMutate.mock.calls[0][0].idempotencyKey).toBe(JSON.parse(key!).idempotencyKey);
+  });
+
+  it("while the review is open a hardware scan neither counts nor confirms", async () => {
+    const user = userEvent.setup();
+    await scanningWith(user, 1);
+    await user.click(reviewButton(1));
+    clock += 5_000;
+    await user.keyboard("880000000005{Enter}"); // a scanner wedge types into whatever has focus
+    expect(resolveBarcode).toHaveBeenCalledTimes(1); // only the scan before the review
+    expect(saveMutate).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("closing the review returns focus to the scan field", async () => {
+    const user = userEvent.setup();
+    await scanningWith(user, 1);
+    await user.click(reviewButton(1));
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByLabelText("Barcode scan input")).toHaveFocus();
+  });
+
+  it("a failed confirm keeps the sheet open with the error; confirming again reuses the key", async () => {
+    const user = userEvent.setup();
+    saveMutate.mockImplementationOnce((_a, opts) => opts.onError(new ApiError({ status: 503, message: "down", requestId: "r-1" })));
+    await scanningWith(user, 1);
+    await reviewAndConfirm(user);
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText(/r-1/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Nothing was posted/)).toBeInTheDocument();
+    await reviewAndConfirm(user);
+    expect(saveMutate).toHaveBeenCalledTimes(2);
+    expect(saveMutate.mock.calls[1][0]).toEqual(saveMutate.mock.calls[0][0]);
+  });
+
+  it("success closes the review and links to the ledger for the product (no invented reference)", async () => {
+    const user = userEvent.setup();
+    saveMutate.mockImplementation((_a, opts) =>
+      opts.onSuccess({ productId: 5, productName: "Sea Salt 500g", savedQuantity: "1.000", currentStock: "11.000", lotNo: null }),
+    );
+    await scanningWith(user, 1);
+    await reviewAndConfirm(user);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("link", { name: /view in ledger/i })).toHaveAttribute("href", "/inventory/ledger?product_id=5");
+    expect(screen.queryByText(/ST-\d/)).toBeNull();
+  });
+
+  it("is translated: Thai step labels, review title and quantity wording", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 204 })));
+    try {
+      render(
+        <LanguageProvider initialLocale="th">
+          <StockInConsole />
+        </LanguageProvider>,
+      );
+      expect(screen.getAllByText("รายละเอียด").length).toBeGreaterThan(0);
+      expect(screen.getByText("เลือกสินค้าที่จะรับเข้าก่อนเริ่มสแกน")).toBeInTheDocument();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

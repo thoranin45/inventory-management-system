@@ -4,6 +4,8 @@ import * as React from "react";
 import { ArrowDown, Factory, Lock, Truck } from "lucide-react";
 
 import { QuantityDisplay } from "@/components/ui/quantity-display";
+import { formatQty } from "@/lib/format";
+import { useT } from "@/lib/i18n/client";
 import type { DecimalString } from "@/lib/decimal";
 import { cn } from "@/lib/utils";
 
@@ -53,13 +55,13 @@ function Stage({
           {name}
           {transit ? <Lock aria-hidden className="h-3 w-3 text-[var(--accent)]" /> : null}
         </div>
-        <div className="text-[11px] text-[var(--muted)]">{sub}</div>
+        <div className="text-[12px] text-[var(--muted)]">{sub}</div>
       </div>
       <div className="ml-auto text-right">
         <div className="mono text-[13px] font-semibold">
           <QuantityDisplay value={qty} />
         </div>
-        <div className="text-[10px] uppercase tracking-[0.06em] text-[var(--faint)]">{qtyLabel}</div>
+        <div className="text-[12px] text-[var(--faint)]">{qtyLabel}</div>
       </div>
     </div>
   );
@@ -82,24 +84,25 @@ export function TransferRoute({
   received: DecimalString;
   className?: string;
 }) {
+  const t = useT();
   return (
     <div className={cn("flex flex-col gap-0", className)}>
       <Stage
         icon={Factory}
         name={sourceLabel}
-        sub={`source · ${total} to move`}
+        sub={t("transfer.routeSource", { qty: formatQty(total) })}
         qty={dispatched}
-        qtyLabel="dispatched"
+        qtyLabel={t("transfer.dispatched")}
       />
       <div className="flex justify-center py-1 text-[var(--faint)]">
         <ArrowDown aria-hidden className="h-4 w-4" />
       </div>
       <Stage
         icon={Truck}
-        name="System transit"
-        sub="protected holding area · outstanding"
+        name={t("transfer.systemTransit")}
+        sub={t("transfer.routeTransit")}
         qty={inTransit}
-        qtyLabel="in transit"
+        qtyLabel={t("transfer.inTransit")}
         transit
       />
       <div className="flex justify-center py-1 text-[var(--faint)]">
@@ -108,13 +111,13 @@ export function TransferRoute({
       <Stage
         icon={Factory}
         name={destinationLabel}
-        sub="destination · received"
+        sub={t("transfer.routeDestination")}
         qty={received}
-        qtyLabel="received"
+        qtyLabel={t("transfer.received")}
       />
-      <p className="mt-2 flex items-start gap-1.5 text-[11px] text-[var(--muted)]">
+      <p className="mt-2 flex items-start gap-1.5 text-[12px] text-[var(--muted)]">
         <Lock aria-hidden className="mt-[1px] h-3 w-3 flex-none" />
-        Transit is a system holding area. It is never selectable as an ordinary source or destination.
+        {t("transfer.transitNote")}
       </p>
     </div>
   );

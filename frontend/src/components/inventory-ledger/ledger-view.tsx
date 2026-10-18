@@ -345,7 +345,7 @@ export function InventoryLedgerView() {
       <Drawer open={requestId !== null} onOpenChange={(open) => (open ? null : setRequestId(null))}>
         <DrawerContent title="Adjustment request">
           {requestId !== null ? (
-            <StockAdjustmentRequestDetailBody id={requestId} role={user.role} onDone={() => setRequestId(null)} />
+            <StockAdjustmentRequestDetailBody id={requestId} role={user.role} currentUserId={user.id} onDone={() => setRequestId(null)} />
           ) : (
             <EmptyState message="No request selected." />
           )}
