@@ -151,11 +151,29 @@ export function buildStockInSaveBody(
   setup: Partial<StockInSetupInput> | null,
   count: number,
 ): StockInSaveBody | null {
-  if (!setup || count <= 0) return null;
+  if (count <= 0) return null;
+  // Scan Count sends the bare integer ("5", never "5.000") — R4 bytes, unchanged.
+  return bodyFor(setup, String(count));
+}
+
+/**
+ * R4-TQ — the same request for a TYPED quantity (the console passes the
+ * canonical three-decimal text). Same endpoints and fields as the scan count;
+ * `null` unless the quantity is positive with at most three decimals.
+ */
+export function buildStockInSaveBodyForQuantity(
+  setup: Partial<StockInSetupInput> | null,
+  quantity: string,
+): StockInSaveBody | null {
+  const qty = qtyInput.safeParse(quantity);
+  return qty.success ? bodyFor(setup, qty.data) : null;
+}
+
+function bodyFor(setup: Partial<StockInSetupInput> | null, quantity: string): StockInSaveBody | null {
+  if (!setup) return null;
   const parsed = stockInSetupInput.safeParse(setup);
   if (!parsed.success) return null;
   const v = parsed.data;
-  const quantity = String(count);
   const remark = v.remark ? { remark: v.remark } : {};
   if (v.trackBatch) {
     return {

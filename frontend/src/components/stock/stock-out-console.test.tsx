@@ -671,3 +671,120 @@ describe("StockOutConsole — R4 review and lot preview", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 });
+
+/* --------------------- R4-TQ typed quantity + attempt lock --------------------- */
+
+describe("StockOutConsole — R4-TQ typed quantity and the attempt lock", () => {
+  const modeRadio = (name: RegExp) => screen.getByRole("radio", { name });
+  const qtyField = () => screen.getByLabelText("Quantity to issue") as HTMLInputElement;
+  async function enterQty(user: ReturnType<typeof userEvent.setup>, text: string) {
+    await user.clear(qtyField());
+    await user.click(qtyField());
+    await user.paste(text);
+  }
+  async function typedSession(user: ReturnType<typeof userEvent.setup>, text: string, strategy?: RegExp) {
+    render(<StockOutConsole />);
+    await pick(user, /Coffee 1kg/);
+    if (strategy) await user.click(screen.getByRole("button", { name: strategy }));
+    await startScanning(user);
+    await user.click(modeRadio(/enter quantity/i));
+    await enterQty(user, text);
+  }
+  const activeKey = () =>
+    JSON.parse(window.sessionStorage.getItem(`stock-out:session:${window.sessionStorage.getItem("stock-out:session:active")}`)!)
+      .idempotencyKey as string;
+
+  it("typed quantities keep the FEFO and FIFO endpoints and are sent canonically", async () => {
+    const user = userEvent.setup();
+    await typedSession(user, "0.75");
+    await reviewAndConfirm(user);
+    expect(saveMutate.mock.calls[0][0].body).toEqual({ endpoint: "stock/out-fefo", json: { product_id: 5, quantity: "0.750" } });
+  });
+
+  it("FIFO typed", async () => {
+    const user = userEvent.setup();
+    await typedSession(user, "2", /^FIFO/i);
+    await reviewAndConfirm(user);
+    expect(saveMutate.mock.calls[0][0].body).toEqual({ endpoint: "stock/out-fifo", json: { product_id: 5, quantity: "2.000" } });
+  });
+
+  it("the review labels the entry method, the strategy and the server-picked lots honestly", async () => {
+    const user = userEvent.setup();
+    await typedSession(user, "1.5");
+    await user.click(reviewButton());
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("Entered quantity")).toBeInTheDocument();
+    expect(within(dialog).getByText("−1.500")).toBeInTheDocument();
+    expect(within(dialog).getByText("Preview only — the server selects the final lots.")).toBeInTheDocument();
+    expect(dialog.textContent).toMatch(/estimate/);
+    expect(within(dialog).getByRole("button", { name: "Confirm −1.500" })).toBeInTheDocument();
+    expect(saveMutate).not.toHaveBeenCalled();
+  });
+
+  it("over-availability stays an advisory warning for a typed quantity (the server decides)", async () => {
+    const user = userEvent.setup();
+    await typedSession(user, "25"); // pick() reports 20.000 available
+    expect(screen.getByText("Over the last-known available quantity — 25.000 of 20.000. The backend re-checks at Save; this is only a heads-up.")).toBeInTheDocument();
+    expect(reviewButton()).toBeEnabled();
+  });
+
+  it("Scan Count still sends the bare integer, byte-for-byte as in R4", async () => {
+    const user = userEvent.setup();
+    render(<StockOutConsole />);
+    await pick(user, /Coffee 1kg/);
+    await startScanning(user);
+    for (let i = 1; i <= 2; i++) {
+      resolveBarcode.mockResolvedValueOnce(lookupResult(PRODUCT));
+      await scan(user, PRODUCT.barcode);
+      expect(await screen.findByText(new RegExp(`Matched — ready to issue ${i}`, "i"))).toBeInTheDocument();
+    }
+    await reviewAndConfirm(user);
+    expect(JSON.stringify(saveMutate.mock.calls[0][0].body)).toBe('{"endpoint":"stock/out-fefo","json":{"product_id":5,"quantity":"2"}}');
+  });
+
+  it("a verified first-attempt 'Not enough stock' unlocks edits on the same key", async () => {
+    const user = userEvent.setup();
+    saveMutate.mockImplementationOnce((_a, opts) => opts.onError(new ApiError({ status: 409, message: "Not enough stock" })));
+    await typedSession(user, "30");
+    await reviewAndConfirm(user);
+    await user.click(screen.getByRole("button", { name: "Back to edit" }));
+    expect(modeRadio(/scan count/i)).toBeEnabled();
+    await enterQty(user, "3");
+    await reviewAndConfirm(user);
+    expect(saveMutate.mock.calls[1][0].idempotencyKey).toBe(saveMutate.mock.calls[0][0].idempotencyKey);
+    expect(saveMutate.mock.calls[1][0].body.json.quantity).toBe("3.000");
+  });
+
+  it("an uncertain outcome locks; the retry is identical; abandon needs the dialog and rotates the key", async () => {
+    const user = userEvent.setup();
+    saveMutate.mockImplementation((_a, opts) => opts.onError(new ApiError({ status: 500, message: "boom" })));
+    await typedSession(user, "1");
+    const oldKey = activeKey();
+    await reviewAndConfirm(user);
+    await reviewAndConfirm(user); // the sheet stays open: confirm again = retry
+    expect(saveMutate.mock.calls[1][0]).toEqual(saveMutate.mock.calls[0][0]);
+    await user.click(screen.getByRole("button", { name: "Back to edit" }));
+    expect(modeRadio(/scan count/i)).toBeDisabled();
+    expect(qtyField()).toHaveAttribute("readonly");
+    await user.click(screen.getByRole("button", { name: "Abandon…" }));
+    const dialog = screen.getByRole("dialog", { name: "Abandon this session?" });
+    await user.click(within(dialog).getByRole("button", { name: "Abandon and start a new session" }));
+    expect(activeKey()).not.toBe(oldKey);
+    expect(saveMutate).toHaveBeenCalledTimes(2);
+  });
+
+  it("a scanner burst in the quantity field is rejected and cannot be submitted", async () => {
+    const user = userEvent.setup();
+    render(<StockOutConsole />);
+    await pick(user, /Coffee 1kg/);
+    await startScanning(user);
+    await user.click(modeRadio(/enter quantity/i));
+    await user.click(qtyField());
+    await user.type(qtyField(), `${PRODUCT.barcode}{Enter}`);
+    expect(qtyField()).toHaveValue("");
+    expect(screen.getByText(/looked like barcode scanner input/i)).toBeInTheDocument();
+    expect(reviewButton()).toBeDisabled();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(saveMutate).not.toHaveBeenCalled();
+  });
+});

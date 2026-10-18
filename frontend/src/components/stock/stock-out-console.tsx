@@ -16,7 +16,7 @@ import { StockTriad } from "@/components/ui/stock-triad";
 import { CameraBarcodeScanner } from "@/components/work/camera-barcode-scanner";
 import { useBeep } from "@/components/work/use-beep";
 import { isApiError } from "@/lib/api/errors";
-import { subtractDecimals } from "@/lib/decimal";
+import { compareDecimals, isDecimalString, subtractDecimals } from "@/lib/decimal";
 import { formatQtyDelta } from "@/lib/format";
 import { useT } from "@/lib/i18n/client";
 import { useProducts } from "@/lib/query/hooks";
@@ -35,6 +35,22 @@ import {
   type StockOutStrategy,
 } from "@/lib/api/schemas/stock-out";
 import { useScanCountSession, type ScanFeedback } from "./use-scan-count-session";
+import {
+  AbandonAttemptDialog,
+  EntryModeSelector,
+  TypedQuantityField,
+  UncertainAttemptBanner,
+  useMethodText,
+  useStockAttempt,
+} from "./quantity-entry";
+import {
+  ATTEMPT_SCOPE,
+  canRetry,
+  classifyAttemptOutcome,
+  parseTypedQuantity,
+  type AttemptRecord,
+  type EntryMode,
+} from "@/lib/workflow/quantity-entry";
 import { DEFAULT_STORAGE_LABEL, LotPreview, StorageRow, useDefaultStorage } from "./stock-task-parts";
 import { TrailList } from "./task-trail";
 
@@ -68,17 +84,28 @@ interface SessionLine {
   count: number;
   /** setup confirmed, scanning has begun */
   started: boolean;
+  /** R4-TQ: how the quantity is produced — absent on R4 drafts, which read as Scan Count */
+  entryMode?: EntryMode;
+  /** R4-TQ: the raw typed text (Enter Quantity), never rewritten while typing */
+  typedQty?: string;
   trail: TrailEntry[];
 }
 
 function buildPayload(lines: Record<number, SessionLine>): StockOutSaveBody | null {
   const s = lines[0];
   if (!s) return null;
-  return buildStockOutSaveBody(
-    { product_id: s.productId, strategy: s.strategy, expected: s.expected || undefined, remark: s.remark || undefined },
-    String(s.count),
-  );
+  const setup = { product_id: s.productId, strategy: s.strategy, expected: s.expected || undefined, remark: s.remark || undefined };
+  if (s.entryMode === "typed") {
+    // R4-TQ: the canonical three-decimal text (TQ-3); FIFO/FEFO endpoint as before
+    const q = parseTypedQuantity(s.typedQty ?? "");
+    return q.status === "valid" ? buildStockOutSaveBody(setup, q.canonical) : null;
+  }
+  // Scan Count: the bare integer count, byte-for-byte as in R4
+  return buildStockOutSaveBody(setup, String(s.count));
 }
+
+/** exact "is a over b" for advisory warnings; false while either is not a decimal */
+const exceeds = (a: string | null, b: string) => !!a && isDecimalString(a) && isDecimalString(b) && compareDecimals(a, b) > 0;
 
 const FIELD_CLS =
   "h-11 w-full rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-[15px] tabular-nums outline-hidden focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-[var(--focus)] disabled:opacity-60 max-[767.98px]:h-[46px] max-[767.98px]:text-[16px]";
@@ -104,6 +131,11 @@ export function StockOutConsole() {
   // a reused key whose stored request differs forces a new session (no silent new key)
   const submission = useIdempotentSubmission({ draft, mutate: saveMut.mutate, isMismatch: isLooseKeyMismatch });
   const { mismatch } = submission;
+  // R4-TQ: a request that may have reached the server locks the session (TQ-2)
+  const { attempt, record, markUncertain, clear: clearAttemptFor } = useStockAttempt<StockOutSaveBody>(ATTEMPT_SCOPE.stockOut, draft);
+  const [abandonOpen, setAbandonOpen] = React.useState(false);
+  const typedRef = React.useRef<HTMLInputElement | null>(null);
+  const methodTextOf = useMethodText();
   const [saved, setSaved] = React.useState<{ qty: string; onHand: string; name: string; productId: number } | null>(null);
   const [cameraOpen, setCameraOpen] = React.useState(false);
   // R4 review before commit: opening it sends nothing; Confirm runs `save`
@@ -111,6 +143,8 @@ export function StockOutConsole() {
   const [reviewError, setReviewError] = React.useState<string | null>(null);
 
   const phase: "setup" | "scanning" | "saved" = saved ? "saved" : line?.started ? "scanning" : "setup";
+  const mode: EntryMode = line?.entryMode ?? "scan";
+  const locked = attempt !== null;
   const storage = useDefaultStorage(line ? line.productId : null);
 
   const strategyLabel = (s: StockOutStrategy) => t(s === "fefo" ? "task.fefo" : "task.fifo");
@@ -209,7 +243,7 @@ export function StockOutConsole() {
   const { feedback, setFeedback, resolving, bump, handleScan, scanner } = useScanCountSession({
     draft,
     purpose: "lookup",
-    scanning: phase === "scanning" && !reviewOpen,
+    scanning: phase === "scanning" && !reviewOpen && mode === "scan" && !locked,
     busy: saveMut.isPending,
     beepOk,
     beepBad,
@@ -217,6 +251,7 @@ export function StockOutConsole() {
   });
 
   const undoLast = () => {
+    if (locked) return;
     bump(-1, "");
     setFeedback({ kind: "idle" });
     requestAnimationFrame(() => scanner.focus());
@@ -229,32 +264,92 @@ export function StockOutConsole() {
     requestAnimationFrame(() => scanner.focus());
   };
 
-  const clearSession = () => {
+  /** Start a fresh session: rotates the key (the existing R4 path, also the mismatch recovery). */
+  const resetSession = () => {
+    const previous = draft.draftId;
     draft.commitSuccess(); // clears the persisted draft + rotates the key
+    clearAttemptFor(previous);
     setSaved(null);
     submission.clearMismatch();
     setFeedback({ kind: "idle" });
     setTerm("");
   };
+  /** TQ-4: an uncertain attempt is never cleared without the explicit abandon dialog. */
+  const clearSession = () => {
+    if (attempt) {
+      setAbandonOpen(true);
+      return;
+    }
+    resetSession();
+  };
 
   /* ------------------------------- SAVE (one authoritative mutation) --- */
-  const overExpected =
-    !!line?.expected && line.count > Number(line.expected) ? { expected: line.expected, count: line.count } : null;
+  // the quantity this session would submit: the scan count, or the canonical typed value
+  const typed = parseTypedQuantity(line?.typedQty ?? "");
+  const activeQty: string | null = !line
+    ? null
+    : mode === "typed"
+      ? typed.status === "valid"
+        ? typed.canonical
+        : null
+      : line.count > 0
+        ? String(line.count)
+        : null;
+  const shownQty = (line: SessionLine) => (mode === "scan" ? line.count : (activeQty as string));
+  // advisory only (TQ-8): the backend decides availability, reservations and lots
+  const overExpected = line?.expected && exceeds(activeQty, line.expected) ? { expected: line.expected, count: shownQty(line) } : null;
   const overAvailable =
-    line?.availableQty != null && line.count > Number(line.availableQty)
-      ? { available: line.availableQty, count: line.count }
+    line?.availableQty != null && exceeds(activeQty, line.availableQty)
+      ? { available: line.availableQty, count: shownQty(line) }
       : null;
-  const canReview = !!draft.payload && !!line && line.count > 0 && !saveMut.isPending && !mismatch;
+  const canReview = !attempt && !!draft.payload && !!activeQty && !saveMut.isPending && !mismatch;
+  const canReviewRetry = !!attempt && canRetry(attempt, draft.idempotencyKey) && !saveMut.isPending && !mismatch;
 
+  /* ------------------------- R4-TQ: one identity per request (TQ-2) --- */
+  const errorInfo = (e: unknown): AttemptRecord<StockOutSaveBody>["lastError"] =>
+    isApiError(e)
+      ? { status: e.status, message: e.message, requestId: e.requestId }
+      : { status: 0, message: e instanceof Error ? e.message : "" };
+
+  /**
+   * Persist the attempt FIRST, then send exactly its body with its key. A retry
+   * resends the stored body and key unchanged. Only a verified, first-attempt
+   * rejection unlocks the session; anything else stays uncertain and locked.
+   */
   const save = () => {
-    const body = draft.payload;
-    if (!body || !line || line.count <= 0 || saveMut.isPending) return;
+    if (!line || saveMut.isPending) return;
     setReviewError(null);
+    const at = new Date().toISOString();
+    let rec: AttemptRecord<StockOutSaveBody>;
+    if (attempt) {
+      if (!canRetry(attempt, draft.idempotencyKey)) return;
+      rec = { ...attempt, status: "inflight", priorUncertain: true, at };
+    } else {
+      const body = draft.payload;
+      if (!body || !activeQty) return;
+      rec = {
+        v: 1,
+        draftId: draft.draftId,
+        idempotencyKey: draft.idempotencyKey,
+        mode,
+        quantity: activeQty,
+        body,
+        status: "inflight",
+        priorUncertain: false,
+        at,
+        lastError: null,
+      };
+    }
+    if (!record(rec)) {
+      setReviewError(t("qtyEntry.storageBlocked"));
+      return;
+    }
     // success consumes the draft — next session gets a fresh key
     submission.submit(
-      { body },
+      { body: rec.body },
       {
         onSuccess: (res) => {
+          clearAttemptFor(rec.draftId);
           beepDone();
           setReviewOpen(false);
           setSaved({ qty: res.difference, onHand: res.current_stock, name: line.name, productId: line.productId });
@@ -268,8 +363,14 @@ export function StockOutConsole() {
           // the operator must explicitly abandon it, not have the console
           // paper over the ambiguity on their behalf.
           if (isMismatch) {
+            markUncertain({ ...rec, status: "uncertain", lastError: errorInfo(e) });
             setReviewOpen(false);
             return;
+          }
+          if (classifyAttemptOutcome(e, rec.body.endpoint, isLooseKeyMismatch) === "definitive" && !rec.priorUncertain) {
+            clearAttemptFor(rec.draftId); // verified: this key posted nothing — edits may resume
+          } else {
+            markUncertain({ ...rec, status: "uncertain", lastError: errorInfo(e) });
           }
           const backend = isApiError(e) ? e.message : "";
           const copy = STOCK_OUT_ERROR_COPY[backend] ?? (isApiError(e) ? e.userMessage : t("task.outRejected"));
@@ -282,14 +383,21 @@ export function StockOutConsole() {
   };
 
   const openReview = () => {
-    if (!canReview) return;
+    if (!canReview && !canReviewRetry) return;
     setReviewError(null);
     setReviewOpen(true);
   };
 
-  const steps = [t("task.stepDetails"), t("task.stepScan"), t("task.stepReview"), t("task.stepDone")];
+  const steps = [
+    t("task.stepDetails"),
+    mode === "typed" ? t("qtyEntry.stepQuantity") : t("task.stepScan"),
+    t("task.stepReview"),
+    t("task.stepDone"),
+  ];
   const stepIndex = phase === "saved" ? 3 : reviewOpen ? 2 : phase === "scanning" ? 1 : 0;
-  const countQty = line ? String(line.count) : "0";
+  // the review shows the attempt being retried, else the live session's quantity
+  const countQty = attempt?.quantity || activeQty || "0";
+  const reviewMode: EntryMode = attempt?.mode ?? mode;
   const afterQty = storage.status === "ready" ? subtractDecimals(storage.onHand, countQty, 3) : null;
 
   /* --------------------------------------------------------- render ---- */
@@ -424,6 +532,35 @@ export function StockOutConsole() {
                 </Button>
               </div>
 
+              <EntryModeSelector
+                mode={mode}
+                onChange={(m) => {
+                  if (locked || saveMut.isPending) return;
+                  patch({ entryMode: m });
+                  setFeedback({ kind: "idle" });
+                }}
+                disabled={locked || saveMut.isPending}
+                lockedNote={locked ? t("qtyEntry.lockedNote") : undefined}
+              />
+
+              {mode === "typed" ? (
+                <>
+                  <TypedQuantityField
+                    id="stock-out-qty"
+                    label={t("qtyEntry.qtyOut")}
+                    value={line.typedQty ?? ""}
+                    onChange={(v) => {
+                      if (!locked && !saveMut.isPending) patch({ typedQty: v });
+                    }}
+                    readOnly={locked || saveMut.isPending}
+                    inputRef={typedRef}
+                  />
+                  {line.count > 0 ? (
+                    <p className="text-[12px] text-[var(--muted)]">{t("qtyEntry.scanKept", { n: line.count })}</p>
+                  ) : null}
+                </>
+              ) : (
+              <>
               {/* scan surface */}
               <div className="flex items-center gap-2 rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 focus-within:border-[var(--accent)] focus-within:outline-2 focus-within:outline-[var(--focus)]">
                 <ScanLine aria-hidden className="h-4 w-4 flex-none text-[var(--muted)]" />
@@ -433,7 +570,7 @@ export function StockOutConsole() {
                   aria-label={t("task.scanInput")}
                   className="min-h-11 w-full min-w-0 bg-transparent text-[16px] tabular-nums outline-none"
                 />
-                <Button type="button" variant="secondary" size="sm" onClick={scanner.submit} disabled={resolving || saveMut.isPending}>
+                <Button type="button" variant="secondary" size="sm" onClick={scanner.submit} disabled={resolving || saveMut.isPending || locked}>
                   {t("task.enter")}
                 </Button>
                 <Button
@@ -446,7 +583,7 @@ export function StockOutConsole() {
                     if (typeof document !== "undefined") (document.activeElement as HTMLElement | null)?.blur();
                     setCameraOpen(true);
                   }}
-                  disabled={resolving || saveMut.isPending}
+                  disabled={resolving || saveMut.isPending || locked}
                 >
                   <Camera aria-hidden className="h-4 w-4" />
                 </Button>
@@ -459,7 +596,7 @@ export function StockOutConsole() {
                   <span className="text-[20px] font-bold tabular-nums">{line.count}</span>
                   {line.expected ? <span className="text-[var(--muted)]"> {t("task.ofExpected", { n: line.expected })}</span> : null}
                 </div>
-                <Button variant="ghost" size="sm" onClick={undoLast} disabled={line.count === 0 || saveMut.isPending}>
+                <Button variant="ghost" size="sm" onClick={undoLast} disabled={line.count === 0 || saveMut.isPending || locked}>
                   <Undo2 aria-hidden className="h-3.5 w-3.5" /> {t("task.undoLastScan")}
                 </Button>
               </div>
@@ -467,6 +604,8 @@ export function StockOutConsole() {
               {feedback.kind !== "idle" ? (
                 <Banner tone={feedback.kind === "match" ? "good" : "danger"} title={feedbackText(feedback)} />
               ) : null}
+              </>
+              )}
 
               {overExpected ? (
                 <Banner tone="warning" title={t("task.overExpected", { count: overExpected.count, expected: overExpected.expected })} />
@@ -476,12 +615,16 @@ export function StockOutConsole() {
                 <Banner tone="warning" title={t("task.overAvailable", { count: overAvailable.count, available: overAvailable.available })} />
               ) : null}
 
+              {attempt && attempt.status === "uncertain" && !mismatch && !saveMut.isPending ? (
+                <UncertainAttemptBanner onRetry={openReview} onAbandon={() => setAbandonOpen(true)} disabled={!canReviewRetry} />
+              ) : null}
+
               {mismatch ? (
                 <Banner
                   tone="danger"
                   title={t("task.outMismatchTitle")}
                   actions={
-                    <Button variant="secondary" size="sm" onClick={clearSession}>
+                    <Button variant="secondary" size="sm" onClick={resetSession}>
                       {t("task.outStartNew")}
                     </Button>
                   }
@@ -491,11 +634,13 @@ export function StockOutConsole() {
               ) : null}
 
               <div className="wc-task-action flex flex-col gap-2">
-                <Button variant="primary" className="h-11" disabled={!canReview} onClick={openReview}>
+                <Button variant="primary" className="h-11" disabled={attempt ? !canReviewRetry : !canReview} onClick={openReview}>
                   <ShieldCheck aria-hidden className="h-4 w-4" />
-                  {saveMut.isPending ? t("task.saving") : t("task.reviewOut", { n: line.count })}
+                  {saveMut.isPending
+                    ? t("task.saving")
+                    : t("task.reviewOut", { n: attempt ? attempt.quantity : mode === "typed" ? (activeQty ?? "—") : line.count })}
                 </Button>
-                {saveMut.isError && !mismatch && !reviewOpen ? (
+                {saveMut.isError && !mismatch && !reviewOpen && !attempt ? (
                   <p className="text-[12px] text-[var(--danger)]">
                     {isApiError(saveMut.error) ? saveMut.error.userMessage : t("task.saveFailed")}{" "}
                     {rid(saveMut.error) ? `· ${t("task.requestRef", { id: rid(saveMut.error)! })}` : null} {t("task.keptRetry")}
@@ -582,12 +727,16 @@ export function StockOutConsole() {
           onOpenChange={setReviewOpen}
           title={t("task.reviewOutTitle")}
           description={t("review.checkBefore")}
-          confirmLabel={t("task.confirmMinus", { q: formatQtyDelta(`-${countQty}`) })}
+          confirmLabel={
+            attempt
+              ? t("qtyEntry.confirmRetry", { q: formatQtyDelta(`-${countQty}`) })
+              : t("task.confirmMinus", { q: formatQtyDelta(`-${countQty}`) })
+          }
           onConfirm={save}
           pending={saveMut.isPending}
-          confirmDisabled={!draft.payload || line.count <= 0 || mismatch}
+          confirmDisabled={attempt ? !canRetry(attempt, draft.idempotencyKey) || mismatch : !draft.payload || !activeQty || mismatch}
           error={reviewError ? <Banner tone="danger" title={reviewError}>{t("review.failedKept")}</Banner> : undefined}
-          returnFocusRef={scanner.inputProps.ref}
+          returnFocusRef={mode === "typed" ? typedRef : scanner.inputProps.ref}
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="inline-flex items-center gap-1 rounded-[var(--r-sm)] bg-[var(--warning-subtle)] px-2 py-1 text-[12px] font-semibold text-[var(--warning)]">
@@ -602,6 +751,7 @@ export function StockOutConsole() {
               <QuantityDisplay value={`-${countQty}`} signed />
             </div>
           </div>
+          <ReviewCell label={t("qtyEntry.entryMethod")}>{methodTextOf(reviewMode, line.count)}</ReviewCell>
           <div className="grid grid-cols-1 gap-2 min-[480px]:grid-cols-2">
             <ReviewCell label={t("task.source")}>
               <span className="mono">{DEFAULT_STORAGE_LABEL}</span>
@@ -620,6 +770,17 @@ export function StockOutConsole() {
           <p className="text-[12px] text-[var(--muted)]">{t("review.estimateNote")}</p>
         </ReviewSheet>
       ) : null}
+
+      <AbandonAttemptDialog
+        open={abandonOpen}
+        onOpenChange={setAbandonOpen}
+        attempt={attempt}
+        productId={line?.productId ?? null}
+        onConfirm={() => {
+          setAbandonOpen(false);
+          resetSession(); // new draft + new Idempotency-Key; the old attempt record is removed
+        }}
+      />
 
       <CameraBarcodeScanner
         open={cameraOpen}

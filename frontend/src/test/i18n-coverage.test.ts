@@ -54,6 +54,7 @@ const R4_SCOPE = [
   "components/products/product-balances.tsx",
   "components/products/product-detail.tsx",
   "components/stock/barcode-lookup-sheet.tsx",
+  "components/stock/quantity-entry.tsx",
   "components/stock/stock-detail-pane.tsx",
   "components/stock/stock-in-console.tsx",
   "components/stock/stock-out-console.tsx",

@@ -725,3 +725,400 @@ describe("StockInConsole — R4 review before commit", () => {
     }
   });
 });
+
+/* --------------------- R4-TQ typed quantity + attempt lock --------------------- */
+
+describe("StockInConsole — R4-TQ typed quantity and the attempt lock", () => {
+  const modeRadio = (name: RegExp) => screen.getByRole("radio", { name });
+  const qtyField = () => screen.getByLabelText("Quantity received") as HTMLInputElement;
+  /** human entry: a paste is never mistaken for a scanner burst */
+  async function enterQty(user: ReturnType<typeof userEvent.setup>, text: string) {
+    await user.clear(qtyField());
+    await user.click(qtyField());
+    await user.paste(text);
+  }
+  async function session(user: ReturnType<typeof userEvent.setup>, scans = 0, product = /Sea Salt 500g/) {
+    render(<StockInConsole />);
+    await pick(user, product);
+    await startScanning(user);
+    for (let i = 1; i <= scans; i++) {
+      resolvesTo({ id: 5, product_name: "Sea Salt 500g" });
+      await scan(user, "880000000005");
+      expect(await screen.findByText(new RegExp(`Matched — scanned ${i}`, "i"))).toBeInTheDocument();
+    }
+  }
+  const activeKey = () =>
+    JSON.parse(window.sessionStorage.getItem(`stock-in:session:${window.sessionStorage.getItem("stock-in:session:active")}`)!)
+      .idempotencyKey as string;
+  const attemptKeys = () => Object.keys(window.sessionStorage).filter((k) => k.startsWith("stock-in:attempt:"));
+
+  it("Scan Count is the default, and an R4 draft without entryMode restores as Scan Count with its data", () => {
+    window.sessionStorage.setItem("stock-in:session:active", "r4-draft");
+    window.sessionStorage.setItem(
+      "stock-in:session:r4-draft",
+      JSON.stringify({
+        idempotencyKey: "stockin-r4",
+        lines: {
+          0: {
+            productId: 5, sku: "WH-SALT", name: "Sea Salt 500g", trackBatch: false, trackExpiry: false,
+            lot_no: "", mfg_date: "", expiry_date: "", expected: "", remark: "", count: 3, started: true, trail: [],
+          },
+        },
+      }),
+    );
+    render(<StockInConsole />);
+    expect(modeRadio(/scan count/i)).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByLabelText("Barcode scan input")).toBeInTheDocument();
+    expect(screen.getByText("3", { selector: "span.font-bold" })).toBeInTheDocument();
+    expect(reviewButton(3)).toBeEnabled();
+  });
+
+  it("switching to Enter Quantity keeps the scan count (not prefilled, labelled as unused); switching back restores it", async () => {
+    const user = userEvent.setup();
+    await session(user, 2);
+    await user.click(modeRadio(/enter quantity/i));
+    expect(qtyField()).toHaveValue("");
+    expect(screen.queryByLabelText("Barcode scan input")).toBeNull();
+    expect(screen.getByText(/scanned count 2 is kept, but it is not used/i)).toBeInTheDocument();
+    expect(reviewButton()).toBeDisabled(); // nothing typed yet
+    await user.click(modeRadio(/scan count/i));
+    expect(screen.getByText("2", { selector: "span.font-bold" })).toBeInTheDocument();
+    expect(reviewButton(2)).toBeEnabled();
+    expect(saveMutate).not.toHaveBeenCalled();
+  });
+
+  it("a typed 1.25 is reviewed as Entered quantity +1.250 and sent canonically, on the unused draft key", async () => {
+    const user = userEvent.setup();
+    await session(user, 1);
+    const key = activeKey();
+    await user.click(modeRadio(/enter quantity/i));
+    await enterQty(user, "1.25");
+    expect(qtyField()).toHaveValue("1.25"); // raw text is never rewritten
+    expect(screen.getByText(/will be recorded as/i).textContent).toMatch(/1\.250/);
+    await user.click(reviewButton());
+    const dialog = screen.getByRole("dialog");
+    expect(saveMutate).not.toHaveBeenCalled();
+    expect(within(dialog).getByText("Entered quantity")).toBeInTheDocument();
+    expect(within(dialog).getByText("+1.250")).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Confirm +1.250" }));
+    expect(saveMutate).toHaveBeenCalledTimes(1);
+    expect(saveMutate.mock.calls[0][0]).toEqual({
+      body: { endpoint: "stock/in", json: { product_id: 5, quantity: "1.250" } },
+      idempotencyKey: key,
+    });
+  });
+
+  it.each([
+    ["1.", null],
+    ["0", /above zero/i],
+    ["-1", /above zero/i],
+    ["1.2345", /at most 3 decimal places/i],
+    ["1e3", /up to 3 decimal places/i],
+    ["abc", /up to 3 decimal places/i],
+    ["1000000000000000", /larger than the system can record/i],
+  ])("%s cannot be reviewed or sent", async (text, error) => {
+    const user = userEvent.setup();
+    await session(user, 0);
+    await user.click(modeRadio(/enter quantity/i));
+    await enterQty(user, text);
+    if (error) expect(screen.getByText(error)).toBeInTheDocument();
+    expect(reviewButton()).toBeDisabled();
+    await user.click(reviewButton());
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(saveMutate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["1", "1.000"],
+    ["1.250", "1.250"],
+    ["0.001", "0.001"],
+    ["5.000", "5.000"],
+  ])("typed %s is sent as %s", async (text, sent) => {
+    const user = userEvent.setup();
+    await session(user, 0);
+    await user.click(modeRadio(/enter quantity/i));
+    await enterQty(user, text);
+    await reviewAndConfirm(user);
+    expect(saveMutate.mock.calls[0][0].body.json.quantity).toBe(sent);
+  });
+
+  it("a batch product keeps POST /batches with its lot and dates; only the quantity is typed", async () => {
+    const user = userEvent.setup();
+    render(<StockInConsole />);
+    await pick(user, /Lot Widget/);
+    await user.type(screen.getByPlaceholderText("LOT-…"), "LOT-7");
+    await startScanning(user);
+    await user.click(modeRadio(/enter quantity/i));
+    await enterQty(user, "0.5");
+    await reviewAndConfirm(user);
+    expect(saveMutate.mock.calls[0][0].body).toEqual({
+      endpoint: "batches",
+      json: { product_id: 6, lot_no: "LOT-7", quantity: "0.500" },
+    });
+  });
+
+  it("Scan Count still sends the bare integer, byte-for-byte as in R4", async () => {
+    const user = userEvent.setup();
+    await session(user, 2);
+    await reviewAndConfirm(user);
+    expect(JSON.stringify(saveMutate.mock.calls[0][0].body)).toBe('{"endpoint":"stock/in","json":{"product_id":5,"quantity":"2"}}');
+  });
+
+  it("a scanner burst in the quantity field is rejected: nothing typed, nothing counted, Review not opened", async () => {
+    const user = userEvent.setup(); // no delay — keystrokes arrive like a wedge scanner
+    await session(user, 0);
+    await user.click(modeRadio(/enter quantity/i));
+    await user.click(qtyField());
+    await user.type(qtyField(), "885000000009{Enter}");
+    expect(qtyField()).toHaveValue("");
+    expect(screen.getByText(/looked like barcode scanner input/i)).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(resolveBarcode).not.toHaveBeenCalled();
+    expect(saveMutate).not.toHaveBeenCalled();
+  });
+
+  it("deliberate manual typing is accepted, and Enter in the field never opens Review", async () => {
+    const user = userEvent.setup({ delay: 60 });
+    await session(user, 0);
+    await user.click(modeRadio(/enter quantity/i));
+    await user.click(qtyField());
+    await user.keyboard("12.5");
+    expect(qtyField()).toHaveValue("12.5");
+    await user.keyboard("{Enter}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(saveMutate).not.toHaveBeenCalled();
+  });
+
+  it("the stepper is exact and never goes to zero", async () => {
+    const user = userEvent.setup();
+    await session(user, 0);
+    await user.click(modeRadio(/enter quantity/i));
+    expect(screen.getByRole("button", { name: "Decrease by 1" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Increase by 1" }));
+    expect(qtyField()).toHaveValue("1.000");
+    expect(screen.getByRole("button", { name: "Decrease by 1" })).toBeDisabled();
+    await enterQty(user, "0.1");
+    await user.click(screen.getByRole("button", { name: "Increase by 1" }));
+    expect(qtyField()).toHaveValue("1.100");
+  });
+
+  it("Back to edit, a mode switch and a new quantity before Confirm send only the final request, once", async () => {
+    const user = userEvent.setup();
+    await session(user, 1);
+    await user.click(reviewButton(1));
+    await user.click(screen.getByRole("button", { name: "Back to edit" }));
+    await user.click(modeRadio(/enter quantity/i));
+    await enterQty(user, "2.5");
+    await reviewAndConfirm(user);
+    expect(saveMutate).toHaveBeenCalledTimes(1);
+    expect(saveMutate.mock.calls[0][0].body.json.quantity).toBe("2.500");
+  });
+
+  it("the mode cannot change while a save is pending", async () => {
+    const user = userEvent.setup();
+    const first = render(<StockInConsole />);
+    await pick(user, /Sea Salt 500g/);
+    await startScanning(user);
+    first.unmount();
+    saveState = { ...saveState, isPending: true };
+    render(<StockInConsole />);
+    expect(modeRadio(/scan count/i)).toBeDisabled();
+    expect(modeRadio(/enter quantity/i)).toBeDisabled();
+  });
+
+  it("an uncertain outcome locks mode and quantity; the retry resends the identical body and key", async () => {
+    const user = userEvent.setup();
+    saveMutate.mockImplementationOnce((_a, opts) => opts.onError(ApiError.network(new TypeError("Failed to fetch"))));
+    await session(user, 0);
+    await user.click(modeRadio(/enter quantity/i));
+    await enterQty(user, "1.25");
+    await reviewAndConfirm(user);
+    await user.click(screen.getByRole("button", { name: "Back to edit" }));
+    expect(screen.getByText(/the result of the last request is unknown/i)).toBeInTheDocument();
+    expect(modeRadio(/scan count/i)).toBeDisabled();
+    expect(qtyField()).toHaveAttribute("readonly");
+    expect(screen.getByRole("button", { name: "Increase by 1" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Retry same request" }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Confirm retry +1.250" }));
+    expect(saveMutate).toHaveBeenCalledTimes(2);
+    expect(saveMutate.mock.calls[1][0]).toEqual(saveMutate.mock.calls[0][0]);
+  });
+
+  it("the lock also applies to Scan Count (TQ-2): no scan or undo after an uncertain outcome", async () => {
+    const user = userEvent.setup();
+    saveMutate.mockImplementationOnce((_a, opts) => opts.onError(new ApiError({ status: 503, message: "down" })));
+    await session(user, 1);
+    await reviewAndConfirm(user);
+    await user.click(screen.getByRole("button", { name: "Back to edit" }));
+    expect(screen.getByRole("button", { name: /undo/i })).toBeDisabled();
+    const lookups = resolveBarcode.mock.calls.length; // the session's own scan
+    resolvesTo({ id: 5, product_name: "Sea Salt 500g" });
+    await scan(user, "880000000005");
+    expect(resolveBarcode).toHaveBeenCalledTimes(lookups);
+    expect(screen.getByText("1", { selector: "span.font-bold" })).toBeInTheDocument();
+  });
+
+  it("a reload restores the lock without sending anything; the retry is identical", async () => {
+    const user = userEvent.setup();
+    saveMutate.mockImplementationOnce((_a, opts) => opts.onError(new ApiError({ status: 502, message: "Upstream request failed." })));
+    const first = render(<StockInConsole />);
+    await pick(user, /Sea Salt 500g/);
+    await startScanning(user);
+    await user.click(modeRadio(/enter quantity/i));
+    await enterQty(user, "3");
+    await reviewAndConfirm(user);
+    first.unmount();
+
+    render(<StockInConsole />);
+    expect(saveMutate).toHaveBeenCalledTimes(1); // no automatic retry
+    expect(screen.getByText(/the result of the last request is unknown/i)).toBeInTheDocument();
+    expect(modeRadio(/enter quantity/i)).toBeDisabled();
+    expect(qtyField()).toHaveValue("3");
+    await user.click(screen.getByRole("button", { name: "Retry same request" }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^confirm retry/i }));
+    expect(saveMutate.mock.calls[1][0]).toEqual(saveMutate.mock.calls[0][0]);
+  });
+
+  it("an in-flight attempt found after a reload is uncertain, never retried automatically", async () => {
+    const user = userEvent.setup();
+    saveMutate.mockImplementationOnce(() => undefined); // the response never arrives
+    const first = render(<StockInConsole />);
+    await pick(user, /Sea Salt 500g/);
+    await startScanning(user);
+    resolvesTo({ id: 5, product_name: "Sea Salt 500g" });
+    await scan(user, "880000000005");
+    await reviewAndConfirm(user);
+    first.unmount();
+    render(<StockInConsole />);
+    expect(saveMutate).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/the result of the last request is unknown/i)).toBeInTheDocument();
+  });
+
+  it("a verified first-attempt rejection (404 Product not found) unlocks edits on the same key", async () => {
+    const user = userEvent.setup();
+    saveMutate.mockImplementationOnce((_a, opts) => opts.onError(new ApiError({ status: 404, message: "Product not found" })));
+    await session(user, 0);
+    await user.click(modeRadio(/enter quantity/i));
+    await enterQty(user, "2");
+    await reviewAndConfirm(user);
+    await user.click(screen.getByRole("button", { name: "Back to edit" }));
+    expect(screen.queryByText(/the result of the last request is unknown/i)).toBeNull();
+    expect(modeRadio(/scan count/i)).toBeEnabled();
+    expect(attemptKeys()).toEqual([]);
+    await enterQty(user, "1");
+    await reviewAndConfirm(user);
+    expect(saveMutate.mock.calls[1][0].idempotencyKey).toBe(saveMutate.mock.calls[0][0].idempotencyKey);
+    expect(saveMutate.mock.calls[1][0].body.json.quantity).toBe("1.000");
+  });
+
+  it("an unverified 409 and a rejection after an uncertain attempt both keep the lock", async () => {
+    const user = userEvent.setup();
+    saveMutate
+      .mockImplementationOnce((_a, opts) => opts.onError(ApiError.network(new TypeError("offline"))))
+      .mockImplementationOnce((_a, opts) => opts.onError(new ApiError({ status: 404, message: "Product not found" })));
+    await session(user, 1);
+    await reviewAndConfirm(user);
+    await reviewAndConfirm(user); // retry → a verified rejection, but an earlier send's fate is unknown
+    await user.click(screen.getByRole("button", { name: "Back to edit" }));
+    expect(screen.getByText(/the result of the last request is unknown/i)).toBeInTheDocument();
+    expect(modeRadio(/enter quantity/i)).toBeDisabled();
+  });
+
+  it("an unverified 409 stays uncertain", async () => {
+    const user = userEvent.setup();
+    saveMutate.mockImplementationOnce((_a, opts) => opts.onError(new ApiError({ status: 409, message: "Something conflicted" })));
+    await session(user, 1);
+    await reviewAndConfirm(user);
+    await user.click(screen.getByRole("button", { name: "Back to edit" }));
+    expect(modeRadio(/enter quantity/i)).toBeDisabled();
+  });
+
+  it("abandoning requires the explicit warning dialog; Keep changes nothing; Abandon starts a new key", async () => {
+    const user = userEvent.setup();
+    saveMutate.mockImplementationOnce((_a, opts) =>
+      opts.onError(new ApiError({ status: 503, message: "down", requestId: "req-503" })),
+    );
+    await session(user, 1);
+    const oldKey = activeKey();
+    await reviewAndConfirm(user);
+    await user.click(screen.getByRole("button", { name: "Back to edit" }));
+
+    await user.click(screen.getByRole("button", { name: "Clear session" }));
+    let dialog = screen.getByRole("dialog", { name: "Abandon this session?" });
+    expect(within(dialog).getByText(/may already have been recorded/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/does not cancel or reverse anything/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/duplicate stock movement/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/req-503/)).toBeInTheDocument();
+    expect(within(dialog).getByRole("link", { name: /check movement history/i })).toHaveAttribute(
+      "href",
+      "/inventory/ledger?product_id=5",
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Keep and retry later" }));
+    expect(screen.getByText(/the result of the last request is unknown/i)).toBeInTheDocument();
+    expect(attemptKeys()).toHaveLength(1);
+
+    await user.click(screen.getByRole("button", { name: "Abandon…" }));
+    dialog = screen.getByRole("dialog", { name: "Abandon this session?" });
+    await user.click(within(dialog).getByRole("button", { name: "Abandon and start a new session" }));
+    expect(screen.getByRole("combobox", { name: /search products/i })).toBeInTheDocument(); // back to setup
+    expect(activeKey()).not.toBe(oldKey);
+    expect(attemptKeys()).toEqual([]);
+    expect(saveMutate).toHaveBeenCalledTimes(1);
+  });
+
+  it("if the attempt cannot be recorded, nothing is sent", async () => {
+    const user = userEvent.setup();
+    await session(user, 1);
+    const real = Storage.prototype.setItem;
+    const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, k: string, v: string) {
+      if (k.startsWith("stock-in:attempt:")) throw new Error("QuotaExceededError");
+      return real.call(this, k, v);
+    });
+    try {
+      await reviewAndConfirm(user);
+      expect(saveMutate).not.toHaveBeenCalled();
+      expect(within(screen.getByRole("dialog")).getByText(/nothing was sent/i)).toBeInTheDocument();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("the mismatch recovery is unchanged: Start new session rotates the key directly", async () => {
+    const user = userEvent.setup();
+    saveMutate.mockImplementationOnce((_a, opts) =>
+      opts.onError(new ApiError({ status: 409, message: "Idempotency-Key already used with a different payload" })),
+    );
+    await session(user, 1);
+    const oldKey = activeKey();
+    await reviewAndConfirm(user);
+    await user.click(screen.getByRole("button", { name: /start new stock-in session/i }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(activeKey()).not.toBe(oldKey);
+    expect(attemptKeys()).toEqual([]);
+  });
+
+  it("is translated: Thai mode names and quantity label", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 204 })));
+    try {
+      window.sessionStorage.setItem("stock-in:session:active", "th-draft");
+      window.sessionStorage.setItem(
+        "stock-in:session:th-draft",
+        JSON.stringify({
+          idempotencyKey: "stockin-th",
+          lines: { 0: { productId: 5, sku: "WH-SALT", name: "Sea Salt 500g", trackBatch: false, trackExpiry: false, lot_no: "", mfg_date: "", expiry_date: "", expected: "", remark: "", count: 0, started: true, trail: [] } },
+        }),
+      );
+      render(
+        <LanguageProvider initialLocale="th">
+          <StockInConsole />
+        </LanguageProvider>,
+      );
+      await user.click(screen.getByRole("radio", { name: /กรอกจำนวน/ }));
+      expect(screen.getByLabelText("จำนวนที่รับเข้า")).toBeInTheDocument();
+      expect(screen.getByText("ทศนิยมได้ไม่เกิน 3 ตำแหน่ง")).toBeInTheDocument();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});

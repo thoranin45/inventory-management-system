@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   batchInInput,
   buildStockInSaveBody,
+  buildStockInSaveBodyForQuantity,
   stockInInput,
   stockInSetupInput,
   toBatchRequestBody,
@@ -154,6 +155,48 @@ describe("buildStockInSaveBody (byte-stable idempotent payload)", () => {
   it("is deterministic for a given (setup, count)", () => {
     expect(JSON.stringify(buildStockInSaveBody(batchExp, 4))).toBe(
       JSON.stringify(buildStockInSaveBody(batchExp, 4)),
+    );
+  });
+});
+
+/* ------------------------------------------------ R4-TQ typed quantity --- */
+
+describe("buildStockInSaveBodyForQuantity (typed entry; the integer path is unchanged)", () => {
+  const nonBatch = { product_id: 5, trackBatch: false, trackExpiry: false };
+  const batchExp = {
+    product_id: 1,
+    trackBatch: true,
+    trackExpiry: true,
+    lot_no: "LOT-CF",
+    mfg_date: "2026-01-01",
+    expiry_date: "2027-01-01",
+  };
+
+  it("sends the canonical three-decimal quantity to the same endpoints and fields", () => {
+    expect(buildStockInSaveBodyForQuantity(nonBatch, "1.250")).toEqual({
+      endpoint: "stock/in",
+      json: { product_id: 5, quantity: "1.250" },
+    });
+    expect(buildStockInSaveBodyForQuantity(batchExp, "0.001")).toEqual({
+      endpoint: "batches",
+      json: { product_id: 1, lot_no: "LOT-CF", quantity: "0.001", mfg_date: "2026-01-01", expiry_date: "2027-01-01" },
+    });
+  });
+
+  it("rejects anything that is not a positive quantity with at most three decimals", () => {
+    for (const q of ["", "0", "0.000", "-1", "1.2345", "abc", "1e3", "1."]) {
+      expect(buildStockInSaveBodyForQuantity(nonBatch, q)).toBeNull();
+    }
+  });
+
+  it("still requires a valid setup (lot for batch products)", () => {
+    expect(buildStockInSaveBodyForQuantity({ product_id: 6, trackBatch: true, trackExpiry: false }, "1.000")).toBeNull();
+  });
+
+  it("the scan-count builder keeps R4's bytes exactly (\"5\", never \"5.000\")", () => {
+    expect(JSON.stringify(buildStockInSaveBody(nonBatch, 5))).toBe('{"endpoint":"stock/in","json":{"product_id":5,"quantity":"5"}}');
+    expect(JSON.stringify(buildStockInSaveBody(batchExp, 12))).toBe(
+      '{"endpoint":"batches","json":{"product_id":1,"lot_no":"LOT-CF","quantity":"12","mfg_date":"2026-01-01","expiry_date":"2027-01-01"}}',
     );
   });
 });
