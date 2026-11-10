@@ -4,6 +4,7 @@ import re
 from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
+from alembic.script import ScriptDirectory
 import pytest
 from sqlalchemy import CheckConstraint, inspect, text
 from sqlalchemy.exc import IntegrityError
@@ -16,6 +17,8 @@ from tests.database_support import isolated_schema, migration_config, validate_t
 PHASE2 = "72ad612eafc9"
 PARITY = "e31a00000001"
 HEAD = "e31a00000002"
+# The repository's single Alembic head. Update it when a migration is added.
+CURRENT_HEAD = "ec1a00000001"
 
 
 @pytest.fixture
@@ -58,7 +61,7 @@ def snapshot(connection):
 def test_fresh_install_and_metadata_parity(migration_engine):
     upgrade(migration_engine, "head")
     with migration_engine.connect() as connection:
-        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "ec1a00000001"
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == CURRENT_HEAD
         inspector = inspect(connection)
         assert set(inspector.get_table_names()) == set(Base.metadata.tables) | {"alembic_version"}
         migration_context = MigrationContext.configure(connection, opts={"compare_type": True, "compare_server_default": True})
@@ -254,4 +257,12 @@ def test_normal_application_fallback_uses_configured_url(migration_engine, monke
     command.upgrade(migration_config(None), "head")
     assert calls == [True]
     with migration_engine.connect() as connection:
-        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "ec1a00000001"
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == CURRENT_HEAD
+
+
+def test_revision_graph_has_one_head_the_current_head():
+    """Pins the CURRENT single head (CURRENT_HEAD, ec1a00000001 at P0-A5, which adds no
+    migration), read offline from the revision graph with no database. It is expected to
+    change whenever a migration is added: update CURRENT_HEAD then."""
+    script = ScriptDirectory.from_config(migration_config(None))
+    assert script.get_heads() == [CURRENT_HEAD]

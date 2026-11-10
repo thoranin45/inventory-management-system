@@ -7,6 +7,7 @@ key + same payload replays the stored response, a different payload is a 409,
 and a business return changes physical stock exactly once.
 """
 from decimal import Decimal
+import re
 from uuid import uuid4
 
 import pytest
@@ -336,3 +337,121 @@ def test_concurrent_same_key_different_payloads_one_applies_one_conflicts(concur
     with s.sessions() as db:
         after = _state(db, order_id, product_id)
     assert after["on_hand"] == before["on_hand"] + applied and after["receipts"] == 1
+
+
+# --------------------------------------------------------------------------------------------
+# P0-A5: multi-line replay and atomicity, and the refusal messages the frontend classifies
+# --------------------------------------------------------------------------------------------
+
+# The frontend (frontend/src/lib/api/schemas/sales.ts) treats only these refusals as proof that
+# nothing was recorded, matching the COMPLETE message. These patterns pin the same structure.
+OVER_REMAINING_RE = re.compile(
+    r"Return quantity exceeds remaining returnable quantity for product ([1-9]\d{0,9})\. "
+    r"Remaining: (\d{1,15}(?:\.\d{1,3})?)"
+)
+NOT_RETURNABLE = "Only completed Sales Order can be returned"
+
+
+def _shipped_two_products(client, headers, *, quantities=("3", "4")):
+    """A shipped two-line, batch-tracked order. The product on the SECOND line is created
+    first, so it has the lower id: request order and product-id order differ."""
+    customer = sales._create_customer(client, headers)
+    second = sales._create_product(client, headers)
+    first = sales._create_product(client, headers)
+    for product in (first, second):
+        sales._create_batch(client, headers, product["id"], quantity=10, expiry_days=90)
+    response = client.post("/api/v1/sales-orders/", headers=headers, json={
+        "customer_id": customer["id"],
+        "items": [{"product_id": first["id"], "quantity": quantities[0], "unit_price": 1},
+                  {"product_id": second["id"], "quantity": quantities[1], "unit_price": 1}],
+    })
+    assert response.status_code == 200, response.text
+    order_id = response.json()["data"]["sales_order_id"]
+    sales._confirm_sales_order(client, headers, order_id)
+    sales._ready_sales_order(client, headers, order_id)
+    sales._ship_sales_order(client, headers, order_id)
+    return order_id, first["id"], second["id"]
+
+
+def test_multi_line_replay_with_the_same_key_returns_the_same_result_and_applies_once(client, admin_headers,
+                                                                                     db_session):
+    order_id, a_id, b_id = _shipped_two_products(client, admin_headers)
+    before = {pid: _state(db_session, order_id, pid) for pid in (a_id, b_id)}
+    key = uuid4().hex
+    items = [_item(a_id, "1"), _item(b_id, "2.5")]
+
+    first = _return(client, admin_headers, order_id, items, key)
+    assert first.status_code == 200, first.text
+    applied = {pid: _state(db_session, order_id, pid) for pid in (a_id, b_id)}
+
+    # The lost-response retry (same key, same payload) and a respelled, reordered copy of it.
+    for replay_items in (items, [_item(b_id, "2.500"), _item(a_id, 1)]):
+        replay = _return(client, admin_headers, order_id, replay_items, key)
+        assert replay.status_code == 200, replay.text
+        assert replay.json() == first.json()  # the stored result, byte for byte
+    assert {pid: _state(db_session, order_id, pid) for pid in (a_id, b_id)} == applied  # nothing applied twice
+
+    returned = {line["product_id"]: line for line in first.json()["data"]["returned_items"]}
+    assert set(returned) == {a_id, b_id}
+    for pid, quantity in ((a_id, Decimal("1")), (b_id, Decimal("2.5"))):
+        assert sales._decimal(returned[pid]["returned_quantity"]) == quantity
+        assert applied[pid]["on_hand"] == before[pid]["on_hand"] + quantity
+        assert applied[pid]["stock_qty"] == before[pid]["stock_qty"] + quantity
+        assert applied[pid]["moved"] == quantity and applied[pid]["movements"] >= 1
+        assert applied[pid]["transactions"] == before[pid]["transactions"] + 1
+    assert applied[a_id]["audits"] == before[a_id]["audits"] + 1  # one audit row for the whole return
+    assert applied[a_id]["receipts"] == 1
+
+
+@pytest.mark.parametrize("failure", ["over_remaining", "not_in_order"])
+def test_one_invalid_line_rolls_back_the_whole_multi_line_return(client, admin_headers, db_session, monkeypatch,
+                                                                  failure):
+    order_id, a_id, b_id = _shipped_two_products(client, admin_headers, quantities=("3", "4"))
+    outsider = sales._create_product(client, admin_headers)["id"]
+    before = {pid: _state(db_session, order_id, pid) for pid in (a_id, b_id)}
+    key = uuid4().hex
+    # The valid line comes FIRST in the request, so it is fully applied before the second fails.
+    invalid = _item(b_id, 5) if failure == "over_remaining" else _item(outsider, 1)
+    synced = []
+    original_sync = StockBalanceRepository.sync_aggregates
+
+    def recording_sync(self, product_id, actor):
+        synced.append(product_id)
+        return original_sync(self, product_id, actor)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(StockBalanceRepository, "sync_aggregates", recording_sync)
+        response = _return(client, admin_headers, order_id, [_item(a_id, 2), invalid], key)
+
+    message = response.json()["message"]
+    if failure == "over_remaining":
+        assert response.status_code == 409, response.text
+        match = OVER_REMAINING_RE.fullmatch(message)
+        assert match, message
+        assert int(match.group(1)) == b_id and Decimal(match.group(2)) == Decimal("4")
+    else:
+        assert response.status_code == 400, response.text
+        assert message == f"Product {outsider} not found in this sales order"
+    assert synced == [a_id]  # line A really was applied before the failure ...
+    for pid in (a_id, b_id):  # ... and nothing survived: no receipt, stock, ledger, transaction or audit row
+        assert _state(db_session, order_id, pid) == before[pid]
+
+    # Nothing was recorded for the key either: the valid line alone applies with it, exactly once.
+    for _ in range(2):
+        alone = _return(client, admin_headers, order_id, [_item(a_id, 2)], key)
+        assert alone.status_code == 200, alone.text
+    after = _state(db_session, order_id, a_id)
+    assert after["on_hand"] == before[a_id]["on_hand"] + 2 and after["receipts"] == 1
+    assert after["transactions"] == before[a_id]["transactions"] + 1
+
+
+def test_not_returnable_refusal_is_the_exact_message_and_records_nothing(client, admin_headers, db_session):
+    customer = sales._create_customer(client, admin_headers)
+    product = _create_plain_product(client, admin_headers, initial_stock=5)
+    order = sales._create_sales_order(client, admin_headers, customer["id"], product["id"], quantity=2, unit_price=1)
+    sales._confirm_sales_order(client, admin_headers, order["sales_order_id"])
+    before = _state(db_session, order["sales_order_id"], product["id"])
+    response = _return(client, admin_headers, order["sales_order_id"], [_item(product["id"], 1)], uuid4().hex)
+    assert response.status_code == 409
+    assert response.json()["message"] == NOT_RETURNABLE
+    assert _state(db_session, order["sales_order_id"], product["id"]) == before
