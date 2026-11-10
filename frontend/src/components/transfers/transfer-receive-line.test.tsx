@@ -34,7 +34,7 @@ describe("TransferReceiveLine", () => {
         onChange={onChange}
       />,
     );
-    expect(screen.getByText("5.00")).toBeInTheDocument(); // dispatched
+    expect(screen.getByText("5.000")).toBeInTheDocument(); // dispatched
     await user.type(screen.getByLabelText("Receive now"), "1");
     expect(onChange).toHaveBeenCalledWith("1");
   });

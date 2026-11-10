@@ -40,6 +40,8 @@ vi.mock("@/lib/query/stock-adjustment-requests", () => ({
 }));
 
 import { StockAdjustmentRequestForm } from "./request-form";
+import { LanguageProvider } from "@/lib/i18n/client";
+import { LanguageSwitch } from "@/components/shell/language-switch";
 
 async function pickProduct(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("combobox", { name: /search products/i }));
@@ -160,5 +162,110 @@ describe("StockAdjustmentRequestForm", () => {
     expect(observedAfterReload).toHaveValue("10.000");
     await user.click(screen.getByRole("button", { name: /submit request/i }));
     expect(firstCallKeyHolder.key).toBe(keyBeforeReload);
+  });
+});
+
+/* ------------------- R3.0 characterization (pre-refactor) ------------------- */
+
+describe("StockAdjustmentRequestForm — characterization (R3.0)", () => {
+  const requested = () => screen.getByLabelText("Requested (corrected) quantity");
+  const submitButton = () => screen.getByRole("button", { name: /submit request/i });
+  const MISMATCH = "Idempotency-Key already used with a different payload";
+
+  it("exact mutate arguments: trimmed note, key prefix adjreq-", async () => {
+    const user = userEvent.setup();
+    render(<StockAdjustmentRequestForm />);
+    await pickProduct(user);
+    await user.type(requested(), "8.5");
+    await user.type(screen.getByPlaceholderText(/counted 38/), "  recount  ");
+    await user.click(submitButton());
+    expect(createMutate.mock.calls[0][0]).toEqual({
+      body: { product_id: 5, observed_quantity: "10.000", requested_quantity: "8.5", reason_code: "CYCLE_COUNT_VARIANCE", notes: "recount" },
+      idempotencyKey: expect.stringMatching(/^adjreq-/),
+    });
+  });
+
+  it("shows the difference with 3 decimals (display only)", async () => {
+    const user = userEvent.setup();
+    render(<StockAdjustmentRequestForm />);
+    await pickProduct(user);
+    await user.type(requested(), "9.9");
+    expect(screen.getByText("(−0.100)")).toBeInTheDocument(); // R4 D-R4-1: real minus sign, exact decimal
+  });
+
+  it("non-batch: a request below the reserved quantity warns but stays submittable (batch requests are blocked instead)", async () => {
+    const user = userEvent.setup();
+    render(<StockAdjustmentRequestForm />);
+    await pickProduct(user);
+    await user.type(requested(), "2");
+    expect(screen.getByRole("alert")).toHaveTextContent(/below the 3.000 reserved/i);
+    expect(submitButton()).toBeEnabled();
+  });
+
+  it("the mismatch predicate is 409 + /different payload/i; another status is a normal failure that keeps the key", async () => {
+    const user = userEvent.setup();
+    createMutate.mockImplementationOnce((_v, opts) => opts.onError(new ApiError({ status: 422, message: MISMATCH })));
+    render(<StockAdjustmentRequestForm />);
+    await pickProduct(user);
+    await user.type(requested(), "8");
+    await user.click(submitButton());
+    expect(screen.queryByText(/can no longer be submitted/i)).not.toBeInTheDocument();
+    createMutate.mockImplementationOnce((_v, opts) => opts.onError(new ApiError({ status: 409, message: "a DIFFERENT PAYLOAD" })));
+    await user.click(submitButton());
+    expect(await screen.findByText(/can no longer be submitted/i)).toBeInTheDocument();
+    expect(createMutate.mock.calls[1][0]).toEqual(createMutate.mock.calls[0][0]);
+  });
+
+  it("mismatch recovery 'Start new request' clears the form and the next submit uses a NEW key", async () => {
+    const user = userEvent.setup();
+    createMutate.mockImplementationOnce((_v, opts) => opts.onError(new ApiError({ status: 409, message: MISMATCH })));
+    render(<StockAdjustmentRequestForm />);
+    await pickProduct(user);
+    await user.type(requested(), "8");
+    await user.click(submitButton());
+    const k1 = createMutate.mock.calls[0][0].idempotencyKey;
+    await user.click(await screen.findByRole("button", { name: /start new request/i }));
+    expect(screen.queryByLabelText("Requested (corrected) quantity")).not.toBeInTheDocument(); // product cleared
+    await pickProduct(user);
+    await user.type(requested(), "8");
+    await user.click(submitButton());
+    expect(createMutate.mock.calls[1][0].idempotencyKey).not.toBe(k1);
+  });
+
+  it("Submit is disabled and inert while a submission is pending", async () => {
+    const user = userEvent.setup();
+    createState = { ...createState, isPending: true };
+    render(<StockAdjustmentRequestForm />);
+    await pickProduct(user);
+    await user.type(requested(), "8");
+    const pending = screen.getByRole("button", { name: /submitting…/i });
+    expect(pending).toBeDisabled();
+    await user.click(pending);
+    expect(createMutate).not.toHaveBeenCalled();
+  });
+
+  it("a language switch keeps the draft and key and sends no business request", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      render(
+        <LanguageProvider initialLocale="en">
+          <LanguageSwitch />
+          <StockAdjustmentRequestForm />
+        </LanguageProvider>,
+      );
+      await pickProduct(user);
+      await user.type(requested(), "8");
+      const input = requested();
+      await user.click(screen.getByRole("button", { name: "ไทย" }));
+      await user.click(screen.getByRole("button", { name: "EN" }));
+      expect(requested()).toBe(input);
+      expect(input).toHaveValue("8");
+      expect(createMutate).not.toHaveBeenCalled();
+      expect(fetchMock.mock.calls.every((c) => (c as unknown[])[0] === "/api/prefs/language")).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

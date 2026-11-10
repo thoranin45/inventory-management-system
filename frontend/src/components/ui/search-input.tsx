@@ -3,14 +3,15 @@
 import * as React from "react";
 import { Search } from "lucide-react";
 
+import { useT } from "@/lib/i18n/client";
 import { cn } from "@/lib/utils";
 
 /** Debounced search box. Local text state; commits `value` after `delay` ms. */
 export function SearchInput({
   value,
   onCommit,
-  placeholder = "Search…",
-  ariaLabel = "Search",
+  placeholder,
+  ariaLabel,
   delay = 250,
   className,
 }: {
@@ -32,6 +33,7 @@ export function SearchInput({
   }
 
   React.useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+  const t = useT();
 
   return (
     <label className={cn("relative flex min-w-[200px] flex-1 items-center", className)}>
@@ -45,9 +47,9 @@ export function SearchInput({
           if (timer.current) clearTimeout(timer.current);
           timer.current = setTimeout(() => onCommit(v), delay);
         }}
-        placeholder={placeholder}
-        aria-label={ariaLabel}
-        className="h-9 w-full rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] pl-8 pr-3 text-[13px] outline-none focus-visible:border-[var(--accent)] focus-visible:outline-2 focus-visible:outline-[var(--focus)]"
+        placeholder={placeholder ?? t("common.searchPlaceholder")}
+        aria-label={ariaLabel ?? t("common.search")}
+        className="h-9 w-full rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] pl-8 pr-3 text-[13px] outline-hidden focus-visible:border-[var(--accent)] focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-[var(--focus)]"
       />
     </label>
   );

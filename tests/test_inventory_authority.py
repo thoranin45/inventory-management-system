@@ -182,7 +182,7 @@ def test_sales_reservation_shipment_return_use_balances(client, admin_headers, d
     assert_aggregates(db_session, product["id"])
     assert balance.on_hand_qty == 6
     assert balance.reserved_qty == 0
-    response = client.post(f"/api/v1/sales-orders/{order['sales_order_id']}/return", headers=admin_headers,
+    response = client.post(f"/api/v1/sales-orders/{order['sales_order_id']}/return", headers={**admin_headers, "Idempotency-Key": uuid4().hex},
                            json={"items": [{"product_id": product["id"], "quantity": 2, "reason": "Return"}]})
     assert response.status_code == 200
     assert_aggregates(db_session, product["id"])

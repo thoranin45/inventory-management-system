@@ -23,7 +23,7 @@ type FormValues = CreateTransferInput;
 const EMPTY_LINE = { product_id: 0, batch_id: null as number | null, from_location_id: 0, to_location_id: 0, quantity: "" };
 
 const inputCls =
-  "min-h-11 rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-[13px] tabular-nums outline-none focus-visible:outline-2 focus-visible:outline-[var(--focus)]";
+  "min-h-11 rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-[13px] tabular-nums outline-hidden focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-[var(--focus)]";
 
 function Field({ label, error, children, htmlFor }: { label: string; error?: string; children: React.ReactNode; htmlFor?: string }) {
   return (

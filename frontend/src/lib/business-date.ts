@@ -51,3 +51,59 @@ export const EXPIRY_STATE_LABEL: Record<ExpiryState, string> = {
   near: "Near expiry",
   ok: "In date",
 };
+
+/* ------------------------------------------------- localized date display -- */
+
+const MONTHS_EN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const MONTHS_TH = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+
+/** Buddhist-era years are Gregorian + 543. */
+export const BUDDHIST_ERA_OFFSET = 543;
+
+/**
+ * A real calendar date in strict `YYYY-MM-DD` form (leap days checked).
+ * Pure arithmetic on the parts: no time zone is involved, so a date-only value
+ * can never shift by a day.
+ */
+export function isIsoDate(value: string | null | undefined): value is string {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const y = +value.slice(0, 4);
+  const m = +value.slice(5, 7);
+  const d = +value.slice(8, 10);
+  if (m < 1 || m > 12 || d < 1) return false;
+  const leap = (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][m - 1];
+  return d <= days;
+}
+
+/**
+ * Display a date-only ISO value in the UI language (frozen spec): Thai shows
+ * the Buddhist-era year ("30 ก.ย. 2570"), English "30 Sep 2027". The value
+ * itself never changes; anything that is not a real ISO date is shown as-is
+ * ("" → "—").
+ */
+export function formatDisplayDate(iso: string | null | undefined, locale: "th" | "en"): string {
+  if (!iso) return "—";
+  if (!isIsoDate(iso)) return iso;
+  const y = +iso.slice(0, 4);
+  const m = +iso.slice(5, 7);
+  const d = +iso.slice(8, 10);
+  return locale === "th"
+    ? `${d} ${MONTHS_TH[m - 1]} ${y + BUDDHIST_ERA_OFFSET}`
+    : `${String(d).padStart(2, "0")} ${MONTHS_EN[m - 1]} ${y}`;
+}
+
+/**
+ * Thai users may type a Buddhist-era year into a date input (2570 for 2027).
+ * A complete ISO date whose year can only be Buddhist-era (2400–2999, giving a
+ * Gregorian 1857–2456) is converted to Gregorian when the result is a real
+ * date; anything else is returned unchanged. The backend only ever receives
+ * the Gregorian ISO value.
+ */
+export function normalizeBuddhistEraIso(iso: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
+  const y = +iso.slice(0, 4);
+  if (y < 2400 || y > 2999) return iso;
+  const converted = `${String(y - BUDDHIST_ERA_OFFSET).padStart(4, "0")}${iso.slice(4)}`;
+  return isIsoDate(converted) ? converted : iso;
+}

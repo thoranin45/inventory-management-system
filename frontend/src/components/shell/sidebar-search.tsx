@@ -3,6 +3,7 @@
 import { Search } from "lucide-react";
 
 import { useCommandPalette } from "@/components/command-palette";
+import { useT } from "@/lib/i18n/client";
 import { cn } from "@/lib/utils";
 
 /**
@@ -11,18 +12,19 @@ import { cn } from "@/lib/utils";
  */
 export function SidebarSearch({ className }: { className?: string }) {
   const { openPalette } = useCommandPalette();
+  const t = useT();
   return (
     <button
       type="button"
       onClick={openPalette}
-      aria-label="Search products, orders, lots — opens the command palette"
+      aria-label={t("shell.openPalette")}
       className={cn(
         "flex min-h-11 w-full items-center gap-[9px] rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--bg)] px-3 text-left text-[14px] text-[var(--faint)] transition-colors duration-[var(--dur-1)] hover:border-[var(--accent)] hover:text-[var(--muted)] focus-visible:outline-2 focus-visible:outline-[var(--focus)]",
         className,
       )}
     >
       <Search aria-hidden className="h-[14px] w-[14px] flex-none" />
-      <span className="truncate">Search products, orders, lots…</span>
+      <span className="truncate">{t("shell.searchPlaceholder")}</span>
     </button>
   );
 }

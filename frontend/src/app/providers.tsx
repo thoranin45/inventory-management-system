@@ -6,6 +6,8 @@ import { ThemeProvider } from "next-themes";
 import { Toaster } from "sonner";
 
 import { isApiError } from "@/lib/api/errors";
+import type { Locale } from "@/lib/i18n/config";
+import { LanguageProvider } from "@/lib/i18n/client";
 
 function makeQueryClient() {
   return new QueryClient({
@@ -31,17 +33,19 @@ function getQueryClient() {
   return browserQueryClient;
 }
 
-export function Providers({ children }: { children: React.ReactNode }) {
+export function Providers({ children, locale }: { children: React.ReactNode; locale: Locale }) {
   const queryClient = getQueryClient();
   return (
     <QueryClientProvider client={queryClient}>
+      {/* D1: new visitors start in Light. An explicit choice already saved by
+          next-themes (same default storage key) is kept untouched. */}
       <ThemeProvider
         attribute="data-theme"
-        defaultTheme="system"
+        defaultTheme="light"
         enableSystem
         disableTransitionOnChange
       >
-        {children}
+        <LanguageProvider initialLocale={locale}>{children}</LanguageProvider>
         <Toaster
           position="bottom-right"
           toastOptions={{

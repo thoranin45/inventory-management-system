@@ -3,6 +3,7 @@
 import * as React from "react";
 import { Check, ChevronsUpDown, Loader2, Search } from "lucide-react";
 
+import { useT } from "@/lib/i18n/client";
 import { cn } from "@/lib/utils";
 
 export interface ComboboxItem {
@@ -22,8 +23,8 @@ export function Combobox({
   items,
   onSearch,
   loading,
-  placeholder = "Search…",
-  emptyText = "No matches",
+  placeholder,
+  emptyText,
   ariaLabel,
   id,
 }: {
@@ -37,6 +38,7 @@ export function Combobox({
   ariaLabel: string;
   id?: string;
 }) {
+  const t = useT();
   const [open, setOpen] = React.useState(false);
   const [term, setTerm] = React.useState("");
   const [active, setActive] = React.useState(0);
@@ -111,7 +113,7 @@ export function Combobox({
             aria-label={ariaLabel}
             autoComplete="off"
             value={term}
-            placeholder={placeholder}
+            placeholder={placeholder ?? t("common.searchPlaceholder")}
             onChange={(e) => {
               setTerm(e.target.value);
               setActive(0);
@@ -137,7 +139,7 @@ export function Combobox({
           className="absolute z-[95] mt-1 max-h-64 w-full overflow-y-auto rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface-raised)] py-1 shadow-[var(--shadow-lg)]"
         >
           {items.length === 0 ? (
-            <li className="px-3 py-2 text-[12px] text-[var(--muted)]">{loading ? "Searching…" : emptyText}</li>
+            <li className="px-3 py-2 text-[12px] text-[var(--muted)]">{loading ? t("common.searching") : (emptyText ?? t("common.noMatches"))}</li>
           ) : (
             items.map((item, i) => (
               <li key={item.id} role="option" aria-selected={value?.id === item.id}>

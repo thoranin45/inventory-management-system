@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { compareDecimals } from "@/lib/decimal";
 import { apiEnvelope, decimalString, paginated } from "./common";
 
 /**
@@ -342,11 +343,18 @@ export const SHIP_STARTABLE_STATUS = "READY_TO_SHIP";
 export const COMPLETE_STARTABLE_STATUS = "SHIPPED";
 export const RETURNABLE_STATUSES = ["SHIPPED", "COMPLETED"] as const;
 
+/** V1-H1: backend message for a reused Idempotency-Key with a different payload (409). */
+export const RETURN_KEY_CONFLICT = "Idempotency-Key already used with a different payload";
+
 export const SALES_SHIP_ERROR_COPY: Record<string, string> = {
   "Insufficient reserved or on-hand stock":
     "Stock moved since packing — the reserved quantity is no longer on hand. Refresh and re-check the allocation.",
   "Only completed Sales Order can be returned":
     "Only a shipped or completed order can be returned.",
+  // V1-H1: same Idempotency-Key, different items — the earlier submit may already be recorded.
+  // P0-A5: the drawer never rotates the key or unlocks a new return after this.
+  [RETURN_KEY_CONFLICT]:
+    "This return's request key was already used with different quantities, so a return may already be recorded. Check this order's SALES_RETURN movements in Inventory › Ledger before doing anything else.",
 };
 
 export function shipErrorCopy(message: string | undefined): string | undefined {
@@ -362,12 +370,19 @@ export function shipErrorCopy(message: string | undefined): string | undefined {
 }
 
 /* ---- return request ---- */
+/**
+ * A return quantity at the backend's scale: digits, then up to 3 decimals.
+ * The one rule for what a return line may send AND for the returned_quantity
+ * a 2xx must carry to confirm it (`confirmsReturnIntent`).
+ */
+const RETURN_QTY_RE = /^\d+(?:\.\d{1,3})?$/;
+
 export const salesReturnLineInput = z.object({
   product_id: z.number().int().positive(),
   quantity: z
     .string()
     .trim()
-    .regex(/^\d+(\.\d{1,3})?$/, "Quantity must be a number with up to 3 decimals")
+    .regex(RETURN_QTY_RE, "Quantity must be a number with up to 3 decimals")
     .refine((v) => Number(v) > 0, "Quantity must be greater than zero"),
   reason: z.string().trim().max(255, "Reason must be 255 characters or fewer").optional().transform((v) => (v ? v : undefined)),
 });
@@ -395,3 +410,98 @@ export const salesReturnResultSchema = z.object({
 });
 export type SalesReturnResult = z.infer<typeof salesReturnResultSchema>;
 export const salesReturnEnvelope = apiEnvelope(salesReturnResultSchema);
+
+/* ================================================================ P0-A5 ===
+ * What a Sales Return response PROVES about a pending return intent.
+ * ========================================================================== */
+
+/**
+ * The part of a 2xx return body that must answer the intent that was sent.
+ * Strict, with no defaults: `salesReturnResultSchema` turns a missing
+ * `returned_items` into [], which must never count as a confirmation.
+ */
+export const salesReturnConfirmationSchema = z.object({
+  sales_order_id: z.number().int().positive(),
+  returned_items: z
+    .array(z.object({ product_id: z.number().int().positive(), returned_quantity: numeric }))
+    .min(1),
+});
+
+/**
+ * A 2xx counts as "recorded" only when it answers THIS intent: the same
+ * order, and exactly one returned line per sent line, with the same product
+ * and the same quantity at 3 decimals. A replay keeps the FIRST request's
+ * line order, so lines are matched by product, not by position. Anything
+ * else (unparseable, another order, a missing/extra/duplicate line, another
+ * quantity) is not a confirmation: the outcome stays unknown.
+ */
+export function confirmsReturnIntent(
+  data: unknown,
+  salesOrderId: number,
+  sent: readonly Pick<SalesReturnLineInput, "product_id" | "quantity">[],
+): boolean {
+  const parsed = salesReturnConfirmationSchema.safeParse(data);
+  if (!parsed.success || parsed.data.sales_order_id !== salesOrderId) return false;
+  const lines = parsed.data.returned_items;
+  if (lines.length !== sent.length) return false;
+  const seen = new Set<number>();
+  for (const line of lines) {
+    const item = sent.find((i) => i.product_id === line.product_id);
+    if (!item || seen.has(line.product_id)) return false;
+    if (!RETURN_QTY_RE.test(line.returned_quantity) || !RETURN_QTY_RE.test(item.quantity)) return false;
+    if (compareDecimals(line.returned_quantity, item.quantity) !== 0) return false;
+    seen.add(line.product_id);
+  }
+  return true;
+}
+
+/*
+ * The ONLY refusals that prove a return was NOT recorded. The backend has no
+ * machine-readable error codes, so each is recognised by its HTTP status AND
+ * its complete message, copied from return_sales_order_items_service in
+ * app/services/sales_order_service.py. Each is raised under the sales-order row
+ * lock AFTER the Idempotency-Key receipt lookup (a key that was recorded
+ * replays its stored 200 instead), inside the same transaction as the receipt
+ * and the stock change, so the whole return rolls back. Every pattern is
+ * anchored and its parameter parts are constrained:
+ *   - product id: 1–10 digits with no leading zero. That admits every
+ *     PostgreSQL integer key (max 2147483647) and stays a safe JS integer;
+ *     it is a digit-count bound, not a range check, so it also admits
+ *     2147483648–9999999999;
+ *   - Remaining: Python's str() of a scale-3 Decimal (no sign, no exponent,
+ *     at most 3 decimals).
+ * Anything else — including a near-miss of these — leaves the outcome unknown.
+ */
+/** 409, sales_order_service.py:506-513 — the order is not SHIPPED/COMPLETED. */
+export const RETURN_REFUSED_NOT_RETURNABLE = "Only completed Sales Order can be returned";
+/** 400, sales_order_service.py:536-544 — `f"Product {product_id} not found in this sales order"`; id: 1–10 digits (see above). */
+export const RETURN_REFUSED_PRODUCT_NOT_IN_ORDER_RE = /^Product ([1-9]\d{0,9}) not found in this sales order$/;
+/**
+ * 409, sales_order_service.py:558-572 — `"Return quantity exceeds remaining returnable quantity
+ * for product {product_id}. Remaining: {remaining_returnable}"`; id: 1–10 digits (see above).
+ */
+export const RETURN_REFUSED_OVER_REMAINING_RE =
+  /^Return quantity exceeds remaining returnable quantity for product ([1-9]\d{0,9})\. Remaining: (\d{1,15}(?:\.\d{1,3})?)$/;
+/** 409, sales_order_service.py:737-746 — the batch allocations can't take the quantity. */
+export const RETURN_REFUSED_OVER_BATCH_ALLOCATION = "Return quantity exceeds available batch allocation";
+
+export type ReturnRefusal =
+  | { kind: "not_returnable" }
+  | { kind: "product_not_in_order"; productId: number }
+  | { kind: "over_remaining"; productId: number; remaining: string }
+  | { kind: "over_batch_allocation" };
+
+/** One of the four terminal refusals above, or null (= the outcome is unknown). */
+export function classifyReturnRefusal(status: number, message: string): ReturnRefusal | null {
+  if (status === 409 && message === RETURN_REFUSED_NOT_RETURNABLE) return { kind: "not_returnable" };
+  if (status === 409 && message === RETURN_REFUSED_OVER_BATCH_ALLOCATION) return { kind: "over_batch_allocation" };
+  if (status === 400) {
+    const m = RETURN_REFUSED_PRODUCT_NOT_IN_ORDER_RE.exec(message);
+    if (m) return { kind: "product_not_in_order", productId: Number(m[1]) };
+  }
+  if (status === 409) {
+    const m = RETURN_REFUSED_OVER_REMAINING_RE.exec(message);
+    if (m) return { kind: "over_remaining", productId: Number(m[1]), remaining: m[2] };
+  }
+  return null;
+}

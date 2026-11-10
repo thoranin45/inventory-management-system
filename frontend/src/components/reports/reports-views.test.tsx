@@ -92,17 +92,17 @@ beforeEach(() => {
 });
 
 describe("Operational stock report", () => {
-  it("renders enriched rows to 2 decimals and the classification foot-note", () => {
+  it("renders enriched rows to 3 decimals and the classification foot-note", () => {
     render(<OperationalStockReport />);
     const table = screen.getByRole("table");
     expect(within(table).getByText("Green Tea 200g")).toBeInTheDocument();
-    expect(within(table).getByText("392.00")).toBeInTheDocument(); // operational available, 2dp
+    expect(within(table).getByText("392.000")).toBeInTheDocument(); // operational available, 3dp
     expect(screen.getByText(/classifications of owned stock, not a separate pool/i)).toBeInTheDocument();
   });
   it("shows the top-stock MiniBars with textual values", () => {
     render(<OperationalStockReport />);
     expect(screen.getByText("Top stock holders (owned quantity)")).toBeInTheDocument();
-    expect(screen.getByText("3,110.00")).toBeInTheDocument();
+    expect(screen.getByText("3,110.000")).toBeInTheDocument();
   });
 });
 

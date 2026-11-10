@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class SalesReturnItemCreate(BaseModel):
@@ -26,3 +26,12 @@ class SalesReturnCreate(BaseModel):
         ...,
         min_length=1,
     )
+
+    @model_validator(mode="after")
+    def _distinct_products(self) -> "SalesReturnCreate":
+        # V1-H1: one line per product, so a request has one unambiguous
+        # fingerprint and the remaining-returnable check sees each product once.
+        product_ids = [item.product_id for item in self.items]
+        if len(product_ids) != len(set(product_ids)):
+            raise ValueError("Duplicate product_id in return items")
+        return self

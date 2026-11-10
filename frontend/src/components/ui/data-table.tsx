@@ -4,6 +4,7 @@ import * as React from "react";
 import { ChevronsUpDown, ChevronDown, ChevronLeft, ChevronRight, ChevronUp } from "lucide-react";
 
 import { useMediaQuery } from "@/lib/hooks/use-viewport";
+import { useT } from "@/lib/i18n/client";
 import { cn } from "@/lib/utils";
 import { Button } from "./button";
 import { EmptyState, ErrorState, LoadingState } from "./states";
@@ -61,6 +62,7 @@ export function DataTable<Row>({
   onSort,
   pagination,
   className,
+  tabletLayout = "cards",
 }: {
   columns: Column<Row>[];
   rows: Row[];
@@ -76,8 +78,17 @@ export function DataTable<Row>({
   onSort?: (field: string) => void;
   pagination?: DataTablePagination;
   className?: string;
+  /**
+   * Concept B (D-R4-5): "table" keeps the dense table on iPad (768–1023 px,
+   * secondary columns hidden) and switches to cards only on phones. The
+   * default keeps the existing ≤1023 px card layout for every other screen.
+   */
+  tabletLayout?: "cards" | "table";
 }) {
-  const isMobile = useMediaQuery("(max-width: 1023.98px)");
+  const t = useT();
+  const belowDesktop = useMediaQuery("(max-width: 1023.98px)");
+  const phone = useMediaQuery("(max-width: 767.98px)");
+  const isMobile = tabletLayout === "table" ? phone : belowDesktop;
   const compact = useMediaQuery("(max-width: 1199.98px)");
   const [internalSort, setInternalSort] = React.useState<{ key: string; order: "asc" | "desc" } | null>(null);
 
@@ -119,9 +130,9 @@ export function DataTable<Row>({
   }, [rows, internalSort, onSort, columns, getRowKey]);
 
   const body = (() => {
-    if (isLoading) return <LoadingState label="Loading…" />;
+    if (isLoading) return <LoadingState />;
     if (error) return <ErrorState error={error} onRetry={onRetry} className="m-4" />;
-    if (!rows.length) return <EmptyState message={emptyMessage ?? "No records match the current filter."} />;
+    if (!rows.length) return <EmptyState message={emptyMessage ?? t("common.emptyFilter")} />;
 
     if (isMobile && renderCard) {
       return (
@@ -234,14 +245,17 @@ export function DataTable<Row>({
       {pagination && !isLoading && !error && rows.length > 0 ? (
         <div className="flex flex-wrap items-center justify-between gap-3 text-[12px] text-[var(--muted)]">
           <span className="tnum">
-            {(pagination.page - 1) * pagination.pageSize + 1}–
-            {Math.min(pagination.page * pagination.pageSize, pagination.totalItems)} of {pagination.totalItems}
+            {t("common.rangeOf", {
+              from: (pagination.page - 1) * pagination.pageSize + 1,
+              to: Math.min(pagination.page * pagination.pageSize, pagination.totalItems),
+              total: pagination.totalItems,
+            })}
           </span>
           <div className="flex items-center gap-1">
             <Button
               size="icon"
               variant="ghost"
-              aria-label="Previous page"
+              aria-label={t("common.previousPage")}
               disabled={pagination.page <= 1}
               onClick={() => pagination.onPageChange(pagination.page - 1)}
             >
@@ -253,7 +267,7 @@ export function DataTable<Row>({
             <Button
               size="icon"
               variant="ghost"
-              aria-label="Next page"
+              aria-label={t("common.nextPage")}
               disabled={pagination.page >= pagination.totalPages}
               onClick={() => pagination.onPageChange(pagination.page + 1)}
             >

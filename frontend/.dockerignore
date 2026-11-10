@@ -18,6 +18,17 @@ coverage
 .env.*
 !.env*.example
 
+# V1-H5A: nested env files and keys, local build/test artefacts
+**/.env
+**/.env.*
+!**/.env*.example
+**/*.pem
+**/*.key
+*.tsbuildinfo
+test-results
+playwright-report
+.turbo
+
 # editor / OS cruft
 .vscode
 .idea

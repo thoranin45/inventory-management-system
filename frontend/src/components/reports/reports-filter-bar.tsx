@@ -9,7 +9,7 @@ import { MOVEMENT_TYPES, movementTypeLabel } from "@/lib/api/schemas/reports";
 import type { ReportParamKey } from "@/lib/reports/use-report-params";
 
 const fieldCls =
-  "h-9 rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 text-[12.5px] tabular-nums outline-none focus-visible:outline-2 focus-visible:outline-[var(--focus)]";
+  "h-9 rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 text-[12.5px] tabular-nums outline-hidden focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-[var(--focus)]";
 
 export interface FilterBarSpec {
   /** which controls to render — only params the endpoint actually supports */

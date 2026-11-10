@@ -368,7 +368,7 @@ def test_fractional_repeated_returns(concurrent_inventory, track_batch):
     sales._ready_sales_order(s.client, s.headers, order_id)
     sales._ship_sales_order(s.client, s.headers, order_id)
     for quantity in ["0.125", "0.001"]:
-        response = s.client.post(f"/api/v1/sales-orders/{order_id}/return", json={"items": [
+        response = s.client.post(f"/api/v1/sales-orders/{order_id}/return", headers={"Idempotency-Key": uuid4().hex}, json={"items": [
             {"product_id": product["id"], "quantity": quantity, "reason": "Fractional return"}]})
         assert response.status_code == 200
     request = ("POST", f"/api/v1/sales-orders/{order_id}/return", {"items": [
@@ -378,10 +378,10 @@ def test_fractional_repeated_returns(concurrent_inventory, track_batch):
     with s.sessions() as db:
         assert db.get(Product, product["id"]).stock_qty == Decimal("0.876")
         assert db.query(StockTransaction).filter_by(transaction_type="SALE_RETURN").count() == 3
-    response = s.client.post(f"/api/v1/sales-orders/{order_id}/return", json={"items": [
+    response = s.client.post(f"/api/v1/sales-orders/{order_id}/return", headers={"Idempotency-Key": uuid4().hex}, json={"items": [
         {"product_id": product["id"], "quantity": "0.249", "reason": "Remainder"}]})
     assert response.status_code == 200
-    response = s.client.post(f"/api/v1/sales-orders/{order_id}/return", json={"items": [
+    response = s.client.post(f"/api/v1/sales-orders/{order_id}/return", headers={"Idempotency-Key": uuid4().hex}, json={"items": [
         {"product_id": product["id"], "quantity": "0.001", "reason": "Over return"}]})
     assert response.status_code == 409
 

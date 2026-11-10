@@ -53,7 +53,8 @@ export type StockOutInput = z.infer<typeof stockOutInput>;
  * SETUP step of the two-step Stock-Out session, mirroring Stock-In's shape.
  * `strategy` is part of the draft (changing it mid-session means abandoning
  * the pending operation, not silently rewriting it — see
- * buildStockOutSaveBody / the console's resolveStrategyChange guard).
+ * buildStockOutSaveBody and the console's SessionLine note: the setup
+ * controls are gone once scanning starts, so "Clear session" is the only way).
  * `expected` is an optional target count — it never blocks a Save, only
  * warns when the counted/entered quantity goes over it.
  */

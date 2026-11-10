@@ -1,14 +1,20 @@
+import hashlib
+import json
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
+from uuid import uuid4
 
 from fastapi import status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core import batch_eligibility
 from app.core.exceptions import AppException, InsufficientAvailableStockException
+from app.core.quantity import encode_quantities
 from app.core.unit_of_work import UnitOfWork
-from app.models import AuditLog, InventoryMovement, SalesOrder, SalesOrderBatchAllocation, SalesOrderItem, StockTransaction
+from app.models import (AuditLog, InventoryMovement, SalesOrder, SalesOrderBatchAllocation, SalesOrderItem,
+                        SalesReturnReceipt, StockTransaction)
 from app.repositories.sales_order_repository import SalesOrderRepository
 from app.repositories.stock_balance_repository import StockBalanceRepository
 from app.repositories.inventory_movement_repository import InventoryMovementRepository
@@ -448,6 +454,20 @@ def _return_source(db, balance_repo, sales_order_repo, order, item, allocation=N
         return balance_repo.get_default_batch_balance_for_update(item.product_id, allocation.batch_id)
     return balance_repo.get_default_product_balance_for_update(item.product_id)
 
+IDEMPOTENCY_CONFLICT = "Idempotency-Key already used with a different payload"
+
+
+def _return_fingerprint(sales_order_id: int, data: SalesReturnCreate) -> str:
+    """Canonical request identity. Quantities are normalised to scale 3, so
+    ``2``, ``2.0`` and ``2.000`` are the same request; line order is irrelevant
+    (product ids are unique per request)."""
+    payload = {"version": 1, "sales_order_id": sales_order_id,
+               "items": [{"product_id": i.product_id, "quantity": format(i.quantity, ".3f"), "reason": i.reason}
+                         for i in sorted(data.items, key=lambda i: i.product_id)]}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"),
+                                     ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
 def return_sales_order_items_service(
     db: Session,
     sales_order_repo: SalesOrderRepository,
@@ -456,8 +476,17 @@ def return_sales_order_items_service(
     sales_order_id: int,
     data: SalesReturnCreate,
     current_user: Any,
+    operation_key: str,
 ) -> dict:
+    """Apply a sales return exactly once per (sales order, Idempotency-Key).
 
+    The sales-order row lock serialises every return of that order, so a
+    concurrent request with the same key waits, then finds the committed
+    receipt and replays it. The receipt is written in the same transaction as
+    the stock mutation: a failed return leaves neither behind.
+    """
+
+    fingerprint = _return_fingerprint(sales_order_id, data)
     returned_items = []
 
     with UnitOfWork(db):
@@ -467,6 +496,12 @@ def return_sales_order_items_service(
                 sales_order_id=sales_order_id,
             )
         )
+
+        existing = sales_order_repo.get_return_receipt(sales_order.id, operation_key)
+        if existing is not None:
+            if existing.request_fingerprint != fingerprint:
+                _raise_error(IDEMPOTENCY_CONFLICT, status.HTTP_409_CONFLICT)
+            return existing.response_snapshot  # replay: no stock, ledger or audit change
 
         if sales_order.status not in {"SHIPPED", "COMPLETED"}:
             _raise_error(
@@ -478,6 +513,16 @@ def return_sales_order_items_service(
             )
 
         balance_repo.lock_inventory([item.product_id for item in data.items])
+
+        try:
+            receipt = sales_order_repo.create_return_receipt(SalesReturnReceipt(
+                sales_order_id=sales_order.id, receipt_number="SRR-" + uuid4().hex,
+                operation_key=operation_key, request_fingerprint=fingerprint,
+                returned_by_user_id=current_user.id, response_snapshot={}))
+        except IntegrityError:
+            # Unreachable while the order row lock is held; kept as a backstop so a
+            # key collision is a clean 409, never a generic constraint error.
+            _raise_error(IDEMPOTENCY_CONFLICT, status.HTTP_409_CONFLICT)
 
         for return_item in data.items:
             sold_item = (
@@ -826,14 +871,20 @@ def return_sales_order_items_service(
             record_id=sales_order.id,
             description=(
                 f"Return items from "
-                f"{sales_order.so_number}"
+                f"{sales_order.so_number}; "
+                f"Receipt: {receipt.receipt_number}"
             ),
         )
 
         db.add(audit)
 
-    return {
-        "sales_order_id": sales_order.id,
-        "so_number": sales_order.so_number,
-        "returned_items": returned_items,
-    }
+        # The snapshot is the final, already-encoded response body, so a replay
+        # returns exactly what the first call returned.
+        result = encode_quantities({
+            "sales_order_id": sales_order.id,
+            "so_number": sales_order.so_number,
+            "returned_items": returned_items,
+        })
+        receipt.response_snapshot = result
+
+    return result

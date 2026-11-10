@@ -19,9 +19,9 @@ describe("TransferRoute", () => {
     expect(screen.getByText("System transit")).toBeInTheDocument();
     expect(screen.getByText("Shop Warehouse")).toBeInTheDocument();
     // 2dp display of the decimal strings
-    expect(screen.getAllByText("9.00").length).toBeGreaterThanOrEqual(1); // dispatched
-    expect(screen.getByText("6.00")).toBeInTheDocument(); // in transit
-    expect(screen.getByText("3.00")).toBeInTheDocument(); // received
+    expect(screen.getAllByText("9.000").length).toBeGreaterThanOrEqual(1); // dispatched
+    expect(screen.getByText("6.000")).toBeInTheDocument(); // in transit
+    expect(screen.getByText("3.000")).toBeInTheDocument(); // received
     expect(screen.getByText(/system holding area/i)).toBeInTheDocument();
     expect(screen.getByText(/never selectable/i)).toBeInTheDocument();
   });

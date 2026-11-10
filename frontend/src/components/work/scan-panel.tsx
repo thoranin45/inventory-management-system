@@ -80,7 +80,7 @@ export function ScanPanel({
           disabled={disabled}
           placeholder="Scan barcode…"
           aria-label="Barcode scan input"
-          className="wc-scan-input h-11 min-w-0 flex-1 rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-[15px] tabular-nums outline-none focus-visible:outline-2 focus-visible:outline-[var(--focus)] disabled:opacity-40"
+          className="wc-scan-input h-11 min-w-0 flex-1 rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-[15px] tabular-nums outline-hidden focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-[var(--focus)] disabled:opacity-40"
           onFocus={() => onFocusChange?.(true)}
           onBlur={() => onFocusChange?.(false)}
         />

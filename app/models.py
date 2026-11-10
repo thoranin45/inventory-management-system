@@ -14,6 +14,7 @@ from sqlalchemy import (
     UniqueConstraint,
     PrimaryKeyConstraint,
     Index,
+    Text,
     text,
 )
 from sqlalchemy.sql import func
@@ -517,7 +518,10 @@ class StockTransaction(Base):
         nullable=False,
     )
 
-    remark = Column(String(255))
+    # V1-H3: TEXT (was VARCHAR(255)). A sales return writes
+    # "Return from {so_number}. Reason: {reason}" -- up to 100 + 255 characters of
+    # input plus the prefix -- which overflowed 255 and failed the whole return.
+    remark = Column(Text)
 
     created_at = Column(
         DateTime,
@@ -1588,6 +1592,28 @@ class InventoryTransferReceipt(Base):
     request_fingerprint = Column(String(64), nullable=False)
     received_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     received_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    response_snapshot = Column(JSONB, nullable=False)
+
+
+class SalesReturnReceipt(Base):
+    """V1-H1: durable idempotency record for ``POST /sales-orders/{id}/return``.
+
+    Same parent-scoped convention as PO and transfer receipts: the required
+    ``Idempotency-Key`` is unique per sales order. Same key + same request
+    fingerprint replays ``response_snapshot``; same key + different fingerprint
+    is a 409. Written in the same transaction as the stock mutation, so a
+    rolled-back return leaves no receipt behind.
+    """
+
+    __tablename__ = "sales_return_receipts"
+    __table_args__ = (UniqueConstraint("sales_order_id", "operation_key", name="uq_sales_return_receipt_operation"),)
+    id = Column(Integer, primary_key=True)
+    sales_order_id = Column(Integer, ForeignKey("sales_orders.id"), nullable=False)
+    receipt_number = Column(String(100), unique=True, nullable=False)
+    operation_key = Column(String(128), nullable=False)
+    request_fingerprint = Column(String(64), nullable=False)
+    returned_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    returned_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     response_snapshot = Column(JSONB, nullable=False)
 
 

@@ -1,69 +1,93 @@
 @import "tailwindcss";
 
 /* ============================================================
-   AKKRATHARA — Design V1 (ported verbatim from
-   frontend-prototype/styles.css). Do not reinterpret.
-   Single family: Sarabun. Plain zero. Tabular numerals.
+   AKKRATHARA — Concept B "Precision Minimal" foundation (R1).
+   Source of truth: the frozen V1 Design Freeze, section B
+   (tokens validated WCAG AA in both themes). Variable NAMES are
+   unchanged so every component keeps working; only the values,
+   the type families and the shell frame changed.
+   Type: IBM Plex Sans + IBM Plex Sans Thai; IBM Plex Mono for
+   codes (.mono). Plain zero. Tabular numerals for quantities.
+   Elevation: flat 1px hairlines; shadows only on overlays.
    ============================================================ */
 
 /* Dark variant: an explicit data-theme wins; "system" (no attribute) is
    handled by the prefers-color-scheme media query on the tokens below. */
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
+/* Light theme — Concept B values (Design Freeze §B). [P] marks a value the
+   freeze does not list; it is derived from the frozen palette and documented. */
 :root {
-  --bg: #f4f5f6;
+  --bg: #f3f5f8;
   --surface: #ffffff;
   --surface-raised: #ffffff;
-  --surface-sunken: #eceeef;
-  --border: #e9ebee;
-  --border-strong: #cdd0d4;
-  --foreground: #16181b;
-  --muted: #59606a;
-  --faint: #8a9099;
-  --accent: #e4572e;
+  --surface-sunken: #f1f4f7;
+  --border: #e1e5eb; /* hairline */
+  --border-strong: #788396; /* input / control border, >= 3:1 */
+  --foreground: #0d1624;
+  --muted: #3a4657; /* secondary text */
+  --faint: #586577; /* muted text, >= 4.5:1 */
+  --accent: #1d58d6;
   --accent-fg: #ffffff;
-  --accent-subtle: #fbebe4;
-  --accent-line: #efc7b6;
-  --primary: #16181b;
+  --accent-subtle: #e8effd; /* accent wash, active nav */
+  --accent-line: #c3d3f6; /* [P] accent chip border */
+  --primary: #1d58d6; /* B: primary button = accent */
   --primary-fg: #ffffff;
-  --success: #1f8a54;
-  --success-subtle: #e4f2ea;
-  --warning: #b0770f;
-  --warning-subtle: #faefd9;
-  --danger: #c23b3b;
-  --danger-subtle: #f9e8e8;
-  --info: #2f6db8;
-  --info-subtle: #e7effa;
-  --focus: var(--accent);
+  --success: #12704a;
+  --success-subtle: #e2f3ea;
+  --warning: #8a5500;
+  --warning-subtle: #fbf0d8;
+  --danger: #b42318;
+  --danger-subtle: #fde7e4;
+  --info: #1d58d6; /* same hue as accent; chips always carry icon + label */
+  --info-subtle: #e8effd;
+  --focus: #1d58d6;
+  --focus-ring: rgba(29, 88, 214, 0.2); /* input focus glow */
+  --row-hover: #f6f8fb;
+  --overlay: rgba(13, 22, 36, 0.38);
+  --chart-1: #2b66e0;
+  --chart-muted: #c9d3e1;
+  --chart-grid: #e8ecf1;
 
-  --shadow-sm: 0 1px 2px rgba(18, 20, 24, 0.05), 0 1px 2px rgba(18, 20, 24, 0.03);
-  --shadow-md: 0 4px 12px -2px rgba(18, 20, 24, 0.1), 0 2px 6px -2px rgba(18, 20, 24, 0.06);
-  --shadow-lg: 0 24px 48px -12px rgba(18, 20, 24, 0.22), 0 8px 20px -8px rgba(18, 20, 24, 0.12);
-  --shadow-panel: 0 1px 3px rgba(18, 20, 24, 0.05), 0 12px 28px -14px rgba(18, 20, 24, 0.12);
+  /* B: flat 1px borders; shadows only on dialogs / overlays */
+  --shadow-sm: none;
+  --shadow-panel: none;
+  --shadow-md: 0 8px 24px -10px rgba(13, 22, 36, 0.18), 0 2px 6px -2px rgba(13, 22, 36, 0.08);
+  --shadow-lg: 0 24px 48px -16px rgba(13, 22, 36, 0.28), 0 8px 20px -8px rgba(13, 22, 36, 0.1);
 
+  /* B radius scale 4 / 6 / 8 / 12 (lg and xl both 12 so no surface exceeds it) */
   --r-xs: 4px;
   --r-sm: 6px;
   --r-md: 8px;
-  --r-lg: 14px;
-  --r-xl: 16px;
+  --r-lg: 12px;
+  --r-xl: 12px;
   --r-full: 999px;
 
-  --frame-pad: 6px;
-  --frame-gap: 8px;
+  /* B shell is edge-to-edge: no floating frame */
+  --frame-pad: 0px;
+  --frame-gap: 0px;
 
   --dur-1: 120ms;
   --dur-2: 160ms;
   --dur-3: 220ms;
   --ease: cubic-bezier(0.2, 0.6, 0.2, 1);
 
-  /* Sarabun is self-hosted by next/font and exposed as --font-sarabun. */
-  --font-display: var(--font-sarabun), "Sarabun", "Segoe UI", system-ui, -apple-system, "Noto Sans Thai", sans-serif;
+  /* IBM Plex is self-hosted by next/font (app/layout.tsx). Plex Sans Thai
+     follows Plex Sans so Thai glyphs render in the matching family. */
+  --font-display: var(--font-plex-sans), var(--font-plex-thai), "IBM Plex Sans", "IBM Plex Sans Thai", "Segoe UI",
+    system-ui, -apple-system, sans-serif;
   --font-body: var(--font-display);
+  /* --font-code (not --font-mono, which Tailwind's own theme defines) */
+  --font-code: var(--font-plex-mono), var(--font-plex-thai), "IBM Plex Mono", ui-monospace, SFMono-Regular, Consolas,
+    monospace;
 
-  --sidebar-w: 240px;
-  --topbar-h: 52px;
-  --content-max: 1200px;
-  --drawer-w: 420px;
+  /* B fixed metrics: sidebar 236 · header 54 · detail pane 400 · content max 1400 */
+  --sidebar-w: 236px;
+  --rail-w: 76px; /* B iPad icon rail */
+  --bottom-nav-h: 64px; /* B phone bottom bar: 52px items + 2x6px padding (safe area added separately) */
+  --topbar-h: 54px;
+  --content-max: 1400px;
+  --drawer-w: 400px;
 
   color-scheme: light;
 }
@@ -71,66 +95,81 @@
 /* system dark (no explicit choice) */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #0b0c0e;
-    --surface: #131519;
-    --surface-raised: #1a1d22;
-    --surface-sunken: #0e0f12;
-    --border: #24272d;
-    --border-strong: #363a41;
-    --foreground: #ecedef;
-    --muted: #9aa1a9;
-    --faint: #666d76;
-    --accent: #f26b41;
-    --accent-fg: #1b0e08;
-    --accent-subtle: #291611;
-    --accent-line: #4a2a1e;
-    --primary: #ecedef;
-    --primary-fg: #131519;
-    --success: #40ba7d;
-    --success-subtle: #122619;
-    --warning: #dba544;
-    --warning-subtle: #29200f;
-    --danger: #e56464;
-    --danger-subtle: #2c1515;
-    --info: #5f9be0;
-    --info-subtle: #111f2c;
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.45);
-    --shadow-md: 0 6px 16px -4px rgba(0, 0, 0, 0.55), 0 2px 6px -2px rgba(0, 0, 0, 0.4);
+    --bg: #0a0e13;
+    --surface: #11171f;
+    --surface-raised: #151c25;
+    --surface-sunken: #17202a;
+    --border: #222c38;
+    --border-strong: #5c6b7e;
+    --foreground: #e6ebf2;
+    --muted: #b3bdca;
+    --faint: #8b97a7;
+    --accent: #78a2ff;
+    --accent-fg: #0a0e13;
+    --accent-subtle: #16264a;
+    --accent-line: #2b4583; /* [P] */
+    --primary: #78a2ff;
+    --primary-fg: #0a0e13;
+    --success: #52c48d;
+    --success-subtle: #10261b;
+    --warning: #ebb04c;
+    --warning-subtle: #2a2010;
+    --danger: #ff7d73;
+    --danger-subtle: #2d1514;
+    --info: #78a2ff;
+    --info-subtle: #16264a;
+    --focus: #78a2ff;
+    --focus-ring: rgba(120, 162, 255, 0.25);
+    --row-hover: #141c26;
+    --overlay: rgba(0, 0, 0, 0.6);
+    --chart-1: #5f8ff5;
+    --chart-muted: #2b3646;
+    --chart-grid: #1c2531;
+    --shadow-sm: none;
+    --shadow-panel: none;
+    --shadow-md: 0 8px 24px -10px rgba(0, 0, 0, 0.6), 0 2px 6px -2px rgba(0, 0, 0, 0.4);
     --shadow-lg: 0 28px 56px -16px rgba(0, 0, 0, 0.7), 0 10px 24px -10px rgba(0, 0, 0, 0.5);
-    --shadow-panel: 0 1px 3px rgba(0, 0, 0, 0.45), 0 14px 30px -16px rgba(0, 0, 0, 0.6);
     color-scheme: dark;
   }
 }
 
-/* explicit dark choice (next-themes stamps data-theme="dark") */
+/* explicit dark choice (next-themes stamps data-theme="dark"); keep in sync
+   with the block above — the color-contrast test reads both. */
 :root[data-theme="dark"] {
-  --bg: #0b0c0e;
-  --surface: #131519;
-  --surface-raised: #1a1d22;
-  --surface-sunken: #0e0f12;
-  --border: #24272d;
-  --border-strong: #363a41;
-  --foreground: #ecedef;
-  --muted: #9aa1a9;
-  --faint: #666d76;
-  --accent: #f26b41;
-  --accent-fg: #1b0e08;
-  --accent-subtle: #291611;
-  --accent-line: #4a2a1e;
-  --primary: #ecedef;
-  --primary-fg: #131519;
-  --success: #40ba7d;
-  --success-subtle: #122619;
-  --warning: #dba544;
-  --warning-subtle: #29200f;
-  --danger: #e56464;
-  --danger-subtle: #2c1515;
-  --info: #5f9be0;
-  --info-subtle: #111f2c;
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.45);
-  --shadow-md: 0 6px 16px -4px rgba(0, 0, 0, 0.55), 0 2px 6px -2px rgba(0, 0, 0, 0.4);
+  --bg: #0a0e13;
+  --surface: #11171f;
+  --surface-raised: #151c25;
+  --surface-sunken: #17202a;
+  --border: #222c38;
+  --border-strong: #5c6b7e;
+  --foreground: #e6ebf2;
+  --muted: #b3bdca;
+  --faint: #8b97a7;
+  --accent: #78a2ff;
+  --accent-fg: #0a0e13;
+  --accent-subtle: #16264a;
+  --accent-line: #2b4583; /* [P] */
+  --primary: #78a2ff;
+  --primary-fg: #0a0e13;
+  --success: #52c48d;
+  --success-subtle: #10261b;
+  --warning: #ebb04c;
+  --warning-subtle: #2a2010;
+  --danger: #ff7d73;
+  --danger-subtle: #2d1514;
+  --info: #78a2ff;
+  --info-subtle: #16264a;
+  --focus: #78a2ff;
+  --focus-ring: rgba(120, 162, 255, 0.25);
+  --row-hover: #141c26;
+  --overlay: rgba(0, 0, 0, 0.6);
+  --chart-1: #5f8ff5;
+  --chart-muted: #2b3646;
+  --chart-grid: #1c2531;
+  --shadow-sm: none;
+  --shadow-panel: none;
+  --shadow-md: 0 8px 24px -10px rgba(0, 0, 0, 0.6), 0 2px 6px -2px rgba(0, 0, 0, 0.4);
   --shadow-lg: 0 28px 56px -16px rgba(0, 0, 0, 0.7), 0 10px 24px -10px rgba(0, 0, 0, 0.5);
-  --shadow-panel: 0 1px 3px rgba(0, 0, 0, 0.45), 0 14px 30px -16px rgba(0, 0, 0, 0.6);
   color-scheme: dark;
 }
 
@@ -158,6 +197,10 @@
   --color-danger-subtle: var(--danger-subtle);
   --color-info: var(--info);
   --color-info-subtle: var(--info-subtle);
+  --color-row-hover: var(--row-hover);
+  --color-chart-1: var(--chart-1);
+  --color-chart-muted: var(--chart-muted);
+  --color-chart-grid: var(--chart-grid);
   --radius-xs: var(--r-xs);
   --radius-sm: var(--r-sm);
   --radius-md: var(--r-md);
@@ -183,7 +226,7 @@
     background: var(--bg);
     color: var(--foreground);
     font-family: var(--font-body);
-    font-size: 14px;
+    font-size: 13.5px; /* B body; 14.5px on phones (below) */
     line-height: 1.55;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
@@ -222,6 +265,39 @@
     outline-offset: 2px;
     border-radius: var(--r-xs);
   }
+  /* B input focus: the outline stays the primary indicator; the glow adds
+     a soft field halo (never the only cue). */
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    box-shadow: 0 0 0 3px var(--focus-ring);
+  }
+}
+
+@media (max-width: 767.98px) {
+  body {
+    font-size: 14.5px; /* B phone body text */
+  }
+}
+
+/* Skip link (WCAG 2.4.1): first focusable element, visible only on focus. */
+.wc-skip-link {
+  position: fixed;
+  left: 12px;
+  top: 8px;
+  z-index: 100;
+  padding: 8px 14px;
+  border-radius: var(--r-sm);
+  background: var(--primary);
+  color: var(--primary-fg);
+  font-weight: 600;
+  font-size: 13px;
+  transform: translateY(-160%);
+  transition: transform var(--dur-1) var(--ease);
+}
+.wc-skip-link:focus-visible {
+  transform: none;
+  outline-color: var(--foreground);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -242,6 +318,10 @@
   font-variant-numeric: tabular-nums lining-nums;
   font-feature-settings: "tnum" 1, "lnum" 1, "zero" 0;
 }
+/* B: SKUs, lots, document IDs and location codes in IBM Plex Mono */
+.mono {
+  font-family: var(--font-code);
+}
 
 /* ---------- utility classes ported from the prototype ---------- */
 .wc-panel {
@@ -252,9 +332,9 @@
 }
 .wc-section-label {
   font-family: var(--font-display);
-  font-size: 10.5px;
+  font-size: 12px; /* B: uppercase labels never below 12px */
   font-weight: 600;
-  letter-spacing: 0.11em;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--faint);
 }
@@ -266,7 +346,12 @@
   display: none;
 }
 
-/* ---------- floating app shell (ported verbatim from the prototype) ---------- */
+/* ---------- app shell — Concept B flat frame ----------
+   Same grid and DOM as before (header row, sidebar column, content); B
+   replaces the floating rounded panels with edge-to-edge hairlines:
+   header 54px with a bottom rule, sidebar 236px with a right rule, and the
+   page background behind content (cards, tables and states bring their own
+   surface). */
 .wc-app {
   display: grid;
   grid-template-columns: var(--sidebar-w) 1fr;
@@ -280,14 +365,16 @@
 .wc-topbar {
   grid-column: 1 / 3;
   grid-row: 1;
+  display: flex;
+}
+.wc-topbar > header {
+  flex: 1;
 }
 .wc-sidebar {
   grid-column: 1;
   grid-row: 2;
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-xl);
-  box-shadow: var(--shadow-sm);
+  border-right: 1px solid var(--border);
   overflow-y: auto;
   z-index: 25;
 }
@@ -296,22 +383,39 @@
   grid-row: 2;
   overflow-y: auto;
   scroll-behavior: smooth;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-xl);
-  box-shadow: var(--shadow-sm);
-  padding: 18px 20px;
+  background: var(--bg);
+  padding: 20px 24px; /* B desktop page padding */
+}
+.wc-content > * {
+  max-width: var(--content-max);
 }
 
-/* tablet / iPad — sidebar becomes a slide-over; topbar + content stay panels */
+/* iPad icon rail (R2): only between 768 and 1023.98px */
+.wc-rail-slot {
+  display: none;
+}
+
+/* tablet / iPad — B icon rail; the full menu opens as a slide-over */
 @media (max-width: 1023.98px) {
   .wc-app {
-    grid-template-columns: 0 1fr;
+    grid-template-columns: var(--rail-w) 1fr;
     column-gap: 0;
     row-gap: var(--frame-gap);
   }
   .wc-sidebar-slot {
     display: none;
+  }
+  .wc-rail-slot {
+    display: flex;
+    grid-column: 1;
+    grid-row: 2;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    z-index: 25;
+  }
+  .wc-content {
+    padding: 20px; /* B iPad page padding */
   }
 }
 
@@ -321,15 +425,17 @@
     --topbar-h: calc(50px + env(safe-area-inset-top));
   }
   .wc-app {
+    grid-template-columns: 0 1fr;
     grid-template-rows: var(--topbar-h) 1fr;
     padding: 0;
     gap: 0;
   }
+  .wc-rail-slot {
+    display: none;
+  }
   .wc-content {
-    border: 0;
-    border-radius: 0;
-    box-shadow: none;
-    padding: 12px 12px calc(64px + env(safe-area-inset-bottom));
+    /* B phone page padding 16 / 14, plus bottom-nav clearance */
+    padding: 14px 16px calc(var(--bottom-nav-h) + 14px + env(safe-area-inset-bottom));
   }
 }
 
@@ -342,9 +448,8 @@
   width: 264px;
   z-index: 49;
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-xl);
-  box-shadow: var(--shadow-lg);
+  border-right: 1px solid var(--border);
+  box-shadow: var(--shadow-lg); /* an overlay: the one place B keeps a shadow */
   overflow-y: auto;
   transition: transform var(--dur-3) var(--ease);
 }
@@ -364,7 +469,39 @@
   position: fixed;
   inset: 0;
   z-index: 48;
-  background: rgba(10, 11, 13, 0.4);
+  background: var(--overlay);
+}
+
+/* phone "More" bottom sheet (B showroom: grouped 3-column grid, 22px top radius) */
+.wc-more-sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 49;
+  max-height: 80dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  border-radius: 22px 22px 0 0;
+  box-shadow: var(--shadow-lg);
+  padding: 8px 16px calc(16px + env(safe-area-inset-bottom));
+}
+.wc-more-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .wc-more-sheet[data-state="open"] {
+    animation: wc-sheet-in var(--dur-3) var(--ease);
+  }
+}
+@keyframes wc-sheet-in {
+  from {
+    transform: translateY(100%);
+  }
 }
 
 /* ---------- dashboard composition (ported from the approved prototype) ---------- */
@@ -512,7 +649,7 @@
   }
   .wc-work-side {
     position: fixed;
-    left: 0;
+    left: var(--rail-w); /* iPad: keep the icon rail uncovered */
     right: 0;
     bottom: 0;
     top: auto;
@@ -577,13 +714,26 @@
 /* phone — the dock sits above the fixed bottom nav */
 @media (max-width: 767.98px) {
   .wc-work-side {
-    bottom: calc(54px + env(safe-area-inset-bottom));
+    left: 0;
+    bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom));
   }
   html[data-kb] .wc-work-side {
     bottom: var(--wc-kb-inset, 0px);
   }
   .wc-preview-panel {
     display: none;
+  }
+  /* R4 Stock In/Out: the Review action stays reachable above the bottom nav */
+  .wc-task-action {
+    position: sticky;
+    bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom) + 8px);
+    z-index: 5;
+    margin: 0 -4px;
+    padding: 8px 4px;
+    background: var(--surface);
+  }
+  html[data-kb] .wc-task-action {
+    bottom: calc(var(--wc-kb-inset, 0px) + 8px);
   }
 }
 
@@ -626,7 +776,7 @@
   }
   .wc-receive-dock {
     position: fixed;
-    left: 0;
+    left: var(--rail-w); /* iPad: keep the icon rail uncovered */
     right: 0;
     bottom: 0;
     z-index: 44;
@@ -646,9 +796,69 @@
 }
 @media (max-width: 767.98px) {
   .wc-receive-main {
-    padding-bottom: calc(84px + 54px + env(safe-area-inset-bottom));
+    padding-bottom: calc(84px + var(--bottom-nav-h) + env(safe-area-inset-bottom));
   }
   .wc-receive-dock {
-    bottom: calc(54px + env(safe-area-inset-bottom));
+    left: 0;
+    bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom));
+  }
+}
+
+/* ---------------------------------------------- R4: review sheet + steps -- */
+/* Concept B review sheet: centred 540 px dialog from 768 px up, a bottom sheet
+   below (frozen spec). The footer stays visible; the body scrolls. */
+.wc-review-sheet {
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(540px, 94vw);
+  max-height: calc(100dvh - 40px);
+  border-radius: var(--r-lg);
+}
+@media (max-width: 767.98px) {
+  .wc-review-sheet {
+    left: 0;
+    right: 0;
+    top: auto;
+    bottom: 0;
+    transform: none;
+    width: 100%;
+    max-height: 92dvh;
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+    border-left: 0;
+    border-right: 0;
+    border-bottom: 0;
+  }
+  .wc-review-sheet-foot {
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  }
+  .wc-review-sheet-foot > * {
+    flex: 1 1 0;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .wc-review-sheet[data-state="open"] {
+    animation: wc-sheet-in var(--dur-2, 160ms) ease-out;
+  }
+}
+@keyframes wc-sheet-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* step indicator: labelled steps from 768 px, "Step 2 of 4 · Details" below */
+.wc-steps-compact {
+  display: none;
+}
+@media (max-width: 767.98px) {
+  .wc-steps-full {
+    display: none;
+  }
+  .wc-steps-compact {
+    display: flex;
   }
 }

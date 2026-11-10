@@ -48,6 +48,10 @@ vi.mock("@/components/products/create-product", () => ({
 }));
 
 import { StockScanButton } from "./barcode-lookup-sheet";
+import { LanguageProvider } from "@/lib/i18n/client";
+
+// R4: the sheet is translated; these tests assert its Thai copy, so they render in Thai explicitly
+const renderTh = (ui: React.ReactElement) => render(<LanguageProvider initialLocale="th">{ui}</LanguageProvider>);
 
 beforeEach(() => {
   role = "warehouse";
@@ -58,7 +62,7 @@ beforeEach(() => {
 });
 
 async function scan(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole("button", { name: /scan barcode/i }));
+  await user.click(screen.getByRole("button", { name: /scan barcode|สแกนบาร์โค้ด/i }));
   await user.click(await screen.findByRole("button", { name: /fake-camera-decode/i }));
 }
 
@@ -80,13 +84,13 @@ describe("StockScanButton — lookup only, never mutates stock", () => {
       batches: [],
     });
     const user = userEvent.setup();
-    render(<StockScanButton onOpenDetail={vi.fn()} />);
+    renderTh(<StockScanButton onOpenDetail={vi.fn()} />);
     await scan(user);
 
     expect(await screen.findByText("พบสินค้า")).toBeInTheDocument();
     expect(screen.getByText("Fresh Milk 1L")).toBeInTheDocument();
     expect(screen.getByText("MILK-001")).toBeInTheDocument();
-    expect(screen.getByText("In stock")).toBeInTheDocument();
+    expect(screen.getByText("ปกติ")).toBeInTheDocument(); // "In stock" in Thai
     expect(resolveBarcode).toHaveBeenCalledWith("8850000000XX", "lookup");
     expect(resolveBarcode).toHaveBeenCalledTimes(1);
   });
@@ -106,9 +110,9 @@ describe("StockScanButton — lookup only, never mutates stock", () => {
       batches: [],
     });
     const user = userEvent.setup();
-    render(<StockScanButton onOpenDetail={vi.fn()} />);
+    renderTh(<StockScanButton onOpenDetail={vi.fn()} />);
     await scan(user);
-    await user.click(await screen.findByRole("button", { name: /^stock in$/i }));
+    await user.click(await screen.findByRole("button", { name: /^รับสินค้าเข้า$/ }));
     expect(push).toHaveBeenCalledWith("/stock-in?product=42");
   });
 
@@ -121,7 +125,7 @@ describe("StockScanButton — lookup only, never mutates stock", () => {
     });
     const onOpenDetail = vi.fn();
     const user = userEvent.setup();
-    render(<StockScanButton onOpenDetail={onOpenDetail} />);
+    renderTh(<StockScanButton onOpenDetail={onOpenDetail} />);
     await scan(user);
     await user.click(await screen.findByRole("button", { name: /ดูรายละเอียด/i }));
     expect(onOpenDetail).toHaveBeenCalledWith("8850000000XX");
@@ -130,7 +134,7 @@ describe("StockScanButton — lookup only, never mutates stock", () => {
   it("unknown barcode (404): decoded successfully but Product Master has no match — distinct copy, no mutation", async () => {
     resolveBarcode.mockRejectedValueOnce(new ApiError({ status: 404, message: "Product not found" }));
     const user = userEvent.setup();
-    render(<StockScanButton onOpenDetail={vi.fn()} />);
+    renderTh(<StockScanButton onOpenDetail={vi.fn()} />);
     await scan(user);
 
     expect(await screen.findByText(/อ่าน Barcode สำเร็จ แต่ยังไม่มีสินค้านี้ในระบบ/)).toBeInTheDocument();
@@ -142,7 +146,7 @@ describe("StockScanButton — lookup only, never mutates stock", () => {
     role = "warehouse";
     resolveBarcode.mockRejectedValueOnce(new ApiError({ status: 404, message: "Product not found" }));
     const user = userEvent.setup();
-    render(<StockScanButton onOpenDetail={vi.fn()} />);
+    renderTh(<StockScanButton onOpenDetail={vi.fn()} />);
     await scan(user);
 
     await screen.findByText(/ยังไม่มีสินค้านี้ในระบบ/);
@@ -154,7 +158,7 @@ describe("StockScanButton — lookup only, never mutates stock", () => {
     role = "admin";
     resolveBarcode.mockRejectedValueOnce(new ApiError({ status: 404, message: "Product not found" }));
     const user = userEvent.setup();
-    render(<StockScanButton onOpenDetail={vi.fn()} />);
+    renderTh(<StockScanButton onOpenDetail={vi.fn()} />);
     await scan(user);
 
     await user.click(await screen.findByRole("button", { name: /สร้างสินค้าใหม่/i }));
@@ -166,7 +170,7 @@ describe("StockScanButton — lookup only, never mutates stock", () => {
     role = "admin";
     resolveBarcode.mockRejectedValueOnce(new ApiError({ status: 404, message: "Product not found" }));
     const user = userEvent.setup();
-    render(<StockScanButton onOpenDetail={vi.fn()} />);
+    renderTh(<StockScanButton onOpenDetail={vi.fn()} />);
     await scan(user);
     await user.click(await screen.findByRole("button", { name: /สร้างสินค้าใหม่/i }));
     await user.click(await screen.findByRole("button", { name: /fake-create-submit/i }));
@@ -180,10 +184,30 @@ describe("StockScanButton — lookup only, never mutates stock", () => {
   it("a non-404 lookup failure gets its own message, distinct from 'unknown barcode'", async () => {
     resolveBarcode.mockRejectedValueOnce(new ApiError({ status: 500, message: "boom" }));
     const user = userEvent.setup();
-    render(<StockScanButton onOpenDetail={vi.fn()} />);
+    renderTh(<StockScanButton onOpenDetail={vi.fn()} />);
     await scan(user);
 
     expect(await screen.findByText(/เกิดข้อผิดพลาด/)).toBeInTheDocument();
     expect(screen.queryByText(/ยังไม่มีสินค้านี้ในระบบ/)).not.toBeInTheDocument();
+  });
+});
+
+describe("StockScanButton — R4 English", () => {
+  it("renders the found result in English outside a Thai provider", async () => {
+    resolveBarcode.mockResolvedValueOnce({
+      barcode: "8850000000XX",
+      context: "lookup",
+      product: {
+        id: 1, sku: "MILK-001", product_name: "Fresh Milk 1L", track_batch: false, track_expiry: false,
+        operational_available_quantity: "125.000", minimum_stock: "10.000", safety_stock: "0",
+      },
+      batches: [],
+    });
+    const user = userEvent.setup();
+    render(<StockScanButton onOpenDetail={vi.fn()} />);
+    await scan(user);
+    expect(await screen.findByText("Product found")).toBeInTheDocument();
+    expect(screen.getByText("In stock")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^stock in$/i })).toBeInTheDocument();
   });
 });

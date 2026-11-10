@@ -1,12 +1,16 @@
 import { AlertTriangle, Clock } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { LocalDate } from "./local-date";
+import { Msg } from "./msg";
 
 /**
  * Expiry state for a batch/allocation. Icon + text, never colour alone.
  *   days < 0   → expired (danger)
  *   0..90      → near expiry (warning)
  *   > 90       → ok (neutral)
+ * Wording follows the UI language; the English text is unchanged (ISO date),
+ * Thai shows the Buddhist-era date.
  */
 export function ExpiryBadge({
   days,
@@ -20,7 +24,7 @@ export function ExpiryBadge({
   if (days === null || days === undefined) {
     return (
       <span className={cn("inline-flex items-center gap-1 text-[11px] text-[var(--faint)]", className)}>
-        no expiry
+        <Msg k="qty.noExpiry" />
       </span>
     );
   }
@@ -32,13 +36,17 @@ export function ExpiryBadge({
       ? "text-[var(--warning)] bg-[var(--warning-subtle)] border-[color-mix(in_srgb,var(--warning)_32%,transparent)]"
       : "text-[var(--muted)] bg-[var(--surface-sunken)] border-[var(--border)]";
   const Icon = expired ? Clock : near ? AlertTriangle : Clock;
-  const label = expired
-    ? `expired ${Math.abs(days)}d`
-    : near
-      ? `${days}d left`
-      : isoDate
-        ? `exp ${isoDate.slice(0, 10)}`
-        : "in date";
+  const label = expired ? (
+    <Msg k="qty.expiredDays" vars={{ n: Math.abs(days) }} />
+  ) : near ? (
+    <Msg k="qty.daysLeft" vars={{ n: days }} />
+  ) : isoDate ? (
+    <>
+      <Msg k="qty.expPrefix" /> <LocalDate iso={isoDate} isoInEnglish />
+    </>
+  ) : (
+    <Msg k="qty.inDate" />
+  );
   return (
     <span
       className={cn(

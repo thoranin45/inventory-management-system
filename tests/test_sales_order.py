@@ -775,7 +775,7 @@ def test_partial_sales_return(
             f"{created['sales_order_id']}"
             "/return"
         ),
-        headers=admin_headers,
+        headers={**admin_headers, "Idempotency-Key": uuid4().hex},
         json={
             "items": [
                 {
@@ -891,7 +891,7 @@ def test_return_quantity_exceeds_remaining(
             f"{created['sales_order_id']}"
             "/return"
         ),
-        headers=admin_headers,
+        headers={**admin_headers, "Idempotency-Key": uuid4().hex},
         json={
             "items": [
                 {
@@ -967,7 +967,7 @@ def test_cancel_after_return_fails(
             f"{created['sales_order_id']}"
             "/return"
         ),
-        headers=admin_headers,
+        headers={**admin_headers, "Idempotency-Key": uuid4().hex},
         json={
             "items": [
                 {

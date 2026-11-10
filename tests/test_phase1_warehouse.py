@@ -35,7 +35,7 @@ def test_warehouse_can_ship_return_and_cancel(client, admin_headers, warehouse_h
     sales._ready_sales_order(client, warehouse_headers, order["sales_order_id"])
     sales._ship_sales_order(client, warehouse_headers, order["sales_order_id"])
     response = client.post(
-        f"/api/v1/sales-orders/{order['sales_order_id']}/return", headers=warehouse_headers,
+        f"/api/v1/sales-orders/{order['sales_order_id']}/return", headers={**warehouse_headers, "Idempotency-Key": uuid4().hex},
         json={"items": [{"product_id": product["id"], "quantity": 2, "reason": "Damaged package"}]},
     )
     assert response.status_code == 200

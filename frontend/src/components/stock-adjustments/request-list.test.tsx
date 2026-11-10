@@ -36,6 +36,7 @@ vi.mock("@/lib/query/stock-adjustment-requests", () => ({
 }));
 
 import { StockAdjustmentRequestList } from "./request-list";
+import { LanguageProvider } from "@/lib/i18n/client";
 
 beforeEach(() => {
   replace.mockReset();
@@ -69,5 +70,31 @@ describe("StockAdjustmentRequestList", () => {
     role = "warehouse";
     render(<StockAdjustmentRequestList scope="mine" title="My Stock Adjustment Requests" />);
     expect(screen.getByRole("link", { name: /new request/i })).toBeInTheDocument();
+  });
+});
+
+describe("StockAdjustmentRequestList — R4", () => {
+  it("is translated: Thai filter tabs, reason and header", () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 204 })));
+    try {
+      render(
+        <LanguageProvider initialLocale="th">
+          <StockAdjustmentRequestList scope="approvals" />
+        </LanguageProvider>,
+      );
+      expect(screen.getAllByText("รออนุมัติ").length).toBeGreaterThan(0);
+      expect(screen.getByText("ทั้งหมด")).toBeInTheDocument();
+      expect(screen.getByText("อนุมัติการปรับยอดสต๊อก")).toBeInTheDocument();
+      expect(screen.getAllByText("นับสต๊อกไม่ตรง").length).toBeGreaterThan(0);
+      expect(screen.getByRole("link", { name: "คำขอใหม่" })).toBeInTheDocument();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("shows the observed → requested change with exact three-decimal quantities", () => {
+    render(<StockAdjustmentRequestList scope="mine" title="My requests" />);
+    expect(screen.getAllByText("10.000").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("8.000").length).toBeGreaterThan(0);
   });
 });

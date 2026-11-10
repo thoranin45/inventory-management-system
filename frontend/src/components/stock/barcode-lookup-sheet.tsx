@@ -17,6 +17,8 @@ import { resolveBarcode } from "@/lib/query/sales";
 import type { ScanResolve } from "@/lib/api/schemas/sales";
 import type { ProductDetail } from "@/lib/api/schemas/products";
 import { stockStatus } from "@/lib/stock-status";
+import { useT } from "@/lib/i18n/client";
+import { statusLabelKey } from "./stock-status-labels";
 import { CreateProductDrawer } from "@/components/products/create-product";
 
 /**
@@ -40,6 +42,7 @@ type Result =
   | { kind: "created"; barcode: string; product: ProductDetail };
 
 export function StockScanButton({ onOpenDetail }: { onOpenDetail: (barcode: string) => void }) {
+  const t = useT();
   const router = useRouter();
   const { user } = useSession();
   const canCreateProduct = canShowAction(user.role, "product:create");
@@ -70,14 +73,14 @@ export function StockScanButton({ onOpenDetail }: { onOpenDetail: (barcode: stri
           setResult({
             kind: "error",
             barcode: code,
-            message: isApiError(e) ? e.userMessage : "Could not read that barcode.",
+            message: isApiError(e) ? e.userMessage : t("lookup.readFailed"),
           });
         }
       } finally {
         setResolving(false);
       }
     },
-    [beepOk, beepBad],
+    [beepOk, beepBad, t],
   );
 
   const close = () => setResult(null);
@@ -86,13 +89,13 @@ export function StockScanButton({ onOpenDetail }: { onOpenDetail: (barcode: stri
     <>
       <Button variant="secondary" size="sm" onClick={() => setCameraOpen(true)} disabled={resolving}>
         <ScanLine aria-hidden className="h-4 w-4" />
-        {resolving ? "Looking up…" : "Scan Barcode"}
+        {resolving ? t("lookup.lookingUp") : t("lookup.scanBarcode")}
       </Button>
 
       <CameraBarcodeScanner open={cameraOpen} onOpenChange={setCameraOpen} onDecode={(v) => void handleDecode(v)} />
 
       <Dialog open={!!result} onOpenChange={(v) => !v && close()}>
-        <DialogContent title="Barcode">
+        <DialogContent title={t("lookup.title")}>
           {result?.kind === "found" ? (
             <FoundResult
               result={result}
@@ -148,6 +151,7 @@ function FoundResult({
   onOpenDetail: () => void;
   onStockIn: () => void;
 }) {
+  const t = useT();
   const { product } = result.data;
   const status = stockStatus({
     operational_available_quantity: product.operational_available_quantity,
@@ -158,32 +162,32 @@ function FoundResult({
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2 text-[13px] font-semibold text-[var(--success)]">
         <CheckCircle2 aria-hidden className="h-4 w-4" />
-        พบสินค้า
+        {t("lookup.found")}
       </div>
       <div className="rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--surface-sunken)] p-3 text-[13px]">
         <div className="font-semibold">{product.product_name}</div>
         <div className="mt-1 flex flex-col gap-1 text-[12px] text-[var(--muted)]">
           <span>
-            SKU: <span className="mono text-[var(--foreground)]">{product.sku}</span>
+            {t("lookup.skuLabel")} <span className="mono text-[var(--foreground)]">{product.sku}</span>
           </span>
           <span>
-            Barcode: <span className="mono text-[var(--foreground)]">{result.barcode}</span>
+            {t("lookup.barcodeLabel")} <span className="mono text-[var(--foreground)]">{result.barcode}</span>
           </span>
           <span>
-            Available: <QuantityDisplay value={product.operational_available_quantity} className="font-medium text-[var(--foreground)]" />
+            {t("lookup.availableLabel")} <QuantityDisplay value={product.operational_available_quantity} className="font-medium text-[var(--foreground)]" />
           </span>
           <span className="mt-1">
-            <StatusBadge tone={status.tone} label={status.label} />
+            <StatusBadge tone={status.tone} label={t(statusLabelKey(status.key))} />
           </span>
         </div>
       </div>
       <div className="flex justify-end gap-2">
         <Button variant="ghost" onClick={onOpenDetail}>
-          ดูรายละเอียด
+          {t("lookup.viewDetail")}
         </Button>
         <Button variant="primary" onClick={onStockIn}>
           <PackagePlus aria-hidden className="h-4 w-4" />
-          Stock In
+          {t("lookup.stockIn")}
         </Button>
       </div>
     </div>
@@ -199,25 +203,26 @@ function NotFoundResult({
   canCreate: boolean;
   onCreate: () => void;
 }) {
+  const t = useT();
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2 text-[13px] font-semibold text-[var(--warning)]">
         <AlertTriangle aria-hidden className="h-4 w-4" />
-        อ่าน Barcode สำเร็จ แต่ยังไม่มีสินค้านี้ในระบบ
+        {t("lookup.notFound")}
       </div>
       <div className="rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--surface-sunken)] p-3 text-[13px]">
-        <span className="text-[var(--muted)]">Barcode: </span>
+        <span className="text-[var(--muted)]">{t("lookup.barcodeLabel")} </span>
         <span className="mono select-all">{barcode}</span>
-        <p className="mt-2 text-[12px] text-[var(--muted)]">Barcode นี้ยังไม่ได้ผูกกับสินค้าใน Product Master</p>
+        <p className="mt-2 text-[12px] text-[var(--muted)]">{t("lookup.notLinked")}</p>
       </div>
       <div className="flex justify-end">
         {canCreate ? (
           <Button variant="primary" onClick={onCreate}>
             <Plus aria-hidden className="h-4 w-4" />
-            สร้างสินค้าใหม่
+            {t("lookup.createProduct")}
           </Button>
         ) : (
-          <p className="text-[12.5px] text-[var(--muted)]">กรุณาให้ Admin เพิ่มสินค้า</p>
+          <p className="text-[13px] text-[var(--muted)]">{t("lookup.askAdmin")}</p>
         )}
       </div>
     </div>
@@ -225,22 +230,23 @@ function NotFoundResult({
 }
 
 function CreatedResult({ product, onStockIn }: { product: ProductDetail; onStockIn: () => void }) {
+  const t = useT();
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2 text-[13px] font-semibold text-[var(--success)]">
         <CheckCircle2 aria-hidden className="h-4 w-4" />
-        สร้างสินค้าเรียบร้อยแล้ว
+        {t("lookup.created")}
       </div>
       <p className="text-[12.5px] text-[var(--muted)]">
-        {product.product_name} (<span className="mono">{product.sku}</span>) สามารถนำสินค้าเข้าสต็อกได้
+        {product.product_name} (<span className="mono">{product.sku}</span>) {t("lookup.canStockIn")}
       </p>
       <div className="flex justify-end gap-2">
         <DialogClose asChild>
-          <Button variant="ghost">ปิด</Button>
+          <Button variant="ghost">{t("lookup.close")}</Button>
         </DialogClose>
         <Button variant="primary" onClick={onStockIn}>
           <PackagePlus aria-hidden className="h-4 w-4" />
-          นำเข้าสินค้า
+          {t("lookup.receiveIt")}
         </Button>
       </div>
     </div>
@@ -248,16 +254,17 @@ function CreatedResult({ product, onStockIn }: { product: ProductDetail; onStock
 }
 
 function ErrorResult({ message }: { message: string }) {
+  const t = useT();
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2 text-[13px] font-semibold text-[var(--danger)]">
         <AlertTriangle aria-hidden className="h-4 w-4" />
-        เกิดข้อผิดพลาด ไม่สามารถตรวจสอบ Barcode ได้ในขณะนี้
+        {t("lookup.error")}
       </div>
       <p className="text-[12.5px] text-[var(--muted)]">{message}</p>
       <div className="flex justify-end">
         <DialogClose asChild>
-          <Button variant="ghost">ปิด</Button>
+          <Button variant="ghost">{t("lookup.close")}</Button>
         </DialogClose>
       </div>
     </div>

@@ -10,7 +10,7 @@ from tests.database_support import migration_config
 from tests.test_migrations import migration_engine, upgrade  # noqa: F401
 
 PHASE8 = "e71a00000001"
-HEAD = "ea1a00000004"  # Phase 14C: ea1a00000003 (ledger indexes + link) + ea1a00000004 (recorded_at_utc)
+HEAD = "ec1a00000001"  # V1-H3 remark TEXT; V1-H1 eb1a00000001; Phase 14C ea1a00000003/ea1a00000004
 
 
 def _columns(conn, table):
