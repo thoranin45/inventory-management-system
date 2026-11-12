@@ -18,7 +18,7 @@ PHASE2 = "72ad612eafc9"
 PARITY = "e31a00000001"
 HEAD = "e31a00000002"
 # The repository's single Alembic head. Update it when a migration is added.
-CURRENT_HEAD = "ec1a00000001"
+CURRENT_HEAD = "ed1a00000001"
 
 
 @pytest.fixture
