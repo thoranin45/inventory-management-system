@@ -8,9 +8,11 @@
       `pytest -q tests/test_migrations.py tests/test_phase5_migrations.py tests/test_phase6_migrations.py tests/test_phase8_migrations.py tests/test_phase9_migration.py`
 - [ ] `python -m compileall app tests scripts`.
 - [ ] `python -c "from app.main import app"` OK.
-- [ ] `pip-audit` reviewed. Known/accepted: `passlib==1.7.4` unmaintained
-      (migrate off in V1.5); transitive `ecdsa` advisories do not affect
-      HS256. No new unreviewed critical findings.
+- [ ] CI step "Dependency vulnerability audit" green (it gates the build).
+      Review every `--ignore-vuln` exception in `.github/workflows/tests.yml`:
+      starlette advisories until the FastAPI/Starlette upgrade (P3b);
+      `python-jose` and transitive `ecdsa` until the PyJWT migration (P3c).
+      `passlib==1.7.4` is unmaintained (migrate off later; no advisory today).
 - [ ] `docker build` OK; image pushed as `…:vX.Y.Z` **and** `…:<sha>`
       (never `:latest` alone).
 - [ ] `docker compose -f compose.yml config` and
