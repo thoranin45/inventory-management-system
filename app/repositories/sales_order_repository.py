@@ -4,7 +4,10 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.models import (
+    FULFILLMENT_RECONCILIATION_UNRESOLVED,
     Customer,
+    FulfillmentAttemptReceipt,
+    FulfillmentReconciliation,
     Product,
     ProductBatch,
     SalesOrder,
@@ -284,6 +287,28 @@ class SalesOrderRepository:
         self.db.add(receipt)
         self.db.flush()  # the unique constraint is checked here, before any stock moves
         return receipt
+
+    # R5-SAFE.1B: fulfilment attempt receipts and reconciliations. Callers hold the
+    # sales-order row lock, which serialises every reader/writer of these rows.
+    def get_fulfillment_receipt(self, sales_order_id: int, operation_key: str) -> FulfillmentAttemptReceipt | None:
+        return (self.db.query(FulfillmentAttemptReceipt)
+                .filter_by(sales_order_id=sales_order_id, operation_key=operation_key).first())
+
+    def create_fulfillment_receipt(self, receipt: FulfillmentAttemptReceipt) -> FulfillmentAttemptReceipt:
+        self.db.add(receipt)
+        self.db.flush()  # constraint violations surface here, inside the caller's transaction
+        return receipt
+
+    def get_unresolved_reconciliation(self, sales_order_id: int) -> FulfillmentReconciliation | None:
+        return (self.db.query(FulfillmentReconciliation)
+                .filter(FulfillmentReconciliation.sales_order_id == sales_order_id,
+                        FulfillmentReconciliation.status.in_(FULFILLMENT_RECONCILIATION_UNRESOLVED))
+                .first())
+
+    def create_reconciliation(self, record: FulfillmentReconciliation) -> FulfillmentReconciliation:
+        self.db.add(record)
+        self.db.flush()
+        return record
 
     def get_returned_quantity(
         self,
