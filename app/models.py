@@ -756,6 +756,17 @@ class SalesOrder(Base):
 
     __table_args__ = (
         Index("ix_sales_orders_status_created_at", "status", "created_at"),
+        # R5-SAFE.1B fulfilment claim (ed1a00000001): all-or-nothing holder metadata.
+        CheckConstraint("fulfillment_claim_epoch >= 0", name="ck_sales_orders_fulfillment_claim_epoch"),
+        CheckConstraint("fulfillment_claim_phase IS NULL OR fulfillment_claim_phase = 'PICK' "
+                        "OR fulfillment_claim_phase = 'PACK'",
+                        name="ck_sales_orders_fulfillment_claim_phase"),
+        CheckConstraint(
+            "(fulfillment_claim_token_hash IS NULL AND fulfillment_claim_user_id IS NULL "
+            "AND fulfillment_claim_phase IS NULL AND fulfillment_claim_acquired_at IS NULL) OR "
+            "(fulfillment_claim_token_hash IS NOT NULL AND fulfillment_claim_user_id IS NOT NULL "
+            "AND fulfillment_claim_phase IS NOT NULL AND fulfillment_claim_acquired_at IS NOT NULL)",
+            name="ck_sales_orders_fulfillment_claim_complete"),
     )
 
     id = Column(Integer, primary_key=True)
@@ -777,6 +788,14 @@ class SalesOrder(Base):
     shipped_at = Column(DateTime(timezone=True))
     shipped_by_user_id = Column(Integer, ForeignKey("users.id"))
     shipment_number = Column(String(100), unique=True)
+
+    # R5-SAFE.1B: one active authorized fulfilment claim per order. The epoch
+    # only ever increases (fencing); only the SHA-256 of the token is stored.
+    fulfillment_claim_epoch = Column(Integer, nullable=False, default=0, server_default=text("0"))
+    fulfillment_claim_token_hash = Column(String(64))
+    fulfillment_claim_user_id = Column(Integer, ForeignKey("users.id", name="fk_sales_orders_fulfillment_claim_user"))
+    fulfillment_claim_phase = Column(String(8))
+    fulfillment_claim_acquired_at = Column(DateTime(timezone=True))
 
 
 class SalesOrderItem(Base):
@@ -1615,6 +1634,99 @@ class SalesReturnReceipt(Base):
     returned_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     returned_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     response_snapshot = Column(JSONB, nullable=False)
+
+
+FULFILLMENT_RECONCILIATION_UNRESOLVED = ("REQUIRED", "CORRECTION_IN_PROGRESS", "ESCALATED")
+FULFILLMENT_RECONCILIATION_TERMINAL = ("RESOLVED_MATCHED", "RESOLVED_CORRECTED", "RESOLVED_ACCEPTED", "SUPERSEDED",
+                                       "CANCELLED")
+# Written as OR-of-equalities (not IN): PostgreSQL stores IN-lists as `= ANY (ARRAY[...])`, which the
+# metadata-parity check cannot match. Same allowed values, same NULL semantics.
+_UNRESOLVED_SQL = "status = 'REQUIRED' OR status = 'CORRECTION_IN_PROGRESS' OR status = 'ESCALATED'"
+_TERMINAL_SQL = ("status = 'RESOLVED_MATCHED' OR status = 'RESOLVED_CORRECTED' "
+                 "OR status = 'RESOLVED_ACCEPTED' OR status = 'SUPERSEDED' OR status = 'CANCELLED'")
+
+
+class FulfillmentReconciliation(Base):
+    """R5-SAFE.1B: the single authoritative fulfilment reconciliation state.
+
+    At most one UNRESOLVED record (REQUIRED / CORRECTION_IN_PROGRESS /
+    ESCALATED) may exist per sales order (partial unique index). Terminal
+    records keep the history. Counters are never treated as physically verified
+    merely because a record exists.
+    """
+
+    __tablename__ = "fulfillment_reconciliations"
+    __table_args__ = (
+        CheckConstraint("phase = 'PICK' OR phase = 'PACK'", name="ck_fulfillment_reconciliations_phase"),
+        CheckConstraint(
+            "reason_code = 'LEGACY_CUTOVER' OR reason_code = 'TAKEOVER' OR reason_code = 'SELF_TAKEOVER' "
+            "OR reason_code = 'RELEASE_UNVERIFIED' OR reason_code = 'DISCREPANCY_REPORTED'",
+            name="ck_fulfillment_reconciliations_reason"),
+        CheckConstraint(f"{_UNRESOLVED_SQL} OR {_TERMINAL_SQL}", name="ck_fulfillment_reconciliations_status"),
+        CheckConstraint(f"({_TERMINAL_SQL}) = (resolved_at IS NOT NULL)",
+                        name="ck_fulfillment_reconciliations_resolved_at"),
+        CheckConstraint("opened_epoch >= 0", name="ck_fulfillment_reconciliations_opened_epoch"),
+        Index("ix_fulfillment_reconciliations_order_opened", "sales_order_id", "opened_at"),
+        Index("uq_fulfillment_reconciliations_one_unresolved", "sales_order_id", unique=True,
+              postgresql_where=text(_UNRESOLVED_SQL)),
+    )
+    id = Column(Integer, primary_key=True)
+    sales_order_id = Column(Integer, ForeignKey("sales_orders.id"), nullable=False)
+    phase = Column(String(8), nullable=False)
+    opened_epoch = Column(Integer, nullable=False)
+    reason_code = Column(String(32), nullable=False)
+    status = Column(String(32), nullable=False)
+    count_lines = Column(JSONB)
+    targets = Column(JSONB)
+    opened_by_user_id = Column(Integer, ForeignKey("users.id"))
+    opened_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    counted_by_user_id = Column(Integer, ForeignKey("users.id"))
+    counted_at = Column(DateTime(timezone=True))
+    resolved_by_user_id = Column(Integer, ForeignKey("users.id"))
+    supervisor_user_id = Column(Integer, ForeignKey("users.id"))
+    resolved_at = Column(DateTime(timezone=True))
+    notes = Column(Text)
+    resolution_notes = Column(Text)
+
+
+class FulfillmentAttemptReceipt(Base):
+    """R5-SAFE.1B: durable identity of one keyed scan / undo attempt.
+
+    Unique per (sales order, Idempotency-Key). APPLIED is written in the same
+    transaction as the counter change and its audit row; REJECTED records a
+    terminal business rejection with no counter change. A same-key retry with
+    the same fingerprint replays the recorded outcome; a different fingerprint is
+    a conflict. ``claim_epoch`` is part of the fingerprint, so a key is bound to
+    the claim it was issued under.
+    """
+
+    __tablename__ = "fulfillment_attempt_receipts"
+    __table_args__ = (
+        UniqueConstraint("sales_order_id", "operation_key", name="uq_fulfillment_attempt_operation"),
+        CheckConstraint("operation_type = 'SCAN_PICK' OR operation_type = 'SCAN_PACK' "
+                        "OR operation_type = 'UNDO_PICK' OR operation_type = 'UNDO_PACK'",
+                        name="ck_fulfillment_attempt_receipts_operation"),
+        CheckConstraint(
+            "(outcome = 'APPLIED' AND error_code IS NULL AND http_status IS NULL) OR "
+            "(outcome = 'REJECTED' AND error_code IS NOT NULL AND http_status IS NOT NULL)",
+            name="ck_fulfillment_attempt_receipts_outcome"),
+        CheckConstraint("claim_epoch >= 0", name="ck_fulfillment_attempt_receipts_claim_epoch"),
+        Index("ix_fulfillment_attempt_receipts_order_created", "sales_order_id", "created_at"),
+    )
+    id = Column(Integer, primary_key=True)
+    sales_order_id = Column(Integer, ForeignKey("sales_orders.id"), nullable=False)
+    operation_key = Column(String(128), nullable=False)
+    operation_type = Column(String(16), nullable=False)
+    claim_epoch = Column(Integer, nullable=False)
+    request_fingerprint = Column(String(64), nullable=False)
+    outcome = Column(String(16), nullable=False)
+    error_code = Column(String(255))
+    http_status = Column(SmallInteger)
+    allocation_id = Column(Integer, ForeignKey("sales_order_batch_allocations.id"))
+    response_snapshot = Column(JSONB, nullable=False)
+    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    reconciliation_id = Column(Integer, ForeignKey("fulfillment_reconciliations.id"))
 
 
 class StockOperationReceipt(Base):

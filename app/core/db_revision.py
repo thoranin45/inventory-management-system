@@ -15,7 +15,8 @@ from sqlalchemy.engine import URL, Connection, make_url
 # .stock_transaction_id link) + ea1a00000004 (movement recorded_at_utc)
 # V1-H1: eb1a00000001 (sales_return_receipts)
 # V1-H3: ec1a00000001 (stock_transactions.remark -> TEXT)
-EXPECTED_ALEMBIC_HEAD = "ec1a00000001"
+# R5-SAFE.1B: ed1a00000001 (fulfilment claims, attempt receipts, reconciliations)
+EXPECTED_ALEMBIC_HEAD = "ed1a00000001"
 
 
 def current_db_revision(connection: Connection) -> str | None:
