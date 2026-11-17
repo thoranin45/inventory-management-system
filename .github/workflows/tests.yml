@@ -79,22 +79,12 @@ jobs:
       - name: Dependency vulnerability audit
         # Gating: fails on any known vulnerability in the pinned
         # requirements.txt (a full freeze, so --no-deps audits exactly what
-        # the image installs). Each --ignore-vuln below is a tracked,
-        # time-boxed exception; remove it in the package that fixes it.
-        #   P3b (FastAPI/Starlette 1.x upgrade):
-        #     PYSEC-2026-161, PYSEC-2026-2280, PYSEC-2026-2281,
-        #     PYSEC-2026-248, PYSEC-2026-249  (starlette 0.50.0)
-        # A newly published advisory will turn this check red on unrelated
-        # PRs; triage it (upgrade, or add a dated exception here) rather
-        # than reverting the gate.
+        # the image installs). If a newly published advisory turns this red
+        # on an unrelated PR, triage it: upgrade, or add a dated
+        # `--ignore-vuln <ID>` with a tracked follow-up. Do not revert the gate.
         run: |
           python -m pip install pip-audit==2.10.1
-          python -m pip_audit --strict --desc --no-deps -r requirements.txt \
-            --ignore-vuln PYSEC-2026-161 \
-            --ignore-vuln PYSEC-2026-2280 \
-            --ignore-vuln PYSEC-2026-2281 \
-            --ignore-vuln PYSEC-2026-248 \
-            --ignore-vuln PYSEC-2026-249
+          python -m pip_audit --strict --desc --no-deps -r requirements.txt
 
       - name: Build Docker image
         run: docker build -t inventory-system-api:test .
