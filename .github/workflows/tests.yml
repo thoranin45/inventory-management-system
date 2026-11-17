@@ -76,14 +76,29 @@ jobs:
       - name: Compile Python files
         run: python -m compileall app tests scripts
 
-      - name: Dependency vulnerability audit (advisory)
-        # Advisory only: passlib 1.7.4 is unmaintained and a couple of
-        # transitive advisories (ecdsa) do not affect HS256 usage. Tracked in
-        # docs/release-checklist.md; revisit when migrating off passlib.
-        continue-on-error: true
+      - name: Dependency vulnerability audit
+        # Gating: fails on any known vulnerability in the pinned
+        # requirements.txt (a full freeze, so --no-deps audits exactly what
+        # the image installs). Each --ignore-vuln below is a tracked,
+        # time-boxed exception; remove it in the package that fixes it.
+        #   P3b (FastAPI/Starlette 1.x upgrade):
+        #     PYSEC-2026-161, PYSEC-2026-2280, PYSEC-2026-2281,
+        #     PYSEC-2026-248, PYSEC-2026-249  (starlette 0.50.0)
+        #   P3c (replace python-jose with PyJWT; no fixed release exists):
+        #     PYSEC-2026-4298 (python-jose), PYSEC-2026-1325 (ecdsa, via jose)
+        # A newly published advisory will turn this check red on unrelated
+        # PRs; triage it (upgrade, or add a dated exception here) rather
+        # than reverting the gate.
         run: |
-          python -m pip install pip-audit
-          python -m pip_audit --strict --desc || true
+          python -m pip install pip-audit==2.10.1
+          python -m pip_audit --strict --desc --no-deps -r requirements.txt \
+            --ignore-vuln PYSEC-2026-161 \
+            --ignore-vuln PYSEC-2026-2280 \
+            --ignore-vuln PYSEC-2026-2281 \
+            --ignore-vuln PYSEC-2026-248 \
+            --ignore-vuln PYSEC-2026-249 \
+            --ignore-vuln PYSEC-2026-4298 \
+            --ignore-vuln PYSEC-2026-1325
 
       - name: Build Docker image
         run: docker build -t inventory-system-api:test .
