@@ -10,8 +10,7 @@
 - [ ] `python -c "from app.main import app"` OK.
 - [ ] CI step "Dependency vulnerability audit" green (it gates the build).
       Review every `--ignore-vuln` exception in `.github/workflows/tests.yml`:
-      starlette advisories until the FastAPI/Starlette upgrade (P3b);
-      `python-jose` and transitive `ecdsa` until the PyJWT migration (P3c).
+      starlette advisories until the FastAPI/Starlette upgrade (P3b).
       `passlib==1.7.4` is unmaintained (migrate off later; no advisory today).
 - [ ] `docker build` OK; image pushed as `…:vX.Y.Z` **and** `…:<sha>`
       (never `:latest` alone).

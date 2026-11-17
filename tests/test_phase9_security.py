@@ -3,7 +3,7 @@ import base64
 import json
 from datetime import timedelta
 
-from jose import jwt
+import jwt
 
 from app.core.security import ALGORITHM, SECRET_KEY, create_access_token
 
