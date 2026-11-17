@@ -5,10 +5,14 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent } from "@/components/ui/dialog";
+import { ActionError, StockEffect } from "@/components/orders/order-dialog-parts";
+import { useOrderCopy } from "@/components/orders/use-order-copy";
 import { isApiError } from "@/lib/api/errors";
 import { isAdmin, type Role } from "@/lib/auth/permissions";
+import { useT } from "@/lib/i18n/client";
+import { shipErrorMessage } from "@/lib/order-copy";
 import { useCompleteSalesOrder } from "@/lib/query/sales";
-import { COMPLETE_STARTABLE_STATUS, shipErrorCopy } from "@/lib/api/schemas/sales";
+import { COMPLETE_STARTABLE_STATUS } from "@/lib/api/schemas/sales";
 
 /**
  * Complete action — `POST /sales-orders/{id}/complete`, **admin only**,
@@ -28,54 +32,52 @@ export function CompleteAction({
   role: Role;
   onDone?: () => void;
 }) {
+  const t = useT();
+  const copy = useOrderCopy();
   const complete = useCompleteSalesOrder();
   const [open, setOpen] = React.useState(false);
 
   if (!isAdmin(role) || status.toUpperCase() !== COMPLETE_STARTABLE_STATUS) return null;
 
+  const errorText = (message: string, userMessage: string) => {
+    const m = shipErrorMessage(message);
+    return m ? copy(m) : userMessage;
+  };
   const err = complete.isError && isApiError(complete.error) ? complete.error : null;
-  const errCopy = err ? (shipErrorCopy(err.message) ?? err.userMessage) : null;
+  const errCopy = err ? errorText(err.message, err.userMessage) : null;
 
   const run = () =>
     complete.mutate(id, {
       onSuccess: (data) => {
         setOpen(false);
-        toast.success(`${data.so_number ?? soNumber ?? "Order"} completed`);
+        toast.success(t("sales.completedToast", { order: data.so_number ?? soNumber ?? t("sales.order") }));
         onDone?.();
       },
       onError: (error) => {
-        const msg = isApiError(error) ? (shipErrorCopy(error.message) ?? error.userMessage) : "Could not complete this order.";
+        const msg = isApiError(error) ? errorText(error.message, error.userMessage) : t("sales.completeFailedFallback");
         const rid = isApiError(error) ? error.requestId : undefined;
-        toast.error("Could not complete this order", { description: rid ? `${msg} · Request ${rid}` : msg });
+        toast.error(t("sales.completeFailed"), { description: rid ? `${msg} · ${t("task.requestRef", { id: rid })}` : msg });
       },
     });
 
   return (
     <>
       <Button variant="secondary" onClick={() => setOpen(true)}>
-        Complete order
+        {t("sales.completeOrder")}
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent
-          title={`Complete ${soNumber ?? "this order"}?`}
-          description="This marks the internal order lifecycle complete. It does not imply payment settlement or courier delivery — the system does not model those. COMPLETED is final."
+          title={t("sales.completeTitle", { order: soNumber ?? t("sales.thisOrder") })}
+          description={t("sales.completeDescription")}
         >
-          {errCopy ? (
-            <p role="alert" className="rounded-[var(--r-sm)] bg-[var(--danger-subtle)] p-2 text-[12px] text-[var(--danger)]">
-              {errCopy}
-              {err?.requestId ? (
-                <span className="mt-1 block text-[11px] text-[var(--muted)]">
-                  Request ID: <span className="mono select-all">{err.requestId}</span>
-                </span>
-              ) : null}
-            </p>
-          ) : null}
-          <div className="mt-1 flex justify-end gap-2">
+          <StockEffect kind="none" />
+          {errCopy ? <ActionError message={errCopy} requestId={err?.requestId} className="mt-2" /> : null}
+          <div className="mt-2 flex flex-wrap justify-end gap-2">
             <DialogClose asChild>
-              <Button variant="ghost">Keep as shipped</Button>
+              <Button variant="ghost">{t("sales.keepShipped")}</Button>
             </DialogClose>
             <Button variant="primary" onClick={run} disabled={complete.isPending}>
-              {complete.isPending ? "Completing…" : "Complete order"}
+              {complete.isPending ? t("sales.completing") : t("sales.completeOrder")}
             </Button>
           </div>
         </DialogContent>

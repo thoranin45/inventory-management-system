@@ -1,7 +1,9 @@
 import * as React from "react";
 import { CheckCheck, CircleCheck, CircleDot, Loader2, ScanLine, XCircle } from "lucide-react";
 
-import { SCAN_STATE_LABEL, type ScanState } from "./scan-machine";
+import { type ScanState } from "./scan-machine";
+import { useT } from "@/lib/i18n/client";
+import type { MessageKey } from "@/lib/i18n/translate";
 import { cn } from "@/lib/utils";
 
 /**
@@ -20,7 +22,18 @@ const META: Record<
   COMPLETED: { Icon: CheckCheck, tone: "text-[var(--accent)]" },
 };
 
+/** the state word in the UI language (English matches SCAN_STATE_LABEL in scan-machine) */
+const STATE_KEY: Record<ScanState, MessageKey> = {
+  READY: "fulfil.stateReady",
+  SCANNING: "fulfil.stateScanning",
+  MATCHED: "fulfil.stateMatched",
+  AMBIGUOUS: "fulfil.stateAmbiguous",
+  ERROR: "fulfil.stateError",
+  COMPLETED: "fulfil.stateCompleted",
+};
+
 export function ScanStatus({ state, className }: { state: ScanState; className?: string }) {
+  const t = useT();
   const { Icon, tone, spin } = META[state];
   return (
     <div
@@ -36,7 +49,7 @@ export function ScanStatus({ state, className }: { state: ScanState; className?:
         aria-hidden
         className={cn("h-4 w-4 flex-none", spin && "animate-spin motion-reduce:animate-none")}
       />
-      {SCAN_STATE_LABEL[state]}
+      {t(STATE_KEY[state])}
     </div>
   );
 }

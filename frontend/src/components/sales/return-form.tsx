@@ -6,12 +6,16 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Drawer, DrawerContent } from "@/components/ui/drawer";
 import { QuantityDisplay } from "@/components/ui/quantity-display";
+import { ActionError } from "@/components/orders/order-dialog-parts";
+import { useOrderCopy } from "@/components/orders/use-order-copy";
 import { isApiError } from "@/lib/api/errors";
 import { subtractDecimals } from "@/lib/decimal";
 import { useIdempotentDraft } from "@/lib/idempotent-draft";
 import { useReturnSalesOrder, useSalesOrder } from "@/lib/query/sales";
 import { useProductLookup } from "@/lib/query/sales";
-import { shipErrorCopy, type SalesReturnItemResult } from "@/lib/api/schemas/sales";
+import { useT } from "@/lib/i18n/client";
+import { formMessage, shipErrorMessage } from "@/lib/order-copy";
+import { type SalesReturnItemResult } from "@/lib/api/schemas/sales";
 import {
   clearReturnedLines,
   isReturnKeyConflict,
@@ -41,6 +45,8 @@ function ReturningTotal({ total }: { total: string | null }) {
 type LineDraft = ReturnLineDraft;
 
 function ReturnBody({ id, onClose }: { id: number; onClose: () => void }) {
+  const t = useT();
+  const copy = useOrderCopy();
   const detailQ = useSalesOrder(id);
   const detail = detailQ.data;
   const ret = useReturnSalesOrder();
@@ -59,7 +65,7 @@ function ReturnBody({ id, onClose }: { id: number; onClose: () => void }) {
 
   const productIds = React.useMemo(() => (detail?.items ?? []).map((it) => it.product_id), [detail]);
   const lookup = useProductLookup(productIds);
-  const name = (pid: number) => lookup.data?.[pid]?.product_name ?? `Product #${pid}`;
+  const name = (pid: number) => lookup.data?.[pid]?.product_name ?? t("receive.productFallback", { id: pid });
   const sku = (pid: number) => lookup.data?.[pid]?.sku ?? "";
 
   // session-local: how much the backend has told us is already returned per product
@@ -97,7 +103,7 @@ function ReturnBody({ id, onClose }: { id: number; onClose: () => void }) {
   const submit = () => {
     setFormError(null);
     if (activeLines.length === 0) {
-      setFormError({ message: "Enter a quantity on at least one line." });
+      setFormError({ message: t("sales.returnEnterQty") });
       return;
     }
     const checked = validateReturnLines(activeLines, (l) => remainingReturnable(l.product_id, l.ordered));
@@ -106,8 +112,8 @@ function ReturnBody({ id, onClose }: { id: number; onClose: () => void }) {
         setLine(Number(pid), {
           error:
             problem.kind === "invalid"
-              ? problem.message
-              : `Can't exceed ${problem.ceiling} (ordered minus already returned)`,
+              ? copy(formMessage(problem.message))
+              : t("sales.returnCeiling", { ceiling: problem.ceiling }),
         });
       }
       return;
@@ -122,30 +128,28 @@ function ReturnBody({ id, onClose }: { id: number; onClose: () => void }) {
           setAlreadyReturned((s) => mergeReturnedTotals(s, data.returned_items));
           // clear the quantities we just submitted, keep the rows for further returns
           setLines((s) => clearReturnedLines(s, data.returned_items));
-          toast.success("Return recorded", { description: `${data.returned_items.length} line${data.returned_items.length === 1 ? "" : "s"} returned to stock` });
+          toast.success(t("sales.returnRecorded"), { description: t(data.returned_items.length === 1 ? "sales.returnLineToStock" : "sales.returnLinesToStock", { n: data.returned_items.length }) });
         },
         onError: (error) => {
           // draft quantities and the Idempotency-Key are preserved — resubmitting the
           // same return reuses the key, so an already-recorded return is replayed
           if (isApiError(error)) {
-            setFormError({ message: shipErrorCopy(error.message) ?? error.userMessage, requestId: error.requestId });
+            const m = shipErrorMessage(error.message);
+            setFormError({ message: m ? copy(m) : error.userMessage, requestId: error.requestId });
           } else {
-            setFormError({ message: "The return was rejected. Your entries are kept." });
+            setFormError({ message: t("sales.returnRejectedKept") });
           }
         },
       },
     );
   };
 
-  if (detailQ.isLoading) return <p className="py-6 text-[13px] text-[var(--muted)]">Loading order lines…</p>;
-  if (detailQ.isError || !detail) return <p className="py-6 text-[13px] text-[var(--danger)]">Could not load the order.</p>;
+  if (detailQ.isLoading) return <p className="py-6 text-[13px] text-[var(--muted)]">{t("sales.loadingLines")}</p>;
+  if (detailQ.isError || !detail) return <p className="py-6 text-[13px] text-[var(--danger)]">{t("sales.loadOrderFailed")}</p>;
 
   return (
     <div className="flex flex-col gap-4">
-      <p className="text-[12px] text-[var(--muted)]">
-        Returns restore stock to the original allocation — the backend picks the batch, you don&apos;t. A return is a
-        stock and audit event; it does <strong>not</strong> change the order status or process a refund.
-      </p>
+      <p className="text-[13px] text-[var(--muted)]">{t("sales.returnIntro")}</p>
 
       <div className="flex flex-col gap-3">
         {detail.items.map((it) => {
@@ -158,26 +162,26 @@ function ReturnBody({ id, onClose }: { id: number; onClose: () => void }) {
             <div key={it.id} className="rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--surface)] p-3">
               <div className="mb-2">
                 <div className="text-[13px] font-medium">{name(it.product_id)}</div>
-                <div className="mono text-[11px] text-[var(--faint)]">{sku(it.product_id)}</div>
+                <div className="mono text-[12px] text-[var(--faint)]">{sku(it.product_id)}</div>
               </div>
-              <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11.5px] text-[var(--muted)]">
-                <span>Ordered <QuantityDisplay value={l.ordered} className="font-medium text-[var(--foreground)]" /></span>
-                <span>Shipped <QuantityDisplay value={l.ordered} className="font-medium text-[var(--foreground)]" /></span>
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-[var(--muted)]">
+                <span>{t("receive.ordered")} <QuantityDisplay value={l.ordered} className="font-medium text-[var(--foreground)]" /></span>
+                <span>{t("status.SHIPPED")} <QuantityDisplay value={l.ordered} className="font-medium text-[var(--foreground)]" /></span>
                 <span>
-                  Already returned{" "}
+                  {t("sales.alreadyReturned")}{" "}
                   {already !== undefined ? (
                     <QuantityDisplay value={already} className="font-medium text-[var(--foreground)]" />
                   ) : (
-                    <span className="text-[var(--faint)]" title="Not exposed by GET /sales-orders/{id}; the backend enforces the true total">unknown until you submit</span>
+                    <span className="text-[var(--faint)]" title={t("sales.alreadyReturnedTitle")}>{t("sales.unknownUntilSubmit")}</span>
                   )}
                 </span>
-                <span>Remaining returnable <QuantityDisplay value={afterThis} className="font-medium text-[var(--foreground)]" /></span>
+                <span>{t("sales.remainingReturnable")} <QuantityDisplay value={afterThis} className="font-medium text-[var(--foreground)]" /></span>
               </div>
               <div className="mt-2 flex flex-wrap items-end gap-3">
                 <label className="flex flex-col gap-1">
-                  <span className="text-[11px] font-semibold text-[var(--muted)]">Return now</span>
+                  <span className="text-[12px] font-semibold text-[var(--muted)]">{t("sales.returnNow")}</span>
                   <input
-                    aria-label={`Return quantity for ${name(it.product_id)}`}
+                    aria-label={t("sales.returnQtyFor", { name: name(it.product_id) })}
                     inputMode="decimal"
                     className={inputCls}
                     placeholder="0.000"
@@ -186,9 +190,9 @@ function ReturnBody({ id, onClose }: { id: number; onClose: () => void }) {
                   />
                 </label>
                 <label className="flex flex-1 flex-col gap-1">
-                  <span className="text-[11px] font-semibold text-[var(--muted)]">Reason (optional)</span>
+                  <span className="text-[12px] font-semibold text-[var(--muted)]">{t("sales.reasonOptional")}</span>
                   <input
-                    aria-label={`Return reason for ${name(it.product_id)}`}
+                    aria-label={t("sales.returnReasonFor", { name: name(it.product_id) })}
                     className={`${inputCls} w-full`}
                     maxLength={255}
                     value={l.reason}
@@ -196,34 +200,25 @@ function ReturnBody({ id, onClose }: { id: number; onClose: () => void }) {
                   />
                 </label>
               </div>
-              {l.error ? <p className="mt-1 text-[11px] text-[var(--danger)]">{l.error}</p> : null}
+              {l.error ? <p className="mt-1 text-[12px] text-[var(--danger)]">{l.error}</p> : null}
             </div>
           );
         })}
       </div>
 
       {results ? (
-        <div className="rounded-[var(--r-sm)] border border-[color-mix(in_srgb,var(--success)_30%,transparent)] bg-[var(--success-subtle)] p-2 text-[11.5px] text-[var(--foreground)]">
-          <div className="mb-1 font-semibold text-[var(--success)]">Recorded by the backend</div>
+        <div className="rounded-[var(--r-sm)] border border-[color-mix(in_srgb,var(--success)_30%,transparent)] bg-[var(--success-subtle)] p-2 text-[12px] text-[var(--foreground)]">
+          <div className="mb-1 font-semibold text-[var(--success)]">{t("sales.recordedByBackend")}</div>
           {results.map((r) => (
             <div key={r.product_id} className="mono">
-              {name(r.product_id)}: returned <QuantityDisplay value={r.returned_quantity} /> · total returned{" "}
-              <QuantityDisplay value={r.total_returned} /> · remaining <QuantityDisplay value={r.remaining_returnable} />
+              {name(r.product_id)}: {t("sales.returnedWord")} <QuantityDisplay value={r.returned_quantity} /> · {t("sales.totalReturnedWord")}{" "}
+              <QuantityDisplay value={r.total_returned} /> · {t("sales.remainingWord")} <QuantityDisplay value={r.remaining_returnable} />
             </div>
           ))}
         </div>
       ) : null}
 
-      {formError ? (
-        <p role="alert" className="rounded-[var(--r-sm)] bg-[var(--danger-subtle)] p-2 text-[12px] text-[var(--danger)]">
-          {formError.message}
-          {formError.requestId ? (
-            <span className="mt-1 block text-[11px] text-[var(--muted)]">
-              Request ID: <span className="mono select-all">{formError.requestId}</span>
-            </span>
-          ) : null}
-        </p>
-      ) : null}
+      {formError ? <ActionError message={formError.message} requestId={formError.requestId} /> : null}
 
       {keyConflict ? (
         <div className="flex justify-end">
@@ -235,21 +230,21 @@ function ReturnBody({ id, onClose }: { id: number; onClose: () => void }) {
               setFormError(null);
             }}
           >
-            Start a new return
+            {t("sales.startNewReturn")}
           </Button>
         </div>
       ) : null}
 
-      <div className="sticky bottom-0 -mx-4 flex items-center justify-between gap-2 border-t border-[var(--border)] bg-[var(--surface)] px-4 pt-3">
+      <div className="sticky bottom-0 -mx-4 flex flex-wrap items-center justify-between gap-2 border-t border-[var(--border)] bg-[var(--surface)] px-4 pb-[env(safe-area-inset-bottom)] pt-3">
         <span className="text-[12px] text-[var(--muted)]">
-          Returning <ReturningTotal total={total} />
+          {t("sales.returningWord")} <ReturningTotal total={total} />
         </span>
         <span className="flex gap-2">
           <Button variant="ghost" onClick={onClose}>
-            Close
+            {t("common.close")}
           </Button>
           <Button variant="primary" onClick={submit} disabled={ret.isPending || keyConflict || activeLines.length === 0}>
-            {ret.isPending ? "Submitting…" : "Record return"}
+            {ret.isPending ? t("receive.submitting") : t("sales.recordReturn")}
           </Button>
         </span>
       </div>
@@ -268,9 +263,10 @@ export function ReturnDrawer({
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
+  const t = useT();
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent title={`Return items — ${soNumber ?? "sales order"}`}>
+      <DrawerContent title={t("sales.returnTitle", { order: soNumber ?? t("sales.salesOrderLower") })}>
         {open && id != null ? <ReturnBody id={id} onClose={() => onOpenChange(false)} /> : null}
       </DrawerContent>
     </Drawer>

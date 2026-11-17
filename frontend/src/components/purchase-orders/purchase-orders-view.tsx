@@ -6,24 +6,23 @@ import { PageHeader } from "@/components/ui/page-header";
 import { FilterStrip } from "@/components/ui/filter-strip";
 import { SearchInput } from "@/components/ui/search-input";
 import { DataTable, type Column } from "@/components/ui/data-table";
+import { LocalDate } from "@/components/ui/local-date";
 import { MoneyDisplay, QuantityDisplay } from "@/components/ui/quantity-display";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
 import { useSession } from "@/components/session-provider";
 import { isAdmin } from "@/lib/auth/permissions";
+import { formatProgressPercent, poReceivingComplete } from "@/lib/format-percent";
+import { useT } from "@/lib/i18n/client";
 import { useListParams } from "@/lib/list-params";
+import { filterTabKey } from "@/lib/order-copy";
 import { usePurchaseOrders } from "@/lib/query/purchase-orders";
-import { formatIsoDate } from "@/lib/format";
 import { PO_FILTER_TABS, type PurchaseOrderDetail, type PurchaseOrderRow } from "@/lib/api/schemas/purchase-orders";
 import { PurchaseOrderDetailDrawer } from "./po-detail";
 import { CreatePurchaseOrderDrawer } from "./create-purchase-order";
 
-function pct(n: number): string {
-  if (!Number.isFinite(n)) return "0%";
-  return `${Math.round(n <= 1 ? n * 100 : n)}%`;
-}
-
 export function PurchaseOrdersView() {
+  const t = useT();
   const { user } = useSession();
   const admin = isAdmin(user.role);
   const { state, setSearch, setPage, setFilter, cycleSort } = useListParams({
@@ -33,7 +32,7 @@ export function PurchaseOrdersView() {
   });
 
   const filter = state.filter ?? "all";
-  const tab = PO_FILTER_TABS.find((t) => t.key === filter) ?? PO_FILTER_TABS[0];
+  const tab = PO_FILTER_TABS.find((x) => x.key === filter) ?? PO_FILTER_TABS[0];
 
   const query = React.useMemo(
     () => ({
@@ -80,75 +79,64 @@ export function PurchaseOrdersView() {
     setDrawerOpen(true);
   };
 
+  const received = (r: PurchaseOrderRow) => formatProgressPercent(r.receiving_pct, poReceivingComplete(r.status));
+
   const columns: Column<PurchaseOrderRow>[] = [
     {
       key: "po_number",
-      header: "PO number",
+      header: t("po.colPoNumber"),
       sortField: "po_number",
       cell: (r) => <span className="mono font-medium">{r.po_number ?? `#${r.id}`}</span>,
     },
     {
       key: "supplier",
-      header: "Supplier",
-      cell: (r) => <span>{r.supplier_name ?? (r.supplier_id != null ? `Supplier #${r.supplier_id}` : "—")}</span>,
+      header: t("po.supplier"),
+      cell: (r) => <span>{r.supplier_name ?? (r.supplier_id != null ? t("po.supplierRef", { id: r.supplier_id }) : "—")}</span>,
     },
-    {
-      key: "status",
-      header: "Status",
-      sortField: "status",
-      cell: (r) => <StatusBadge status={r.status.toUpperCase()} />,
-    },
+    { key: "status", header: t("sales.colStatus"), sortField: "status", cell: (r) => <StatusBadge status={r.status.toUpperCase()} /> },
     {
       key: "ordered",
-      header: "Ordered",
+      header: t("receive.ordered"),
       align: "right",
       secondary: true,
       cell: (r) => <QuantityDisplay value={r.ordered_quantity} className="text-[var(--muted)]" />,
     },
-    {
-      key: "received",
-      header: "Received",
-      align: "right",
-      cell: (r) => <QuantityDisplay value={r.received_quantity} />,
-    },
+    { key: "received", header: t("receive.received"), align: "right", cell: (r) => <QuantityDisplay value={r.received_quantity} /> },
     {
       key: "remaining",
-      header: "Remaining",
+      header: t("receive.outstanding"),
       align: "right",
       secondary: true,
       cell: (r) => <QuantityDisplay value={r.remaining_quantity} className="text-[var(--muted)]" />,
     },
-    {
-      key: "progress",
-      header: "Received %",
-      align: "right",
-      cell: (r) => <span className="tnum">{pct(r.receiving_pct)}</span>,
-    },
-    {
-      key: "amount",
-      header: "Total",
-      align: "right",
-      secondary: true,
-      cell: (r) => <MoneyDisplay value={r.total_amount} />,
-    },
+    { key: "progress", header: t("po.colReceivedPct"), align: "right", cell: (r) => <span className="tnum">{received(r)}</span> },
+    { key: "amount", header: t("po.total"), align: "right", secondary: true, cell: (r) => <MoneyDisplay value={r.total_amount} /> },
     {
       key: "receipts",
-      header: "Receipts",
+      header: t("po.colReceipts"),
       align: "right",
       secondary: true,
       cell: (r) => <span className="tnum text-[var(--muted)]">{r.receipt_count}</span>,
     },
     {
       key: "created",
-      header: "Created",
+      header: t("sales.created"),
       sortField: "created_at",
       secondary: true,
-      cell: (r) => <span className="mono text-[var(--muted)]">{formatIsoDate(r.created_at)}</span>,
+      cell: (r) => (
+        <span className="mono text-[var(--muted)]">
+          <LocalDate iso={r.created_at} isoInEnglish />
+        </span>
+      ),
     },
     {
       key: "last_receipt",
-      header: "Last receipt",
-      cell: (r) => <span className="mono text-[var(--muted)]">{formatIsoDate(r.last_receipt_at)}</span>,
+      header: t("po.lastReceipt"),
+      cell: (r) => (
+        <span className="mono text-[var(--muted)]">
+          <LocalDate iso={r.last_receipt_at} isoInEnglish />
+        </span>
+      ),
     },
   ];
 
@@ -157,12 +145,12 @@ export function PurchaseOrdersView() {
   return (
     <div className="flex flex-col gap-5">
       <PageHeader
-        title="Purchase Orders"
-        subtitle={data ? `${total} purchase orders · amounts in ฿` : "Loading purchase orders…"}
+        title={t("po.title")}
+        subtitle={data ? t("po.listSubtitle", { n: total }) : t("po.loadingList")}
         actions={
           admin ? (
             <Button variant="primary" onClick={() => setCreateOpen(true)}>
-              New purchase order
+              {t("po.newOrder")}
             </Button>
           ) : undefined
         }
@@ -170,16 +158,16 @@ export function PurchaseOrdersView() {
 
       <div className="flex flex-wrap items-center gap-3">
         <FilterStrip
-          ariaLabel="Purchase order status filter"
-          options={PO_FILTER_TABS.map((t) => ({ key: t.key, label: t.label }))}
+          ariaLabel={t("po.filterLabel")}
+          options={PO_FILTER_TABS.map((x) => ({ key: x.key, label: t(filterTabKey(x.key)) }))}
           value={filter}
           onChange={setFilter}
         />
         <SearchInput
           value={state.search}
           onCommit={setSearch}
-          placeholder="PO number, supplier…"
-          ariaLabel="Search purchase orders"
+          placeholder={t("po.searchPlaceholder")}
+          ariaLabel={t("po.searchLabel")}
           className="max-w-[320px]"
         />
       </div>
@@ -193,9 +181,10 @@ export function PurchaseOrdersView() {
         isFetching={isFetching}
         error={isError ? error : undefined}
         onRetry={() => void refetch()}
-        emptyMessage="No purchase orders match the current filter."
+        emptyMessage={t("po.empty")}
         sort={state.sortBy ? { field: state.sortBy, order: state.sortOrder } : null}
         onSort={cycleSort}
+        tabletLayout="table"
         pagination={
           data
             ? {
@@ -217,7 +206,7 @@ export function PurchaseOrdersView() {
                 <MoneyDisplay value={r.total_amount} className="font-medium" />
               </span>
               <span>
-                {pct(r.receiving_pct)} received · {r.receipt_count} receipt{r.receipt_count === 1 ? "" : "s"}
+                {t(r.receipt_count === 1 ? "po.cardReceipt" : "po.cardReceipts", { pct: received(r), n: r.receipt_count })}
               </span>
             </>
           ),
@@ -225,9 +214,7 @@ export function PurchaseOrdersView() {
       />
 
       <PurchaseOrderDetailDrawer row={selected} open={drawerOpen} onOpenChange={setDrawerOpen} role={user.role} />
-      {admin ? (
-        <CreatePurchaseOrderDrawer open={createOpen} onOpenChange={setCreateOpen} onCreated={onCreated} />
-      ) : null}
+      {admin ? <CreatePurchaseOrderDrawer open={createOpen} onOpenChange={setCreateOpen} onCreated={onCreated} /> : null}
     </div>
   );
 }

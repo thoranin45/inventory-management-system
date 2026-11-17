@@ -40,6 +40,16 @@ import type { Locale } from "@/lib/i18n/config";
 import { LanguageSwitch } from "./language-switch";
 import { ReturnDrawer } from "@/components/sales/return-form";
 import { ApiError } from "@/lib/api/errors";
+import { DICTIONARIES, translate, type MessageKey } from "@/lib/i18n/translate";
+
+/** R5: the return form is localized — these tests switch languages, so match its labels in either one */
+const eitherLanguage = (key: MessageKey, vars?: Record<string, string>) => {
+  const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^(?:${esc(translate(DICTIONARIES.en, key, vars))}|${esc(translate(DICTIONARIES.th, key, vars))})$`, "i");
+};
+const RETURN_QTY = eitherLanguage("sales.returnQtyFor", { name: "Green Tea 200g" });
+const RETURN_REASON = eitherLanguage("sales.returnReasonFor", { name: "Green Tea 200g" });
+const RECORD_RETURN = eitherLanguage("sales.recordReturn");
 
 let fetchMock: ReturnType<typeof vi.fn>;
 
@@ -362,10 +372,10 @@ describe("LanguageSwitch — Sales Return state safety under rapid switching", (
         <ReturnDrawer id={63} soNumber="SO-000063" open onOpenChange={() => {}} />
       </LanguageProvider>,
     );
-    const qty = screen.getByLabelText(/Return quantity for Green Tea 200g/i);
+    const qty = screen.getByLabelText(RETURN_QTY);
     await user.type(qty, "2");
-    await user.type(screen.getByLabelText(/Return reason for Green Tea 200g/i), "damaged");
-    await user.click(screen.getByRole("button", { name: /record return/i }));
+    await user.type(screen.getByLabelText(RETURN_REASON), "damaged");
+    await user.click(screen.getByRole("button", { name: RECORD_RETURN }));
     await waitFor(() => expect(retMut.mutate).toHaveBeenCalledTimes(1));
     const keyBefore = (retMut.mutate.mock.calls[0][0] as { idempotencyKey: string }).idempotencyKey;
 
@@ -383,13 +393,13 @@ describe("LanguageSwitch — Sales Return state safety under rapid switching", (
     expect(prefs.fn.mock.calls.every(([url]) => url === "/api/prefs/language")).toBe(true);
     expect(retMut.mutate).toHaveBeenCalledTimes(1);
     // the same mounted inputs, values intact
-    expect(screen.getByLabelText(/Return quantity for Green Tea 200g/i)).toBe(qty);
+    expect(screen.getByLabelText(RETURN_QTY)).toBe(qty);
     expect(qty).toHaveValue("2");
-    expect(screen.getByLabelText(/Return reason for Green Tea 200g/i)).toHaveValue("damaged");
+    expect(screen.getByLabelText(RETURN_REASON)).toHaveValue("damaged");
 
     // the retry reuses the very same Idempotency-Key
     retMut.mutate.mockImplementation(() => {});
-    await user.click(screen.getByRole("button", { name: /record return/i }));
+    await user.click(screen.getByRole("button", { name: RECORD_RETURN }));
     await waitFor(() => expect(retMut.mutate).toHaveBeenCalledTimes(2));
     expect((retMut.mutate.mock.calls[1][0] as { idempotencyKey: string }).idempotencyKey).toBe(keyBefore);
   });
@@ -614,9 +624,9 @@ describe("LanguageSwitch — stalled preference writes (R2-RF bounded feedback)"
         <ReturnDrawer id={63} soNumber="SO-000063" open onOpenChange={() => {}} />
       </LanguageProvider>,
     );
-    const qty = screen.getByLabelText(/Return quantity for Green Tea 200g/i);
+    const qty = screen.getByLabelText(RETURN_QTY);
     fireEvent.change(qty, { target: { value: "2" } });
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: /record return/i })));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: RECORD_RETURN })));
     expect(retMut.mutate).toHaveBeenCalledTimes(1);
     const keyBefore = (retMut.mutate.mock.calls[0][0] as { idempotencyKey: string }).idempotencyKey;
 
@@ -631,11 +641,11 @@ describe("LanguageSwitch — stalled preference writes (R2-RF bounded feedback)"
     expect(prefs.state.jar).toBe("th");
     expect(prefs.fn.mock.calls.every(([url]) => url === "/api/prefs/language")).toBe(true);
     expect(retMut.mutate).toHaveBeenCalledTimes(1);
-    expect(screen.getByLabelText(/Return quantity for Green Tea 200g/i)).toBe(qty);
+    expect(screen.getByLabelText(RETURN_QTY)).toBe(qty);
     expect(qty).toHaveValue("2");
 
     retMut.mutate.mockImplementation(() => {});
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: /record return/i })));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: RECORD_RETURN })));
     expect(retMut.mutate).toHaveBeenCalledTimes(2);
     expect((retMut.mutate.mock.calls[1][0] as { idempotencyKey: string }).idempotencyKey).toBe(keyBefore);
   });

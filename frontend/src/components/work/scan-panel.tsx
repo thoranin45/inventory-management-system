@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { ScanStatus } from "./scan-status";
 import type { ScanState } from "./scan-machine";
 import type { UseScannerResult } from "./use-scanner";
+import { useT } from "@/lib/i18n/client";
 import { cn } from "@/lib/utils";
 
 const BORDER: Record<ScanState, string> = {
@@ -48,6 +49,7 @@ export function ScanPanel({
   /** a line was tapped for [Scan +1] — the next scan is attributed to it */
   targeting?: { label: string; onClear: () => void };
 }) {
+  const t = useT();
   const soundId = React.useId();
   return (
     <div
@@ -60,40 +62,40 @@ export function ScanPanel({
 
       {targeting ? (
         <div className="flex items-center justify-between gap-2 rounded-[var(--r-sm)] border border-[var(--accent)] bg-[var(--accent-subtle)] px-3 py-2 text-[12px] font-medium text-[var(--accent)]">
-          <span>{targeting.label} — waiting for the item…</span>
+          <span>{t("fulfil.targetWaiting", { label: targeting.label })}</span>
           <button
             type="button"
-            aria-label="Cancel targeted scan"
+            aria-label={t("fulfil.cancelTarget")}
             onClick={targeting.onClear}
-            className="grid h-6 w-6 flex-none place-items-center rounded-[var(--r-sm)] hover:bg-[color-mix(in_srgb,var(--accent)_15%,transparent)]"
+            className="grid h-11 w-11 flex-none place-items-center rounded-[var(--r-sm)] hover:bg-[color-mix(in_srgb,var(--accent)_15%,transparent)] min-[1024px]:h-6 min-[1024px]:w-6"
           >
             <X aria-hidden className="h-3.5 w-3.5" />
           </button>
         </div>
       ) : null}
 
-      <p className="wc-scan-msg min-h-[2.6em] text-[12.5px] text-[var(--muted)]">{message}</p>
+      <p className="wc-scan-msg min-h-[2.6em] text-[13px] text-[var(--muted)]" aria-live="polite">{message}</p>
 
       <div className="flex gap-2">
         <input
           {...scanner.inputProps}
           disabled={disabled}
-          placeholder="Scan barcode…"
-          aria-label="Barcode scan input"
-          className="wc-scan-input h-11 min-w-0 flex-1 rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-[15px] tabular-nums outline-hidden focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-[var(--focus)] disabled:opacity-40"
+          placeholder={t("fulfil.scanPlaceholder")}
+          aria-label={t("task.scanInput")}
+          className="wc-scan-input h-11 min-w-0 flex-1 rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-[16px] tabular-nums outline-hidden focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-[var(--focus)] disabled:opacity-40"
           onFocus={() => onFocusChange?.(true)}
           onBlur={() => onFocusChange?.(false)}
         />
         <Button type="button" variant="secondary" onClick={scanner.submit} disabled={disabled}>
-          Enter
+          {t("task.enter")}
         </Button>
         {onCameraOpen ? (
           <Button
             type="button"
             variant="secondary"
             size="icon"
-            aria-label="Scan with camera"
-            title="Scan with the device camera"
+            aria-label={t("task.scanWithCamera")}
+            title={t("task.scanWithCameraTitle")}
             onClick={onCameraOpen}
             disabled={disabled}
           >
@@ -102,15 +104,15 @@ export function ScanPanel({
         ) : null}
       </div>
 
-      <div className="wc-scan-focuslock flex items-center gap-[7px] text-[11px] text-[var(--faint)]">
+      <div className="wc-scan-focuslock flex items-center gap-[7px] text-[12px] text-[var(--faint)]">
         <span aria-hidden className="h-2 w-2 flex-none rounded-[2px] bg-[var(--success)]" />
-        Focus stays here — hardware scanner ready
+        {t("fulfil.focusHere")}
       </div>
 
       {sound ? (
         <label
           htmlFor={soundId}
-          className="wc-scan-sound flex items-center gap-[6px] text-[11px] text-[var(--muted)]"
+          className="wc-scan-sound flex min-h-11 items-center gap-[6px] text-[12px] text-[var(--muted)] min-[1024px]:min-h-0"
         >
           <input
             id={soundId}
@@ -118,11 +120,11 @@ export function ScanPanel({
             checked={sound.enabled}
             onChange={(e) => sound.setEnabled(e.target.checked)}
           />
-          audible scan feedback
+          {t("fulfil.audible")}
         </label>
       ) : null}
 
-      {hint ? <div className="wc-scan-hint text-[11px] leading-[1.7] text-[var(--faint)]">{hint}</div> : null}
+      {hint ? <div className="wc-scan-hint text-[12px] leading-[1.7] text-[var(--faint)]">{hint}</div> : null}
     </div>
   );
 }
