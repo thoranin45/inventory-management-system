@@ -4,6 +4,7 @@ import * as React from "react";
 
 import { compareDecimals, ratio, type DecimalString } from "@/lib/decimal";
 import { cn } from "@/lib/utils";
+import { useT } from "@/lib/i18n/client";
 
 export interface MiniBarDatum {
   label: string;
@@ -20,7 +21,7 @@ export function MiniBars({
   title,
   data,
   format,
-  emptyLabel = "No data",
+  emptyLabel,
   className,
 }: {
   title?: string;
@@ -29,13 +30,14 @@ export function MiniBars({
   emptyLabel?: string;
   className?: string;
 }) {
+  const t = useT();
   const max = data.reduce<DecimalString>((m, d) => (compareDecimals(d.value, m) > 0 ? d.value : m), "0");
 
   return (
     <section className={cn("rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--surface)] p-4", className)}>
       {title ? <h3 className="wc-section-label mb-3">{title}</h3> : null}
       {data.length === 0 ? (
-        <p className="text-[12px] text-[var(--muted)]">{emptyLabel}</p>
+        <p className="text-[12px] text-[var(--muted)]">{emptyLabel ?? t("reports.noData")}</p>
       ) : (
         <ul className="flex flex-col gap-2">
           {data.map((d, i) => {

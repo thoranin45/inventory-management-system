@@ -19,12 +19,13 @@ import {
   nearExpiryStockSchema,
   operationalStockEnvelope,
   purchaseOrdersReportEnvelope,
-  reportErrorCopy,
   salesReportEnvelope,
   salesSummarySchema,
   transfersReportEnvelope,
 } from "@/lib/api/schemas/reports";
 import { queryKeys } from "./keys";
+import { useT } from "@/lib/i18n/client";
+import { reportErrorText } from "@/lib/reports/report-copy";
 
 type Query = Record<string, string | number | boolean | undefined | null>;
 
@@ -78,25 +79,29 @@ export interface ExportState {
  * row-cap message and any Request ID.
  */
 export function useReportExport(): ExportState {
+  const t = useT();
   const [running, setRunning] = React.useState(false);
 
   const run = React.useCallback(async (path: string, query?: Query) => {
     setRunning(true);
-    const toastId = toast.loading("Preparing the workbook…");
+    const toastId = toast.loading(t("reports.preparingWorkbook"));
     try {
       const { blob, filename } = await bffBinary(
         path + (query ? "?" + new URLSearchParams(Object.entries(query).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)])).toString() : ""),
       );
       saveBlob(blob, filename ?? "report.xlsx");
-      toast.success("Workbook downloaded", { id: toastId, description: filename });
+      toast.success(t("reports.workbookDownloaded"), { id: toastId, description: filename });
     } catch (error) {
-      const msg = isApiError(error) ? reportErrorCopy(error.message) ?? error.userMessage : "Export failed.";
+      const msg = isApiError(error) ? reportErrorText(t, error.message, error.userMessage) : t("reports.exportFailedDot");
       const rid = isApiError(error) ? error.requestId : undefined;
-      toast.error("Export failed", { id: toastId, description: rid ? `${msg} · Request ${rid}` : msg });
+      toast.error(t("reports.exportFailed"), {
+        id: toastId,
+        description: rid ? t("reports.requestSuffix", { message: msg, id: rid }) : msg,
+      });
     } finally {
       setRunning(false);
     }
-  }, []);
+  }, [t]);
 
   return { running, run };
 }

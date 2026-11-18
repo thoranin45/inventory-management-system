@@ -9,13 +9,16 @@ import { ReportShell } from "./report-shell";
 import { ReportsFilterBar } from "./reports-filter-bar";
 import { useMovementReport } from "@/lib/query/reports";
 import { useReportParams } from "@/lib/reports/use-report-params";
-import { movementTypeLabel, type MovementRow } from "@/lib/api/schemas/reports";
+import type { MovementRow } from "@/lib/api/schemas/reports";
 import { useProductLookup } from "@/lib/query/sales";
 import { formatIsoDate } from "@/lib/format";
+import { useT } from "@/lib/i18n/client";
+import { movementTypeText } from "@/lib/reports/report-copy";
 
 const CONTROLS = ["transaction_type", "date_from", "date_to", "page", "page_size"] as const;
 
 export function MovementHistoryReport() {
+  const t = useT();
   const rp = useReportParams([...CONTROLS], { page_size: 25 });
   const query = {
     page: rp.page,
@@ -29,19 +32,19 @@ export function MovementHistoryReport() {
   const pg = q.data?.data.pagination;
 
   const lookup = useProductLookup(rows.map((r) => r.product_id ?? 0).filter(Boolean));
-  const name = (id: number | null) => (id == null ? "—" : lookup.data?.[id]?.product_name ?? `Product #${id}`);
+  const name = (id: number | null) => (id == null ? "—" : lookup.data?.[id]?.product_name ?? t("reports.productFallback", { id }));
   const sku = (id: number | null) => (id == null ? "" : lookup.data?.[id]?.sku ?? "");
 
   const columns: Column<MovementRow>[] = [
-    { key: "when", header: "When", cell: (r) => <span className="mono text-[var(--muted)]">{formatIsoDate(r.created_at)}</span> },
+    { key: "when", header: t("reports.colWhen"), cell: (r) => <span className="mono text-[var(--muted)]">{formatIsoDate(r.created_at)}</span> },
     {
       key: "type",
-      header: "Type",
-      cell: (r) => <StatusBadge tone="neutral" label={r.transaction_type ? movementTypeLabel(r.transaction_type) : "—"} />,
+      header: t("reports.colType"),
+      cell: (r) => <StatusBadge tone="neutral" label={r.transaction_type ? movementTypeText(t, r.transaction_type) : "—"} />,
     },
     {
       key: "product",
-      header: "Product",
+      header: t("reports.colProduct"),
       cell: (r) => (
         <div>
           <div className="font-medium">{name(r.product_id)}</div>
@@ -49,8 +52,8 @@ export function MovementHistoryReport() {
         </div>
       ),
     },
-    { key: "qty", header: "Quantity", align: "right", cell: (r) => <QuantityDisplay value={r.quantity} className="font-semibold" /> },
-    { key: "ref", header: "Reference", secondary: true, cell: (r) => <span className="text-[12px] text-[var(--muted)]">{r.remark || "—"}</span> },
+    { key: "qty", header: t("reports.colQuantity"), align: "right", cell: (r) => <QuantityDisplay value={r.quantity} className="font-semibold" /> },
+    { key: "ref", header: t("reports.colReference"), secondary: true, cell: (r) => <span className="text-[12px] text-[var(--muted)]">{r.remark || "—"}</span> },
   ];
 
   return (
@@ -58,7 +61,7 @@ export function MovementHistoryReport() {
       slug="movements"
       query={q}
       isEmpty={rows.length === 0}
-      emptyMessage="No stock movements for the selected filters."
+      emptyMessage={t("reports.emptyMovements")}
       filters={
         <ReportsFilterBar
           controls={["transaction_type", "date_from", "date_to"]}
@@ -67,7 +70,7 @@ export function MovementHistoryReport() {
           onClear={rp.clearFilters}
         />
       }
-      footNote="History is server-paginated — only one page is ever loaded. Adjust the date range to narrow it."
+      footNote={t("reports.footMovements")}
     >
       <DataTable<MovementRow>
         columns={columns}
@@ -87,12 +90,12 @@ export function MovementHistoryReport() {
         }
         renderCard={(r) => ({
           title: name(r.product_id),
-          badge: <StatusBadge tone="neutral" label={r.transaction_type ? movementTypeLabel(r.transaction_type) : "—"} />,
+          badge: <StatusBadge tone="neutral" label={r.transaction_type ? movementTypeText(t, r.transaction_type) : "—"} />,
           meta: (
             <>
               <span className="mono">{formatIsoDate(r.created_at)}</span>
               <span>
-                Qty <QuantityDisplay value={r.quantity} className="font-medium" />
+                {t("reports.qty")} <QuantityDisplay value={r.quantity} className="font-medium" />
               </span>
               {r.remark ? <span className="w-full text-[11px] text-[var(--faint)]">{r.remark}</span> : null}
             </>

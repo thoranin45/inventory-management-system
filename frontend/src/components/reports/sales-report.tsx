@@ -12,10 +12,13 @@ import { useSalesChart, useSalesReport, useSalesSummary } from "@/lib/query/repo
 import { useReportParams } from "@/lib/reports/use-report-params";
 import { SO_STATUSES, SO_STATUS_LABEL, type SalesOrderRow } from "@/lib/api/schemas/sales";
 import { formatIsoDate, formatMoney } from "@/lib/format";
+import { useT } from "@/lib/i18n/client";
+import { statusText } from "@/lib/reports/report-copy";
 
 const CONTROLS = ["search", "status", "page", "page_size"] as const;
 
 export function SalesReport() {
+  const t = useT();
   const rp = useReportParams([...CONTROLS], { page_size: 25 });
   const query = {
     page: rp.page,
@@ -31,13 +34,13 @@ export function SalesReport() {
   const pg = q.data?.data.pagination;
 
   const columns: Column<SalesOrderRow>[] = [
-    { key: "so", header: "SO #", cell: (r) => <span className="mono">{r.so_number}</span> },
-    { key: "customer", header: "Customer", cell: (r) => <span className="font-medium">{r.customer_name ?? `Customer #${r.customer_id ?? "—"}`}</span> },
-    { key: "status", header: "Status", cell: (r) => <StatusBadge status={r.status} /> },
-    { key: "items", header: "Lines", align: "right", secondary: true, cell: (r) => <span className="tnum">{r.item_count}</span> },
-    { key: "qty", header: "Total qty", align: "right", cell: (r) => <QuantityDisplay value={r.total_quantity} /> },
-    { key: "amount", header: "Total amount", align: "right", cell: (r) => <MoneyDisplay value={r.total_amount} className="font-semibold" /> },
-    { key: "created", header: "Created", secondary: true, cell: (r) => <span className="mono text-[var(--muted)]">{formatIsoDate(r.created_at)}</span> },
+    { key: "so", header: t("reports.colSo"), cell: (r) => <span className="mono">{r.so_number}</span> },
+    { key: "customer", header: t("reports.colCustomer"), cell: (r) => <span className="font-medium">{r.customer_name ?? t("reports.customerFallback", { id: r.customer_id ?? "—" })}</span> },
+    { key: "status", header: t("reports.colStatus"), cell: (r) => <StatusBadge status={r.status} /> },
+    { key: "items", header: t("reports.colLines"), align: "right", secondary: true, cell: (r) => <span className="tnum">{r.item_count}</span> },
+    { key: "qty", header: t("reports.colTotalQty"), align: "right", cell: (r) => <QuantityDisplay value={r.total_quantity} /> },
+    { key: "amount", header: t("reports.colTotalAmount"), align: "right", cell: (r) => <MoneyDisplay value={r.total_amount} className="font-semibold" /> },
+    { key: "created", header: t("reports.colCreated"), secondary: true, cell: (r) => <span className="mono text-[var(--muted)]">{formatIsoDate(r.created_at)}</span> },
   ];
 
   return (
@@ -45,13 +48,13 @@ export function SalesReport() {
       slug="sales"
       query={q}
       isEmpty={rows.length === 0}
-      emptyMessage="No sales orders for the selected filters."
+      emptyMessage={t("reports.emptySales")}
       exportPath="/api/bff/reports/export/sales"
       filters={
         <ReportsFilterBar
           controls={["search", "status"]}
-          searchPlaceholder="SO number, customer…"
-          statusOptions={SO_STATUSES.map((s) => ({ value: s, label: SO_STATUS_LABEL[s] ?? s }))}
+          searchPlaceholder={t("reports.phSales")}
+          statusOptions={SO_STATUSES.map((s) => ({ value: s, label: statusText(t, s, SO_STATUS_LABEL) }))}
           values={rp.values}
           onChange={rp.setParams}
           onClear={rp.clearFilters}
@@ -63,18 +66,18 @@ export function SalesReport() {
           <div className="flex flex-wrap gap-2">
             <span className="inline-flex items-baseline gap-1 rounded-[var(--r-sm)] border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-[12px] text-[var(--muted)]">
               <span className="tnum text-[15px] font-semibold text-[var(--foreground)]">{summary.data.total_orders}</span>
-              orders (all time)
+              {t("reports.ordersAllTime")}
             </span>
             <span className="inline-flex items-baseline gap-1 rounded-[var(--r-sm)] border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-[12px] text-[var(--muted)]">
               <span className="tnum text-[15px] font-semibold text-[var(--foreground)]">{formatMoney(summary.data.total_sales_amount)}</span>
-              total amount
+              {t("reports.totalAmount")}
             </span>
           </div>
         ) : null}
         {chart.data && chart.data.length > 1 ? (
           <MiniBars
-            title="Order amount by day"
-            data={chart.data.slice(-14).map((d) => ({ label: d.date, value: d.sales, hint: `${d.orders} order${d.orders === 1 ? "" : "s"}` }))}
+            title={t("reports.orderAmountByDay")}
+            data={chart.data.slice(-14).map((d) => ({ label: d.date, value: d.sales, hint: t(d.orders === 1 ? "reports.ordersOne" : "reports.ordersMany", { n: d.orders }) }))}
             format={(v) => formatMoney(v)}
           />
         ) : null}
@@ -95,7 +98,7 @@ export function SalesReport() {
               <>
                 <span className="mono">{r.so_number}</span>
                 <span>
-                  Qty <QuantityDisplay value={r.total_quantity} className="font-medium" />
+                  {t("reports.qty")} <QuantityDisplay value={r.total_quantity} className="font-medium" />
                 </span>
                 <span>
                   <MoneyDisplay value={r.total_amount} className="font-medium" />

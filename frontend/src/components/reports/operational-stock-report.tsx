@@ -14,10 +14,12 @@ import type { ProductRow } from "@/lib/api/schemas/products";
 import { formatQty } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { isZero } from "@/lib/decimal";
+import { useT } from "@/lib/i18n/client";
 
 const CONTROLS = ["search", "page", "page_size", "sort_by", "sort_order"] as const;
 
 export function OperationalStockReport() {
+  const t = useT();
   const rp = useReportParams([...CONTROLS], { page_size: 20 });
   const query = {
     page: rp.page,
@@ -33,25 +35,25 @@ export function OperationalStockReport() {
   const pg = q.data?.data.pagination;
 
   const columns: Column<ProductRow>[] = [
-    { key: "sku", header: "SKU", sortField: "sku", cell: (p) => <span className="mono text-[var(--muted)]">{p.sku}</span> },
-    { key: "name", header: "Product", sortField: "product_name", cell: (p) => <span className="font-medium">{p.product_name}</span> },
-    { key: "owned", header: "Owned", align: "right", sortField: "stock_qty", cell: (p) => <QuantityDisplay value={p.owned_quantity} /> },
-    { key: "avail", header: "Operational available", align: "right", cell: (p) => <QuantityDisplay value={p.operational_available_quantity} className="font-semibold" /> },
-    { key: "reserved", header: "Reserved", align: "right", secondary: true, cell: (p) => <QuantityDisplay value={p.reserved_quantity} className="text-[var(--muted)]" /> },
+    { key: "sku", header: t("product.sku"), sortField: "sku", cell: (p) => <span className="mono text-[var(--muted)]">{p.sku}</span> },
+    { key: "name", header: t("reports.colProduct"), sortField: "product_name", cell: (p) => <span className="font-medium">{p.product_name}</span> },
+    { key: "owned", header: t("reports.colOwned"), align: "right", sortField: "stock_qty", cell: (p) => <QuantityDisplay value={p.owned_quantity} /> },
+    { key: "avail", header: t("reports.colOpAvailable"), align: "right", cell: (p) => <QuantityDisplay value={p.operational_available_quantity} className="font-semibold" /> },
+    { key: "reserved", header: t("reports.colReserved"), align: "right", secondary: true, cell: (p) => <QuantityDisplay value={p.reserved_quantity} className="text-[var(--muted)]" /> },
     {
       key: "expired",
-      header: "Expired",
+      header: t("reports.colExpired"),
       align: "right",
       cell: (p) => <QuantityDisplay value={p.expired_quantity} className={cn(!isZero(p.expired_quantity) && "text-[var(--danger)]")} />,
     },
     {
       key: "near",
-      header: "Near expiry",
+      header: t("reports.colNearExpiry"),
       align: "right",
       secondary: true,
       cell: (p) => <QuantityDisplay value={p.near_expiry_quantity} className={cn(!isZero(p.near_expiry_quantity) && "text-[var(--warning)]")} />,
     },
-    { key: "transit", header: "In transit", align: "right", secondary: true, cell: (p) => <QuantityDisplay value={p.transit_quantity} className="text-[var(--muted)]" /> },
+    { key: "transit", header: t("reports.colInTransit"), align: "right", secondary: true, cell: (p) => <QuantityDisplay value={p.transit_quantity} className="text-[var(--muted)]" /> },
   ];
 
   return (
@@ -59,22 +61,22 @@ export function OperationalStockReport() {
       slug="operational-stock"
       query={q}
       isEmpty={rows.length === 0}
-      emptyMessage="No products match the current search."
+      emptyMessage={t("reports.emptyOperational")}
       filters={
         <ReportsFilterBar
           controls={["search"]}
-          searchPlaceholder="SKU, name, barcode…"
+          searchPlaceholder={t("reports.phOperational")}
           values={rp.values}
           onChange={rp.setParams}
           onClear={rp.clearFilters}
         />
       }
-      footNote={`Near-expiry and expired quantities are classifications of owned stock, not a separate pool. Owned = operational available + reserved + expired + near-expiry + transit. As of ${rows[0]?.as_of_date ?? "today"}.`}
+      footNote={t("reports.footOperational", { date: rows[0]?.as_of_date ?? t("reports.today") })}
     >
       <div className="flex flex-col gap-4">
         {chart.data && chart.data.length > 0 ? (
           <MiniBars
-            title="Top stock holders (owned quantity)"
+            title={t("reports.topHolders")}
             data={chart.data.slice(0, 10).map((d) => ({ label: d.product_name, value: d.stock_qty }))}
             format={(v) => formatQty(v)}
           />
@@ -103,14 +105,14 @@ export function OperationalStockReport() {
               <>
                 <span className="mono">{p.sku}</span>
                 <span>
-                  Avail <QuantityDisplay value={p.operational_available_quantity} className="font-medium" />
+                  {t("reports.avail")} <QuantityDisplay value={p.operational_available_quantity} className="font-medium" />
                 </span>
                 <span>
-                  Owned <QuantityDisplay value={p.owned_quantity} className="font-medium" />
+                  {t("reports.owned")} <QuantityDisplay value={p.owned_quantity} className="font-medium" />
                 </span>
                 {!isZero(p.expired_quantity) ? (
                   <span className="text-[var(--danger)]">
-                    Expired <QuantityDisplay value={p.expired_quantity} />
+                    {t("reports.expired")} <QuantityDisplay value={p.expired_quantity} />
                   </span>
                 ) : null}
               </>

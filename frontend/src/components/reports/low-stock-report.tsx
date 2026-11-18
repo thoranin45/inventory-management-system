@@ -9,19 +9,21 @@ import { ReportShell } from "./report-shell";
 import { useLowStockOperationalReport } from "@/lib/query/reports";
 import type { LowStockOperationalRow } from "@/lib/api/schemas/reports";
 import { compareDecimals, subtractDecimals } from "@/lib/decimal";
+import { useT } from "@/lib/i18n/client";
 
 export function LowStockReport() {
+  const t = useT();
   const q = useLowStockOperationalReport({});
   const rows = q.data?.items ?? [];
 
   const columns: Column<LowStockOperationalRow>[] = [
-    { key: "sku", header: "SKU", cell: (r) => <span className="mono text-[var(--muted)]">{r.sku}</span> },
-    { key: "name", header: "Product", cell: (r) => <span className="font-medium">{r.product_name}</span> },
-    { key: "avail", header: "Operational available", align: "right", cell: (r) => <QuantityDisplay value={r.operational_available_quantity} className="font-semibold" /> },
-    { key: "threshold", header: "Threshold", align: "right", cell: (r) => <QuantityDisplay value={r.threshold} className="text-[var(--muted)]" /> },
+    { key: "sku", header: t("product.sku"), cell: (r) => <span className="mono text-[var(--muted)]">{r.sku}</span> },
+    { key: "name", header: t("reports.colProduct"), cell: (r) => <span className="font-medium">{r.product_name}</span> },
+    { key: "avail", header: t("reports.colOpAvailable"), align: "right", cell: (r) => <QuantityDisplay value={r.operational_available_quantity} className="font-semibold" /> },
+    { key: "threshold", header: t("reports.colThreshold"), align: "right", cell: (r) => <QuantityDisplay value={r.threshold} className="text-[var(--muted)]" /> },
     {
       key: "short",
-      header: "Short by",
+      header: t("reports.colShortBy"),
       align: "right",
       cell: (r) => {
         const short = subtractDecimals(r.threshold, r.operational_available_quantity, 3);
@@ -34,7 +36,7 @@ export function LowStockReport() {
         );
       },
     },
-    { key: "state", header: "State", cell: () => <StatusBadge tone="warning" label="Below threshold" /> },
+    { key: "state", header: t("reports.colState"), cell: () => <StatusBadge tone="warning" label={t("reports.belowThreshold")} /> },
   ];
 
   return (
@@ -42,9 +44,9 @@ export function LowStockReport() {
       slug="low-stock"
       query={q}
       isEmpty={rows.length === 0}
-      emptyMessage="No products are below their operational low-stock threshold."
+      emptyMessage={t("reports.emptyLow")}
       exportPath="/api/bff/reports/export/low-stock"
-      footNote="Threshold is the backend operational rule: safety stock if > 0, else minimum stock, else the default of 10. Never recomputed from a product's total stock quantity."
+      footNote={t("reports.footLow")}
     >
       <DataTable<LowStockOperationalRow>
         columns={columns}
@@ -53,15 +55,15 @@ export function LowStockReport() {
         isFetching={q.isFetching}
         renderCard={(r) => ({
           title: r.product_name,
-          badge: <StatusBadge tone="warning" label="Below threshold" />,
+          badge: <StatusBadge tone="warning" label={t("reports.belowThreshold")} />,
           meta: (
             <>
               <span className="mono">{r.sku}</span>
               <span>
-                Avail <QuantityDisplay value={r.operational_available_quantity} className="font-medium" />
+                {t("reports.avail")} <QuantityDisplay value={r.operational_available_quantity} className="font-medium" />
               </span>
               <span>
-                Threshold <QuantityDisplay value={r.threshold} className="font-medium" />
+                {t("reports.threshold")} <QuantityDisplay value={r.threshold} className="font-medium" />
               </span>
             </>
           ),

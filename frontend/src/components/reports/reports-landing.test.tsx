@@ -8,6 +8,7 @@ vi.mock("next/link", () => ({
 const run = vi.fn().mockResolvedValue(undefined);
 vi.mock("@/lib/query/reports", () => ({ useReportExport: () => ({ running: false, run }) }));
 
+import { LanguageProvider } from "@/lib/i18n/client";
 import { ReportsLanding } from "./reports-landing";
 
 beforeEach(() => run.mockClear());
@@ -55,5 +56,24 @@ describe("ReportsLanding", () => {
     await userEvent.type(thr, "25");
     await userEvent.click(within(card).getByRole("button", { name: /download .xlsx/i }));
     await waitFor(() => expect(run).toHaveBeenCalledWith("/api/bff/reports/export/low-stock", { threshold: "25" }));
+  });
+
+  it("renders in Thai with the same export behaviour", async () => {
+    render(
+      <LanguageProvider initialLocale="th">
+        <ReportsLanding />
+      </LanguageProvider>,
+    );
+    expect(screen.getByRole("heading", { name: "รายงาน" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "สินค้าคงคลัง" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "ส่งออกไฟล์" })).toBeInTheDocument();
+    expect(screen.getByText("สต็อกพร้อมใช้งาน")).toBeInTheDocument();
+    expect(screen.queryByText("Stock workbook")).not.toBeInTheDocument();
+    const thr = screen.getByLabelText("ไฟล์สต็อกต่ำ: เกณฑ์");
+    await userEvent.clear(thr);
+    await userEvent.type(thr, "7");
+    const card = screen.getByText("ไฟล์สต็อกต่ำ").closest("div") as HTMLElement;
+    await userEvent.click(within(card).getByRole("button", { name: "ดาวน์โหลด .xlsx" }));
+    await waitFor(() => expect(run).toHaveBeenCalledWith("/api/bff/reports/export/low-stock", { threshold: "7" }));
   });
 });
