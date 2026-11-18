@@ -1,0 +1,1903 @@
+{
+  "fixture": "wp5_contract_vectors",
+  "fixture_version": 2,
+  "status": "DRAFT (W5-0 documentation). Not frozen; owner decisions D-1..D-14 are not approved (see docs/wp5-backend-bff-contract.md section 19). Remediated 2026-10-27 for Codex findings F-5 and F-6; all previously computed digests are unchanged.",
+  "consumed_by": "Nothing yet. First intended consumers: W5-2 tests (tests/test_wp5_fingerprint.py) and W5-6 frontend tests.",
+  "verification_disclaimer": "All computed values were produced by copies of the repository algorithms written by the same author (Claude). They are NOT independent verification and NOT verification of the repository implementations.",
+  "algorithms": {
+    "canonical-json/1": {
+      "encoding": "UTF-8",
+      "object_keys": "sorted; ASCII keys only (UTF-16 order equals code-point order)",
+      "separators": "no whitespace",
+      "strings": "escaped exactly as ECMAScript JSON.stringify: quotation mark, reverse solidus, \\b \\f \\n \\r \\t, other U+0000..U+001F as \\u00xx lowercase; all other characters raw UTF-8",
+      "numbers": "integer fields are validated semantically after JSON parsing and BFF normalization: an integer value within bounds is required; JSON 3 and 3.0 are equivalent and both accepted as integer 3; 3.5, strings, booleans, negative-where-prohibited and out-of-range values are rejected; strings are never coerced; the digest is computed over the parsed, validated representation (integer 3). Owner-approved W5-0 documentation rule, 2026-10-27",
+      "null": "forbidden in requests",
+      "undefined": "impossible in JSON; rejected client-side before hashing",
+      "unicode": "Unicode scalar values only; lone surrogates rejected; no normalization",
+      "python_equivalent": "json.dumps(v, sort_keys=True, separators=(\",\", \":\"), ensure_ascii=False)"
+    },
+    "client-fingerprint/1": "lowercase hex SHA-256 of UTF-8 canonical-json/1 of {\"scope\":{\"actor\",\"deployment\",\"order\"},\"payload\"}; identical to frontend attempt.ts digest({scope,payload})",
+    "business-fingerprint/attempt/1": "repository attempt_fingerprint() version 1 (actor excluded; ensure_ascii=False)",
+    "business-fingerprint/lifecycle/1": "PROPOSED: SHA-256 of canonical {version:1, sales_order_id, kind, phase, expected_epoch, progress_revision, mode?, confirmed?, reason?, counts?[sorted by allocation_id]}; absent optional members omitted"
+  },
+  "decimal_rules": {
+    "pattern": "^(0|[1-9]\\d{0,14})\\.\\d{3}$",
+    "scan_undo": "> 0.000",
+    "maximum": "999999999999999.999"
+  },
+  "uuid_rules": {
+    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+  },
+  "barcode_rules": {
+    "identity": "byte-exact, leading zeros preserved, no trim, no normalization",
+    "charset_and_length": "UNRESOLVED: D-14"
+  },
+  "positive_vectors": [
+    {
+      "id": "scan-pick-leading-zeros",
+      "description": "Previously calculated W5-0 positive vector (preserved).",
+      "input": {
+        "scope": {
+          "deployment": "3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f",
+          "actor": 7,
+          "order": 101
+        },
+        "payload": {
+          "operation": "SCAN_PICK",
+          "phase": "PICK",
+          "epoch": 3,
+          "barcode": "00012345",
+          "quantity": "1.000"
+        }
+      },
+      "canonical_json": "{\"payload\":{\"barcode\":\"00012345\",\"epoch\":3,\"operation\":\"SCAN_PICK\",\"phase\":\"PICK\",\"quantity\":\"1.000\"},\"scope\":{\"actor\":7,\"deployment\":\"3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f\",\"order\":101}}",
+      "client_fingerprint": {
+        "algorithm": "client-fingerprint/1",
+        "value": "4b18b7930843373846bae89cd8a9246d1c6469a038b845329ec89ffa9ebf9a33"
+      },
+      "business_fingerprint": {
+        "algorithm": "business-fingerprint/attempt/1",
+        "value": "01645dd7a989dd526b95c238f3b81efa79c85aa851d0a906027de722e8f895fa",
+        "basis": "COPY of app/services/fulfillment_integrity_service.py attempt_fingerprint() + app/core/quantity.py quantity_text()"
+      },
+      "provenance": {
+        "computed": "2026-10-26, W5-0 read-only design (scratchpad w50/vectors.mjs + vectors_check.py); recomputed and cross-checked in this build",
+        "method": "EXECUTED_AGAINST_COPIED_ALGORITHMS",
+        "independent": false
+      },
+      "verification": {
+        "repository_client_digest": "PENDING (W5-2: import frontend/src/lib/fulfillment/attempt.ts digest() in Vitest)",
+        "repository_business_fingerprint": "PENDING (W5-2: call the repository function in pytest)",
+        "codex_independent_recomputation": "PENDING (post-implementation audit)"
+      },
+      "classification": {
+        "canonical_digest_valid": true,
+        "request_schema_valid": true,
+        "business_prerequisites": [
+          "valid current claim token, epoch and holder for the order",
+          "order status PICKING (PICK) or PACKING (PACK)",
+          "no unresolved reconciliation (otherwise an accepted REJECTED receipt)",
+          "coordinated contract mode active for the order (W5-7)",
+          "a product whose barcode equals the payload barcode, on an order line",
+          "an allocation with enough remaining quantity"
+        ],
+        "digest_only_boundary": false,
+        "role": "positive",
+        "business_outcome": "NOT_IMPLIED: a valid digest is not an authorized or successful business operation"
+      }
+    },
+    {
+      "id": "scan-pick-with-allocation",
+      "description": "Previously calculated W5-0 positive vector (preserved).",
+      "input": {
+        "scope": {
+          "deployment": "3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f",
+          "actor": 7,
+          "order": 101
+        },
+        "payload": {
+          "operation": "SCAN_PICK",
+          "phase": "PICK",
+          "epoch": 3,
+          "barcode": "00012345",
+          "allocation_id": 42,
+          "quantity": "2.500"
+        }
+      },
+      "canonical_json": "{\"payload\":{\"allocation_id\":42,\"barcode\":\"00012345\",\"epoch\":3,\"operation\":\"SCAN_PICK\",\"phase\":\"PICK\",\"quantity\":\"2.500\"},\"scope\":{\"actor\":7,\"deployment\":\"3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f\",\"order\":101}}",
+      "client_fingerprint": {
+        "algorithm": "client-fingerprint/1",
+        "value": "727077f977cde2c214c037209fd53a4ce4080fbefdec375f58a59e77eb569b11"
+      },
+      "business_fingerprint": {
+        "algorithm": "business-fingerprint/attempt/1",
+        "value": "5b853958a4b78f66a7119222286bcd9a956e1f2ab80220eaddfe7bb66509a5ba",
+        "basis": "COPY of app/services/fulfillment_integrity_service.py attempt_fingerprint() + app/core/quantity.py quantity_text()"
+      },
+      "provenance": {
+        "computed": "2026-10-26, W5-0 read-only design (scratchpad w50/vectors.mjs + vectors_check.py); recomputed and cross-checked in this build",
+        "method": "EXECUTED_AGAINST_COPIED_ALGORITHMS",
+        "independent": false
+      },
+      "verification": {
+        "repository_client_digest": "PENDING (W5-2: import frontend/src/lib/fulfillment/attempt.ts digest() in Vitest)",
+        "repository_business_fingerprint": "PENDING (W5-2: call the repository function in pytest)",
+        "codex_independent_recomputation": "PENDING (post-implementation audit)"
+      },
+      "classification": {
+        "canonical_digest_valid": true,
+        "request_schema_valid": true,
+        "business_prerequisites": [
+          "valid current claim token, epoch and holder for the order",
+          "order status PICKING (PICK) or PACKING (PACK)",
+          "no unresolved reconciliation (otherwise an accepted REJECTED receipt)",
+          "coordinated contract mode active for the order (W5-7)",
+          "a product whose barcode equals the payload barcode, on an order line",
+          "an allocation with enough remaining quantity",
+          "allocation 42 belongs to the scanned line"
+        ],
+        "digest_only_boundary": false,
+        "role": "positive",
+        "business_outcome": "NOT_IMPLIED: a valid digest is not an authorized or successful business operation"
+      }
+    },
+    {
+      "id": "scan-pack-max-quantity",
+      "description": "Previously calculated W5-0 positive vector (preserved).",
+      "input": {
+        "scope": {
+          "deployment": "3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f",
+          "actor": 7,
+          "order": 101
+        },
+        "payload": {
+          "operation": "SCAN_PACK",
+          "phase": "PACK",
+          "epoch": 4,
+          "barcode": "ABC-0001",
+          "quantity": "999999999999999.999"
+        }
+      },
+      "canonical_json": "{\"payload\":{\"barcode\":\"ABC-0001\",\"epoch\":4,\"operation\":\"SCAN_PACK\",\"phase\":\"PACK\",\"quantity\":\"999999999999999.999\"},\"scope\":{\"actor\":7,\"deployment\":\"3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f\",\"order\":101}}",
+      "client_fingerprint": {
+        "algorithm": "client-fingerprint/1",
+        "value": "35aa856fd9336fbad427b2a13e605eea3ebb483e5191f77ef11c3411aaff2e78"
+      },
+      "business_fingerprint": {
+        "algorithm": "business-fingerprint/attempt/1",
+        "value": "cfc65d9c24bac8ed5944d6044e716301384e03b3fc6af204b73ca4257adffc15",
+        "basis": "COPY of app/services/fulfillment_integrity_service.py attempt_fingerprint() + app/core/quantity.py quantity_text()"
+      },
+      "provenance": {
+        "computed": "2026-10-26, W5-0 read-only design (scratchpad w50/vectors.mjs + vectors_check.py); recomputed and cross-checked in this build",
+        "method": "EXECUTED_AGAINST_COPIED_ALGORITHMS",
+        "independent": false
+      },
+      "verification": {
+        "repository_client_digest": "PENDING (W5-2: import frontend/src/lib/fulfillment/attempt.ts digest() in Vitest)",
+        "repository_business_fingerprint": "PENDING (W5-2: call the repository function in pytest)",
+        "codex_independent_recomputation": "PENDING (post-implementation audit)"
+      },
+      "classification": {
+        "canonical_digest_valid": true,
+        "request_schema_valid": true,
+        "business_prerequisites": [
+          "valid current claim token, epoch and holder for the order",
+          "order status PICKING (PICK) or PACKING (PACK)",
+          "no unresolved reconciliation (otherwise an accepted REJECTED receipt)",
+          "coordinated contract mode active for the order (W5-7)",
+          "a product whose barcode equals the payload barcode, on an order line",
+          "an allocation with enough remaining quantity",
+          "an allocation with 999999999999999.999 remaining"
+        ],
+        "digest_only_boundary": true,
+        "role": "positive",
+        "business_outcome": "NOT_IMPLIED: a valid digest is not an authorized or successful business operation",
+        "note": "Maximum representable quantity; a real allocation of this size is implausible."
+      }
+    },
+    {
+      "id": "undo-pick",
+      "description": "Previously calculated W5-0 positive vector (preserved).",
+      "input": {
+        "scope": {
+          "deployment": "3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f",
+          "actor": 7,
+          "order": 101
+        },
+        "payload": {
+          "operation": "UNDO_PICK",
+          "phase": "PICK",
+          "epoch": 3,
+          "allocation_id": 42,
+          "quantity": "0.001"
+        }
+      },
+      "canonical_json": "{\"payload\":{\"allocation_id\":42,\"epoch\":3,\"operation\":\"UNDO_PICK\",\"phase\":\"PICK\",\"quantity\":\"0.001\"},\"scope\":{\"actor\":7,\"deployment\":\"3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f\",\"order\":101}}",
+      "client_fingerprint": {
+        "algorithm": "client-fingerprint/1",
+        "value": "05da21628895dccf3926771fbe573ef547133fd4eeb688038251d5f6d7e9e6b8"
+      },
+      "business_fingerprint": {
+        "algorithm": "business-fingerprint/attempt/1",
+        "value": "1bca13a9043ab731240187482a28088fd0f43d7ac4bd4d2b8228d5e38257a116",
+        "basis": "COPY of app/services/fulfillment_integrity_service.py attempt_fingerprint() + app/core/quantity.py quantity_text()"
+      },
+      "provenance": {
+        "computed": "2026-10-26, W5-0 read-only design (scratchpad w50/vectors.mjs + vectors_check.py); recomputed and cross-checked in this build",
+        "method": "EXECUTED_AGAINST_COPIED_ALGORITHMS",
+        "independent": false
+      },
+      "verification": {
+        "repository_client_digest": "PENDING (W5-2: import frontend/src/lib/fulfillment/attempt.ts digest() in Vitest)",
+        "repository_business_fingerprint": "PENDING (W5-2: call the repository function in pytest)",
+        "codex_independent_recomputation": "PENDING (post-implementation audit)"
+      },
+      "classification": {
+        "canonical_digest_valid": true,
+        "request_schema_valid": true,
+        "business_prerequisites": [
+          "valid current claim token, epoch and holder for the order",
+          "order status PICKING (PICK) or PACKING (PACK)",
+          "no unresolved reconciliation (otherwise an accepted REJECTED receipt)",
+          "coordinated contract mode active for the order (W5-7)",
+          "the allocation exists on the order",
+          "the counter can be reduced by the quantity within bounds"
+        ],
+        "digest_only_boundary": false,
+        "role": "positive",
+        "business_outcome": "NOT_IMPLIED: a valid digest is not an authorized or successful business operation"
+      }
+    },
+    {
+      "id": "barcode-escapes",
+      "description": "Previously calculated W5-0 positive vector (preserved).",
+      "input": {
+        "scope": {
+          "deployment": "3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f",
+          "actor": 7,
+          "order": 101
+        },
+        "payload": {
+          "operation": "SCAN_PICK",
+          "phase": "PICK",
+          "epoch": 3,
+          "barcode": "A\"B\\C/D",
+          "quantity": "1.000"
+        }
+      },
+      "canonical_json": "{\"payload\":{\"barcode\":\"A\\\"B\\\\C/D\",\"epoch\":3,\"operation\":\"SCAN_PICK\",\"phase\":\"PICK\",\"quantity\":\"1.000\"},\"scope\":{\"actor\":7,\"deployment\":\"3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f\",\"order\":101}}",
+      "client_fingerprint": {
+        "algorithm": "client-fingerprint/1",
+        "value": "c30e5fa474d8ac4da31684bd061906f393968dd6935b91557bfafdac902cc919"
+      },
+      "business_fingerprint": {
+        "algorithm": "business-fingerprint/attempt/1",
+        "value": "9afba2b29d50a2eb857865b87b1a59ae714de5b1bd3cc771355a19ae26a782d7",
+        "basis": "COPY of app/services/fulfillment_integrity_service.py attempt_fingerprint() + app/core/quantity.py quantity_text()"
+      },
+      "provenance": {
+        "computed": "2026-10-26, W5-0 read-only design (scratchpad w50/vectors.mjs + vectors_check.py); recomputed and cross-checked in this build",
+        "method": "EXECUTED_AGAINST_COPIED_ALGORITHMS",
+        "independent": false
+      },
+      "verification": {
+        "repository_client_digest": "PENDING (W5-2: import frontend/src/lib/fulfillment/attempt.ts digest() in Vitest)",
+        "repository_business_fingerprint": "PENDING (W5-2: call the repository function in pytest)",
+        "codex_independent_recomputation": "PENDING (post-implementation audit)"
+      },
+      "classification": {
+        "canonical_digest_valid": true,
+        "request_schema_valid": true,
+        "business_prerequisites": [
+          "valid current claim token, epoch and holder for the order",
+          "order status PICKING (PICK) or PACKING (PACK)",
+          "no unresolved reconciliation (otherwise an accepted REJECTED receipt)",
+          "coordinated contract mode active for the order (W5-7)",
+          "a product whose barcode equals the payload barcode, on an order line",
+          "an allocation with enough remaining quantity"
+        ],
+        "digest_only_boundary": false,
+        "role": "positive",
+        "business_outcome": "NOT_IMPLIED: a valid digest is not an authorized or successful business operation",
+        "note": "Exercises JSON string escaping; charset acceptability is subject to D-14."
+      }
+    },
+    {
+      "id": "lifecycle-acquire",
+      "description": "Previously calculated W5-0 positive vector (preserved).",
+      "input": {
+        "scope": {
+          "deployment": "3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f",
+          "actor": 7,
+          "order": 101
+        },
+        "payload": {
+          "kind": "ACQUIRE",
+          "phase": "PICK",
+          "expectedEpoch": 2,
+          "progressRevision": "0"
+        }
+      },
+      "canonical_json": "{\"payload\":{\"expectedEpoch\":2,\"kind\":\"ACQUIRE\",\"phase\":\"PICK\",\"progressRevision\":\"0\"},\"scope\":{\"actor\":7,\"deployment\":\"3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f\",\"order\":101}}",
+      "client_fingerprint": {
+        "algorithm": "client-fingerprint/1",
+        "value": "1321b598f2c96256112ee8453d852571abaf9fd033d38f253fffc046b31df6bb"
+      },
+      "business_fingerprint": {
+        "algorithm": "business-fingerprint/lifecycle/1 (PROPOSED)",
+        "value": "29bb613650870bce5a88db34e87de7707c5333656e1641ff56ba8bc36c242db2",
+        "basis": "PROPOSED algorithm defined by this draft; no repository implementation exists"
+      },
+      "provenance": {
+        "computed": "2026-10-26, W5-0 read-only design (scratchpad w50/vectors.mjs + vectors_check.py); recomputed and cross-checked in this build",
+        "method": "EXECUTED_AGAINST_COPIED_ALGORITHMS",
+        "independent": false
+      },
+      "verification": {
+        "repository_client_digest": "PENDING (W5-2: import frontend/src/lib/fulfillment/attempt.ts digest() in Vitest)",
+        "repository_business_fingerprint": "PENDING (W5-2: call the repository function in pytest)",
+        "codex_independent_recomputation": "PENDING (post-implementation audit)"
+      },
+      "classification": {
+        "canonical_digest_valid": true,
+        "request_schema_valid": true,
+        "business_prerequisites": [
+          "current epoch equals expectedEpoch",
+          "order status matches the phase",
+          "current progress revision equals progressRevision",
+          "no active claim holder"
+        ],
+        "digest_only_boundary": false,
+        "role": "positive",
+        "business_outcome": "NOT_IMPLIED: a valid digest is not an authorized or successful business operation",
+        "note": "Business fingerprint uses the PROPOSED lifecycle algorithm (no repository implementation)."
+      }
+    },
+    {
+      "id": "lifecycle-release-verified",
+      "description": "Previously calculated W5-0 positive vector (preserved).",
+      "input": {
+        "scope": {
+          "deployment": "3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f",
+          "actor": 7,
+          "order": 101
+        },
+        "payload": {
+          "kind": "RELEASE",
+          "mode": "VERIFIED",
+          "confirmed": true,
+          "phase": "PICK",
+          "expectedEpoch": 3,
+          "progressRevision": "17",
+          "counts": [
+            {
+              "allocation_id": 42,
+              "picked": "2.500",
+              "packed": "0.000"
+            }
+          ]
+        }
+      },
+      "canonical_json": "{\"payload\":{\"confirmed\":true,\"counts\":[{\"allocation_id\":42,\"packed\":\"0.000\",\"picked\":\"2.500\"}],\"expectedEpoch\":3,\"kind\":\"RELEASE\",\"mode\":\"VERIFIED\",\"phase\":\"PICK\",\"progressRevision\":\"17\"},\"scope\":{\"actor\":7,\"deployment\":\"3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f\",\"order\":101}}",
+      "client_fingerprint": {
+        "algorithm": "client-fingerprint/1",
+        "value": "55666b2393b6dcb9be1103ad615259c956cbdb676ae26beae2a14d516509d3e7"
+      },
+      "business_fingerprint": {
+        "algorithm": "business-fingerprint/lifecycle/1 (PROPOSED)",
+        "value": "06cba754e3e91489ec02055fb9129c38178a9230f7ef0b577b211d3a0acfe99c",
+        "basis": "PROPOSED algorithm defined by this draft; no repository implementation exists"
+      },
+      "provenance": {
+        "computed": "2026-10-26, W5-0 read-only design (scratchpad w50/vectors.mjs + vectors_check.py); recomputed and cross-checked in this build",
+        "method": "EXECUTED_AGAINST_COPIED_ALGORITHMS",
+        "independent": false
+      },
+      "verification": {
+        "repository_client_digest": "PENDING (W5-2: import frontend/src/lib/fulfillment/attempt.ts digest() in Vitest)",
+        "repository_business_fingerprint": "PENDING (W5-2: call the repository function in pytest)",
+        "codex_independent_recomputation": "PENDING (post-implementation audit)"
+      },
+      "classification": {
+        "canonical_digest_valid": true,
+        "request_schema_valid": true,
+        "business_prerequisites": [
+          "current epoch equals expectedEpoch",
+          "order status matches the phase",
+          "current progress revision equals progressRevision",
+          "valid current claim credential",
+          "attested counts equal the authoritative counters",
+          "no unresolved reconciliation"
+        ],
+        "digest_only_boundary": false,
+        "role": "positive",
+        "business_outcome": "NOT_IMPLIED: a valid digest is not an authorized or successful business operation",
+        "note": "Business fingerprint uses the PROPOSED lifecycle algorithm (no repository implementation)."
+      }
+    }
+  ],
+  "boundary_vectors": [
+    {
+      "id": "boundary-epoch-max",
+      "description": "Largest representable epoch (the service additionally refuses lifecycle transitions at it: FULFILLMENT_EPOCH_EXHAUSTED).",
+      "input": {
+        "scope": {
+          "deployment": "3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f",
+          "actor": 7,
+          "order": 101
+        },
+        "payload": {
+          "operation": "SCAN_PICK",
+          "phase": "PICK",
+          "epoch": 2147483647,
+          "barcode": "00012345",
+          "quantity": "1.000"
+        }
+      },
+      "canonical_json": "{\"payload\":{\"barcode\":\"00012345\",\"epoch\":2147483647,\"operation\":\"SCAN_PICK\",\"phase\":\"PICK\",\"quantity\":\"1.000\"},\"scope\":{\"actor\":7,\"deployment\":\"3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f\",\"order\":101}}",
+      "client_fingerprint": {
+        "algorithm": "client-fingerprint/1",
+        "value": "47e8b429000943f9cc41ee146633734d9291839f3676e1700aeaa0ec112e5088"
+      },
+      "business_fingerprint": {
+        "algorithm": "business-fingerprint/attempt/1",
+        "value": "5bd3cff50598faa204a6c66b780af5c5e1322c2d00bda70d6efd4dbbedc24ccb",
+        "basis": "COPY of app/services/fulfillment_integrity_service.py attempt_fingerprint() + app/core/quantity.py quantity_text()"
+      },
+      "provenance": {
+        "computed": "2026-10-26, W5-0 documentation implementation build (scratchpad w50/impl)",
+        "method": "EXECUTED_AGAINST_COPIED_ALGORITHMS",
+        "independent": false
+      },
+      "verification": {
+        "repository_client_digest": "PENDING (W5-2: import frontend/src/lib/fulfillment/attempt.ts digest() in Vitest)",
+        "repository_business_fingerprint": "PENDING (W5-2: call the repository function in pytest)",
+        "codex_independent_recomputation": "PENDING (post-implementation audit)"
+      },
+      "classification": {
+        "canonical_digest_valid": true,
+        "request_schema_valid": true,
+        "business_prerequisites": [
+          "valid current claim token, epoch and holder for the order",
+          "order status PICKING (PICK) or PACKING (PACK)",
+          "no unresolved reconciliation (otherwise an accepted REJECTED receipt)",
+          "coordinated contract mode active for the order (W5-7)",
+          "a product whose barcode equals the payload barcode, on an order line",
+          "an allocation with enough remaining quantity"
+        ],
+        "digest_only_boundary": true,
+        "role": "boundary",
+        "business_outcome": "NOT_IMPLIED: a valid digest is not an authorized or successful business operation",
+        "note": "Reachable: _check_epoch refuses only when expected_epoch >= 2147483647, so a checked transition from 2147483646 advances the claim epoch to 2147483647. Any further checked lifecycle advancement (acquire, takeover, release, complete) at 2147483647 is refused with FULFILLMENT_EPOCH_EXHAUSTED. Classified digest-only because reaching the maximum is practically implausible."
+      }
+    },
+    {
+      "id": "boundary-epoch-zero",
+      "description": "Epoch 0 (never-claimed orders).",
+      "input": {
+        "scope": {
+          "deployment": "3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f",
+          "actor": 7,
+          "order": 101
+        },
+        "payload": {
+          "operation": "SCAN_PICK",
+          "phase": "PICK",
+          "epoch": 0,
+          "barcode": "00012345",
+          "quantity": "1.000"
+        }
+      },
+      "canonical_json": "{\"payload\":{\"barcode\":\"00012345\",\"epoch\":0,\"operation\":\"SCAN_PICK\",\"phase\":\"PICK\",\"quantity\":\"1.000\"},\"scope\":{\"actor\":7,\"deployment\":\"3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f\",\"order\":101}}",
+      "client_fingerprint": {
+        "algorithm": "client-fingerprint/1",
+        "value": "f67bb306198ec6701ed55092b264180e0f2ee5090ae53e6b44f0b37754be4974"
+      },
+      "business_fingerprint": {
+        "algorithm": "business-fingerprint/attempt/1",
+        "value": "f64750cb1e14159a1ed67f5918aad1d333c474e78822755cc31a6302fa89bde5",
+        "basis": "COPY of app/services/fulfillment_integrity_service.py attempt_fingerprint() + app/core/quantity.py quantity_text()"
+      },
+      "provenance": {
+        "computed": "2026-10-26, W5-0 documentation implementation build (scratchpad w50/impl)",
+        "method": "EXECUTED_AGAINST_COPIED_ALGORITHMS",
+        "independent": false
+      },
+      "verification": {
+        "repository_client_digest": "PENDING (W5-2: import frontend/src/lib/fulfillment/attempt.ts digest() in Vitest)",
+        "repository_business_fingerprint": "PENDING (W5-2: call the repository function in pytest)",
+        "codex_independent_recomputation": "PENDING (post-implementation audit)"
+      },
+      "classification": {
+        "canonical_digest_valid": true,
+        "request_schema_valid": true,
+        "business_prerequisites": [
+          "valid current claim token, epoch and holder for the order",
+          "order status PICKING (PICK) or PACKING (PACK)",
+          "no unresolved reconciliation (otherwise an accepted REJECTED receipt)",
+          "coordinated contract mode active for the order (W5-7)",
+          "a product whose barcode equals the payload barcode, on an order line",
+          "an allocation with enough remaining quantity"
+        ],
+        "digest_only_boundary": true,
+        "role": "boundary",
+        "business_outcome": "NOT_IMPLIED: a valid digest is not an authorized or successful business operation",
+        "note": "No claim exists at epoch 0 (the first acquire produces epoch 1), so this can never authorize an effect; digest-only."
+      }
+    },
+    {
+      "id": "boundary-quantity-min",
+      "description": "Smallest positive scan quantity.",
+      "input": {
+        "scope": {
+          "deployment": "3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f",
+          "actor": 7,
+          "order": 101
+        },
+        "payload": {
+          "operation": "SCAN_PICK",
+          "phase": "PICK",
+          "epoch": 3,
+          "barcode": "00012345",
+          "quantity": "0.001"
+        }
+      },
+      "canonical_json": "{\"payload\":{\"barcode\":\"00012345\",\"epoch\":3,\"operation\":\"SCAN_PICK\",\"phase\":\"PICK\",\"quantity\":\"0.001\"},\"scope\":{\"actor\":7,\"deployment\":\"3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f\",\"order\":101}}",
+      "client_fingerprint": {
+        "algorithm": "client-fingerprint/1",
+        "value": "c9d012967ec48f6b5aea39278b52793db8180532e772ef17a8ddcd485dde0b14"
+      },
+      "business_fingerprint": {
+        "algorithm": "business-fingerprint/attempt/1",
+        "value": "03d1c9d807901437f95c35c8ad6a3838df7b1794a320d478d9ee69c4fb510a1b",
+        "basis": "COPY of app/services/fulfillment_integrity_service.py attempt_fingerprint() + app/core/quantity.py quantity_text()"
+      },
+      "provenance": {
+        "computed": "2026-10-26, W5-0 documentation implementation build (scratchpad w50/impl)",
+        "method": "EXECUTED_AGAINST_COPIED_ALGORITHMS",
+        "independent": false
+      },
+      "verification": {
+        "repository_client_digest": "PENDING (W5-2: import frontend/src/lib/fulfillment/attempt.ts digest() in Vitest)",
+        "repository_business_fingerprint": "PENDING (W5-2: call the repository function in pytest)",
+        "codex_independent_recomputation": "PENDING (post-implementation audit)"
+      },
+      "classification": {
+        "canonical_digest_valid": true,
+        "request_schema_valid": true,
+        "business_prerequisites": [
+          "valid current claim token, epoch and holder for the order",
+          "order status PICKING (PICK) or PACKING (PACK)",
+          "no unresolved reconciliation (otherwise an accepted REJECTED receipt)",
+          "coordinated contract mode active for the order (W5-7)",
+          "a product whose barcode equals the payload barcode, on an order line",
+          "an allocation with enough remaining quantity"
+        ],
+        "digest_only_boundary": false,
+        "role": "boundary",
+        "business_outcome": "NOT_IMPLIED: a valid digest is not an authorized or successful business operation"
+      }
+    },
+    {
+      "id": "boundary-allocation-max",
+      "description": "Largest allocation id.",
+      "input": {
+        "scope": {
+          "deployment": "3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f",
+          "actor": 7,
+          "order": 101
+        },
+        "payload": {
+          "operation": "SCAN_PICK",
+          "phase": "PICK",
+          "epoch": 3,
+          "barcode": "00012345",
+          "quantity": "1.000",
+          "allocation_id": 2147483647
+        }
+      },
+      "canonical_json": "{\"payload\":{\"allocation_id\":2147483647,\"barcode\":\"00012345\",\"epoch\":3,\"operation\":\"SCAN_PICK\",\"phase\":\"PICK\",\"quantity\":\"1.000\"},\"scope\":{\"actor\":7,\"deployment\":\"3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f\",\"order\":101}}",
+      "client_fingerprint": {
+        "algorithm": "client-fingerprint/1",
+        "value": "8019d789e0131bf9f393da92d3fb8b4e0d8d4f8b75fa05007443853c8068cafc"
+      },
+      "business_fingerprint": {
+        "algorithm": "business-fingerprint/attempt/1",
+        "value": "bdbcf72d1089cc96a0e228677b69dcf5af449a9b88935e2a0ff664e380d93592",
+        "basis": "COPY of app/services/fulfillment_integrity_service.py attempt_fingerprint() + app/core/quantity.py quantity_text()"
+      },
+      "provenance": {
+        "computed": "2026-10-26, W5-0 documentation implementation build (scratchpad w50/impl)",
+        "method": "EXECUTED_AGAINST_COPIED_ALGORITHMS",
+        "independent": false
+      },
+      "verification": {
+        "repository_client_digest": "PENDING (W5-2: import frontend/src/lib/fulfillment/attempt.ts digest() in Vitest)",
+        "repository_business_fingerprint": "PENDING (W5-2: call the repository function in pytest)",
+        "codex_independent_recomputation": "PENDING (post-implementation audit)"
+      },
+      "classification": {
+        "canonical_digest_valid": true,
+        "request_schema_valid": true,
+        "business_prerequisites": [
+          "valid current claim token, epoch and holder for the order",
+          "order status PICKING (PICK) or PACKING (PACK)",
+          "no unresolved reconciliation (otherwise an accepted REJECTED receipt)",
+          "coordinated contract mode active for the order (W5-7)",
+          "a product whose barcode equals the payload barcode, on an order line",
+          "an allocation with enough remaining quantity",
+          "an allocation with id 2147483647"
+        ],
+        "digest_only_boundary": true,
+        "role": "boundary",
+        "business_outcome": "NOT_IMPLIED: a valid digest is not an authorized or successful business operation",
+        "note": "Identifier at the integer bound; digest-only in practice."
+      }
+    },
+    {
+      "id": "boundary-barcode-single-char",
+      "description": "One-character barcode, a leading zero.",
+      "input": {
+        "scope": {
+          "deployment": "3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f",
+          "actor": 7,
+          "order": 101
+        },
+        "payload": {
+          "operation": "SCAN_PICK",
+          "phase": "PICK",
+          "epoch": 3,
+          "barcode": "0",
+          "quantity": "1.000"
+        }
+      },
+      "canonical_json": "{\"payload\":{\"barcode\":\"0\",\"epoch\":3,\"operation\":\"SCAN_PICK\",\"phase\":\"PICK\",\"quantity\":\"1.000\"},\"scope\":{\"actor\":7,\"deployment\":\"3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f\",\"order\":101}}",
+      "client_fingerprint": {
+        "algorithm": "client-fingerprint/1",
+        "value": "3820cd2ba8537892393a149f104a9a9ace588e585019eea8ea60b5beeb0ca601"
+      },
+      "business_fingerprint": {
+        "algorithm": "business-fingerprint/attempt/1",
+        "value": "1641ccb582dd9773125256012f80ce401b2aa8cac91cc14b592540960102f5b0",
+        "basis": "COPY of app/services/fulfillment_integrity_service.py attempt_fingerprint() + app/core/quantity.py quantity_text()"
+      },
+      "provenance": {
+        "computed": "2026-10-26, W5-0 documentation implementation build (scratchpad w50/impl)",
+        "method": "EXECUTED_AGAINST_COPIED_ALGORITHMS",
+        "independent": false
+      },
+      "verification": {
+        "repository_client_digest": "PENDING (W5-2: import frontend/src/lib/fulfillment/attempt.ts digest() in Vitest)",
+        "repository_business_fingerprint": "PENDING (W5-2: call the repository function in pytest)",
+        "codex_independent_recomputation": "PENDING (post-implementation audit)"
+      },
+      "classification": {
+        "canonical_digest_valid": true,
+        "request_schema_valid": true,
+        "business_prerequisites": [
+          "valid current claim token, epoch and holder for the order",
+          "order status PICKING (PICK) or PACKING (PACK)",
+          "no unresolved reconciliation (otherwise an accepted REJECTED receipt)",
+          "coordinated contract mode active for the order (W5-7)",
+          "a product whose barcode equals the payload barcode, on an order line",
+          "an allocation with enough remaining quantity"
+        ],
+        "digest_only_boundary": false,
+        "role": "boundary",
+        "business_outcome": "NOT_IMPLIED: a valid digest is not an authorized or successful business operation"
+      }
+    },
+    {
+      "id": "boundary-barcode-100-ascii",
+      "description": "100 characters: valid under both the client (200) and backend (100) limits.",
+      "input": {
+        "scope": {
+          "deployment": "3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f",
+          "actor": 7,
+          "order": 101
+        },
+        "payload": {
+          "operation": "SCAN_PICK",
+          "phase": "PICK",
+          "epoch": 3,
+          "barcode": "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+          "quantity": "1.000"
+        }
+      },
+      "canonical_json": "{\"payload\":{\"barcode\":\"0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\",\"epoch\":3,\"operation\":\"SCAN_PICK\",\"phase\":\"PICK\",\"quantity\":\"1.000\"},\"scope\":{\"actor\":7,\"deployment\":\"3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f\",\"order\":101}}",
+      "client_fingerprint": {
+        "algorithm": "client-fingerprint/1",
+        "value": "e1a4b0594ed65cc5e6d7e04ec6a87e79248d5008e242b6a9d586539dfbb02019"
+      },
+      "business_fingerprint": {
+        "algorithm": "business-fingerprint/attempt/1",
+        "value": "fe0f02de50ad8d7062904f703629bdfb2ebdbabe68ebcba4baad5eca2d1fa800",
+        "basis": "COPY of app/services/fulfillment_integrity_service.py attempt_fingerprint() + app/core/quantity.py quantity_text()"
+      },
+      "provenance": {
+        "computed": "2026-10-26, W5-0 documentation implementation build (scratchpad w50/impl)",
+        "method": "EXECUTED_AGAINST_COPIED_ALGORITHMS",
+        "independent": false
+      },
+      "verification": {
+        "repository_client_digest": "PENDING (W5-2: import frontend/src/lib/fulfillment/attempt.ts digest() in Vitest)",
+        "repository_business_fingerprint": "PENDING (W5-2: call the repository function in pytest)",
+        "codex_independent_recomputation": "PENDING (post-implementation audit)"
+      },
+      "classification": {
+        "canonical_digest_valid": true,
+        "request_schema_valid": true,
+        "business_prerequisites": [
+          "valid current claim token, epoch and holder for the order",
+          "order status PICKING (PICK) or PACKING (PACK)",
+          "no unresolved reconciliation (otherwise an accepted REJECTED receipt)",
+          "coordinated contract mode active for the order (W5-7)",
+          "a product whose barcode equals the payload barcode, on an order line",
+          "an allocation with enough remaining quantity"
+        ],
+        "digest_only_boundary": false,
+        "role": "boundary",
+        "business_outcome": "NOT_IMPLIED: a valid digest is not an authorized or successful business operation",
+        "note": "Valid under both the client (200) and backend (100) limits; D-14 does not affect it."
+      }
+    }
+  ],
+  "conflict_set": {
+    "key": "8c0e4a1b-2f3d-4c5e-9a7b-1d2e3f4a5b6c",
+    "expected_for_each_variant": {
+      "result": "PAYLOAD_CONFLICT",
+      "http_status": 409,
+      "effect": "NONE",
+      "original_receipt": "UNCHANGED",
+      "client": "remains blocked; no replacement key"
+    },
+    "phase_only_change": "Not a conflict vector: phase cannot change without the operation (see neg-operation-phase-mismatch).",
+    "vectors": [
+      {
+        "id": "conflict-base",
+        "description": "Base payload for the same-key conflict set (key 8c0e4a1b-2f3d-4c5e-9a7b-1d2e3f4a5b6c).",
+        "input": {
+          "scope": {
+            "deployment": "3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f",
+            "actor": 7,
+            "order": 101
+          },
+          "payload": {
+            "operation": "SCAN_PICK",
+            "phase": "PICK",
+            "epoch": 3,
+            "barcode": "00012345",
+            "quantity": "1.000"
+          }
+        },
+        "canonical_json": "{\"payload\":{\"barcode\":\"00012345\",\"epoch\":3,\"operation\":\"SCAN_PICK\",\"phase\":\"PICK\",\"quantity\":\"1.000\"},\"scope\":{\"actor\":7,\"deployment\":\"3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f\",\"order\":101}}",
+        "client_fingerprint": {
+          "algorithm": "client-fingerprint/1",
+          "value": "4b18b7930843373846bae89cd8a9246d1c6469a038b845329ec89ffa9ebf9a33"
+        },
+        "business_fingerprint": {
+          "algorithm": "business-fingerprint/attempt/1",
+          "value": "01645dd7a989dd526b95c238f3b81efa79c85aa851d0a906027de722e8f895fa",
+          "basis": "COPY of app/services/fulfillment_integrity_service.py attempt_fingerprint() + app/core/quantity.py quantity_text()"
+        },
+        "provenance": {
+          "computed": "2026-10-26, W5-0 documentation implementation build (scratchpad w50/impl)",
+          "method": "EXECUTED_AGAINST_COPIED_ALGORITHMS",
+          "independent": false
+        },
+        "verification": {
+          "repository_client_digest": "PENDING (W5-2: import frontend/src/lib/fulfillment/attempt.ts digest() in Vitest)",
+          "repository_business_fingerprint": "PENDING (W5-2: call the repository function in pytest)",
+          "codex_independent_recomputation": "PENDING (post-implementation audit)"
+        },
+        "classification": {
+          "canonical_digest_valid": true,
+          "request_schema_valid": true,
+          "business_prerequisites": [
+            "valid current claim token, epoch and holder for the order",
+            "order status PICKING (PICK) or PACKING (PACK)",
+            "no unresolved reconciliation (otherwise an accepted REJECTED receipt)",
+            "coordinated contract mode active for the order (W5-7)",
+            "a product whose barcode equals the payload barcode, on an order line",
+            "an allocation with enough remaining quantity"
+          ],
+          "digest_only_boundary": false,
+          "role": "conflict_baseline",
+          "business_outcome": "NOT_IMPLIED: a valid digest is not an authorized or successful business operation",
+          "note": "Baseline submitted first with the conflict-set key; identical input to scan-pick-leading-zeros."
+        }
+      },
+      {
+        "id": "conflict-quantity",
+        "description": "Same key, quantity changed.",
+        "input": {
+          "scope": {
+            "deployment": "3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f",
+            "actor": 7,
+            "order": 101
+          },
+          "payload": {
+            "operation": "SCAN_PICK",
+            "phase": "PICK",
+            "epoch": 3,
+            "barcode": "00012345",
+            "quantity": "2.000"
+          }
+        },
+        "canonical_json": "{\"payload\":{\"barcode\":\"00012345\",\"epoch\":3,\"operation\":\"SCAN_PICK\",\"phase\":\"PICK\",\"quantity\":\"2.000\"},\"scope\":{\"actor\":7,\"deployment\":\"3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f\",\"order\":101}}",
+        "client_fingerprint": {
+          "algorithm": "client-fingerprint/1",
+          "value": "3c25e56f49274bcd2cd6db6b12c7e39c43098f51c9d3e39c58b617e5e0e58a41"
+        },
+        "business_fingerprint": {
+          "algorithm": "business-fingerprint/attempt/1",
+          "value": "c072a84afe0f5fca8964b05f507856c0def54d040ed31c825793e4b8e0a48cd7",
+          "basis": "COPY of app/services/fulfillment_integrity_service.py attempt_fingerprint() + app/core/quantity.py quantity_text()"
+        },
+        "provenance": {
+          "computed": "2026-10-26, W5-0 documentation implementation build (scratchpad w50/impl)",
+          "method": "EXECUTED_AGAINST_COPIED_ALGORITHMS",
+          "independent": false
+        },
+        "verification": {
+          "repository_client_digest": "PENDING (W5-2: import frontend/src/lib/fulfillment/attempt.ts digest() in Vitest)",
+          "repository_business_fingerprint": "PENDING (W5-2: call the repository function in pytest)",
+          "codex_independent_recomputation": "PENDING (post-implementation audit)"
+        },
+        "classification": {
+          "canonical_digest_valid": true,
+          "request_schema_valid": true,
+          "business_prerequisites": [
+            "the conflict-set key already has a recorded receipt for conflict-base"
+          ],
+          "digest_only_boundary": false,
+          "role": "conflict_variant",
+          "business_outcome": "NOT_IMPLIED: a valid digest is not an authorized or successful business operation",
+          "note": "Expected PAYLOAD_CONFLICT when submitted with the same key after the baseline; never applied."
+        }
+      },
+      {
+        "id": "conflict-barcode",
+        "description": "Same key, barcode changed (leading zeros removed).",
+        "input": {
+          "scope": {
+            "deployment": "3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f",
+            "actor": 7,
+            "order": 101
+          },
+          "payload": {
+            "operation": "SCAN_PICK",
+            "phase": "PICK",
+            "epoch": 3,
+            "barcode": "12345",
+            "quantity": "1.000"
+          }
+        },
+        "canonical_json": "{\"payload\":{\"barcode\":\"12345\",\"epoch\":3,\"operation\":\"SCAN_PICK\",\"phase\":\"PICK\",\"quantity\":\"1.000\"},\"scope\":{\"actor\":7,\"deployment\":\"3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f\",\"order\":101}}",
+        "client_fingerprint": {
+          "algorithm": "client-fingerprint/1",
+          "value": "b011fc421b0cd8589a55fdc6504e60df990af750f1245dba09bf1d018305b81e"
+        },
+        "business_fingerprint": {
+          "algorithm": "business-fingerprint/attempt/1",
+          "value": "a35a3acd6ab0391fdda87a838bf395a82bbf7a4508dd2a74a819ed8925b0cac5",
+          "basis": "COPY of app/services/fulfillment_integrity_service.py attempt_fingerprint() + app/core/quantity.py quantity_text()"
+        },
+        "provenance": {
+          "computed": "2026-10-26, W5-0 documentation implementation build (scratchpad w50/impl)",
+          "method": "EXECUTED_AGAINST_COPIED_ALGORITHMS",
+          "independent": false
+        },
+        "verification": {
+          "repository_client_digest": "PENDING (W5-2: import frontend/src/lib/fulfillment/attempt.ts digest() in Vitest)",
+          "repository_business_fingerprint": "PENDING (W5-2: call the repository function in pytest)",
+          "codex_independent_recomputation": "PENDING (post-implementation audit)"
+        },
+        "classification": {
+          "canonical_digest_valid": true,
+          "request_schema_valid": true,
+          "business_prerequisites": [
+            "the conflict-set key already has a recorded receipt for conflict-base"
+          ],
+          "digest_only_boundary": false,
+          "role": "conflict_variant",
+          "business_outcome": "NOT_IMPLIED: a valid digest is not an authorized or successful business operation",
+          "note": "Expected PAYLOAD_CONFLICT when submitted with the same key after the baseline; never applied."
+        }
+      },
+      {
+        "id": "conflict-allocation-presence",
+        "description": "Same key, allocation supplied instead of omitted.",
+        "input": {
+          "scope": {
+            "deployment": "3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f",
+            "actor": 7,
+            "order": 101
+          },
+          "payload": {
+            "operation": "SCAN_PICK",
+            "phase": "PICK",
+            "epoch": 3,
+            "barcode": "00012345",
+            "quantity": "1.000",
+            "allocation_id": 42
+          }
+        },
+        "canonical_json": "{\"payload\":{\"allocation_id\":42,\"barcode\":\"00012345\",\"epoch\":3,\"operation\":\"SCAN_PICK\",\"phase\":\"PICK\",\"quantity\":\"1.000\"},\"scope\":{\"actor\":7,\"deployment\":\"3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f\",\"order\":101}}",
+        "client_fingerprint": {
+          "algorithm": "client-fingerprint/1",
+          "value": "baaeaf88cbaf497a9f24f7070f3f4d4f3e4f9c4289ade3b40ec701fac5089c7b"
+        },
+        "business_fingerprint": {
+          "algorithm": "business-fingerprint/attempt/1",
+          "value": "3d7bace3f0910bf79b573fc08357ed95035a587b589899aa75bd673f05a69ca8",
+          "basis": "COPY of app/services/fulfillment_integrity_service.py attempt_fingerprint() + app/core/quantity.py quantity_text()"
+        },
+        "provenance": {
+          "computed": "2026-10-26, W5-0 documentation implementation build (scratchpad w50/impl)",
+          "method": "EXECUTED_AGAINST_COPIED_ALGORITHMS",
+          "independent": false
+        },
+        "verification": {
+          "repository_client_digest": "PENDING (W5-2: import frontend/src/lib/fulfillment/attempt.ts digest() in Vitest)",
+          "repository_business_fingerprint": "PENDING (W5-2: call the repository function in pytest)",
+          "codex_independent_recomputation": "PENDING (post-implementation audit)"
+        },
+        "classification": {
+          "canonical_digest_valid": true,
+          "request_schema_valid": true,
+          "business_prerequisites": [
+            "the conflict-set key already has a recorded receipt for conflict-base"
+          ],
+          "digest_only_boundary": false,
+          "role": "conflict_variant",
+          "business_outcome": "NOT_IMPLIED: a valid digest is not an authorized or successful business operation",
+          "note": "Expected PAYLOAD_CONFLICT when submitted with the same key after the baseline; never applied."
+        }
+      },
+      {
+        "id": "conflict-operation",
+        "description": "Same key, operation changed (SCAN_PACK requires phase PACK).",
+        "input": {
+          "scope": {
+            "deployment": "3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f",
+            "actor": 7,
+            "order": 101
+          },
+          "payload": {
+            "operation": "SCAN_PACK",
+            "phase": "PACK",
+            "epoch": 3,
+            "barcode": "00012345",
+            "quantity": "1.000"
+          }
+        },
+        "canonical_json": "{\"payload\":{\"barcode\":\"00012345\",\"epoch\":3,\"operation\":\"SCAN_PACK\",\"phase\":\"PACK\",\"quantity\":\"1.000\"},\"scope\":{\"actor\":7,\"deployment\":\"3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f\",\"order\":101}}",
+        "client_fingerprint": {
+          "algorithm": "client-fingerprint/1",
+          "value": "f6229e1244de90292ac7f215faed8ffd170d7a6d469156b13c5aac40c0c2a95e"
+        },
+        "business_fingerprint": {
+          "algorithm": "business-fingerprint/attempt/1",
+          "value": "b611f286f617b78a0e2f6dd00baf724cc6fb7cbd441a11d64c878175f881360d",
+          "basis": "COPY of app/services/fulfillment_integrity_service.py attempt_fingerprint() + app/core/quantity.py quantity_text()"
+        },
+        "provenance": {
+          "computed": "2026-10-26, W5-0 documentation implementation build (scratchpad w50/impl)",
+          "method": "EXECUTED_AGAINST_COPIED_ALGORITHMS",
+          "independent": false
+        },
+        "verification": {
+          "repository_client_digest": "PENDING (W5-2: import frontend/src/lib/fulfillment/attempt.ts digest() in Vitest)",
+          "repository_business_fingerprint": "PENDING (W5-2: call the repository function in pytest)",
+          "codex_independent_recomputation": "PENDING (post-implementation audit)"
+        },
+        "classification": {
+          "canonical_digest_valid": true,
+          "request_schema_valid": true,
+          "business_prerequisites": [
+            "the conflict-set key already has a recorded receipt for conflict-base"
+          ],
+          "digest_only_boundary": false,
+          "role": "conflict_variant",
+          "business_outcome": "NOT_IMPLIED: a valid digest is not an authorized or successful business operation",
+          "note": "Expected PAYLOAD_CONFLICT when submitted with the same key after the baseline; never applied."
+        }
+      },
+      {
+        "id": "conflict-epoch",
+        "description": "Same key, claim epoch changed.",
+        "input": {
+          "scope": {
+            "deployment": "3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f",
+            "actor": 7,
+            "order": 101
+          },
+          "payload": {
+            "operation": "SCAN_PICK",
+            "phase": "PICK",
+            "epoch": 4,
+            "barcode": "00012345",
+            "quantity": "1.000"
+          }
+        },
+        "canonical_json": "{\"payload\":{\"barcode\":\"00012345\",\"epoch\":4,\"operation\":\"SCAN_PICK\",\"phase\":\"PICK\",\"quantity\":\"1.000\"},\"scope\":{\"actor\":7,\"deployment\":\"3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f\",\"order\":101}}",
+        "client_fingerprint": {
+          "algorithm": "client-fingerprint/1",
+          "value": "215de4accad42682d519e2052c4290ea1beda411505f4119395f6f8f02a34a66"
+        },
+        "business_fingerprint": {
+          "algorithm": "business-fingerprint/attempt/1",
+          "value": "6fa3e8490a27464c034338c69743761576fa1c0c433b5d9624fbdf49e649eef7",
+          "basis": "COPY of app/services/fulfillment_integrity_service.py attempt_fingerprint() + app/core/quantity.py quantity_text()"
+        },
+        "provenance": {
+          "computed": "2026-10-26, W5-0 documentation implementation build (scratchpad w50/impl)",
+          "method": "EXECUTED_AGAINST_COPIED_ALGORITHMS",
+          "independent": false
+        },
+        "verification": {
+          "repository_client_digest": "PENDING (W5-2: import frontend/src/lib/fulfillment/attempt.ts digest() in Vitest)",
+          "repository_business_fingerprint": "PENDING (W5-2: call the repository function in pytest)",
+          "codex_independent_recomputation": "PENDING (post-implementation audit)"
+        },
+        "classification": {
+          "canonical_digest_valid": true,
+          "request_schema_valid": true,
+          "business_prerequisites": [
+            "the conflict-set key already has a recorded receipt for conflict-base"
+          ],
+          "digest_only_boundary": false,
+          "role": "conflict_variant",
+          "business_outcome": "NOT_IMPLIED: a valid digest is not an authorized or successful business operation",
+          "note": "Expected PAYLOAD_CONFLICT when submitted with the same key after the baseline; never applied."
+        }
+      }
+    ],
+    "baseline_id": "conflict-base",
+    "variant_ids": [
+      "conflict-quantity",
+      "conflict-barcode",
+      "conflict-allocation-presence",
+      "conflict-operation",
+      "conflict-epoch"
+    ],
+    "expected_for_baseline": {
+      "result": "RECORDED_FIRST",
+      "note": "Submitted first; establishes the receipt the variants conflict with."
+    }
+  },
+  "negative_vectors": [
+    {
+      "id": "neg-null-allocation",
+      "field": "payload.allocation_id",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED",
+      "expected": {
+        "result": "REJECT",
+        "http_status": 422,
+        "error_code": "NULL_FORBIDDEN",
+        "effect": "NONE",
+        "receipt": "NONE"
+      },
+      "note": "null is forbidden in requests; optional fields are omitted.",
+      "invalid_input": {
+        "operation": "SCAN_PICK",
+        "phase": "PICK",
+        "epoch": 3,
+        "barcode": "00012345",
+        "quantity": "1.000",
+        "allocation_id": null
+      }
+    },
+    {
+      "id": "neg-undefined-barcode",
+      "field": "payload.barcode",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED",
+      "expected": {
+        "result": "REJECT_CLIENT_BEFORE_HASHING",
+        "effect": "NONE",
+        "receipt": "NONE"
+      },
+      "note": "JSON cannot represent undefined; the client adapter must reject it before hashing.",
+      "invalid_input_descriptor": {
+        "descriptor": "EXPLICIT_UNDEFINED",
+        "path": "payload.barcode",
+        "client_canonical_hazard": "canonical() would emit the bare word undefined (not JSON); see positive vector inputs for the omitted form"
+      }
+    },
+    {
+      "id": "neg-lone-surrogate-barcode",
+      "field": "payload.barcode",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED",
+      "expected": {
+        "result": "REJECT",
+        "http_status": 422,
+        "error_code": "INVALID_UNICODE",
+        "effect": "NONE",
+        "receipt": "NONE"
+      },
+      "note": "Valid JSON escape, but not a Unicode scalar value; Python cannot UTF-8 encode it (VERIFIED W5-0).",
+      "invalid_input_descriptor": {
+        "descriptor": "LONE_SURROGATE",
+        "path": "payload.barcode",
+        "json_text_value": "\"\\ud800\""
+      }
+    },
+    {
+      "id": "neg-quantity-number",
+      "field": "payload.quantity",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED",
+      "expected": {
+        "result": "REJECT",
+        "http_status": 422,
+        "error_code": "QUANTITY_TEXT_REQUIRED",
+        "effect": "NONE",
+        "receipt": "NONE"
+      },
+      "note": "Quantities are exact decimal text.",
+      "invalid_input": {
+        "operation": "SCAN_PICK",
+        "phase": "PICK",
+        "epoch": 3,
+        "barcode": "00012345",
+        "quantity": 1
+      }
+    },
+    {
+      "id": "neg-quantity-no-fraction",
+      "field": "payload.quantity",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED",
+      "expected": {
+        "result": "REJECT",
+        "http_status": 422,
+        "error_code": "NONCANONICAL_QUANTITY",
+        "effect": "NONE",
+        "receipt": "NONE"
+      },
+      "note": "Exactly three decimals required.",
+      "invalid_input": {
+        "operation": "SCAN_PICK",
+        "phase": "PICK",
+        "epoch": 3,
+        "barcode": "00012345",
+        "quantity": "1"
+      }
+    },
+    {
+      "id": "neg-quantity-one-decimal",
+      "field": "payload.quantity",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED",
+      "expected": {
+        "result": "REJECT",
+        "http_status": 422,
+        "error_code": "NONCANONICAL_QUANTITY",
+        "effect": "NONE",
+        "receipt": "NONE"
+      },
+      "note": "Exactly three decimals required.",
+      "invalid_input": {
+        "operation": "SCAN_PICK",
+        "phase": "PICK",
+        "epoch": 3,
+        "barcode": "00012345",
+        "quantity": "1.0"
+      }
+    },
+    {
+      "id": "neg-quantity-leading-zero",
+      "field": "payload.quantity",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED",
+      "expected": {
+        "result": "REJECT",
+        "http_status": 422,
+        "error_code": "NONCANONICAL_QUANTITY",
+        "effect": "NONE",
+        "receipt": "NONE"
+      },
+      "note": "No leading zeros.",
+      "invalid_input": {
+        "operation": "SCAN_PICK",
+        "phase": "PICK",
+        "epoch": 3,
+        "barcode": "00012345",
+        "quantity": "01.000"
+      }
+    },
+    {
+      "id": "neg-quantity-four-decimals",
+      "field": "payload.quantity",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED",
+      "expected": {
+        "result": "REJECT",
+        "http_status": 422,
+        "error_code": "NONCANONICAL_QUANTITY",
+        "effect": "NONE",
+        "receipt": "NONE"
+      },
+      "note": "More than three decimals.",
+      "invalid_input": {
+        "operation": "SCAN_PICK",
+        "phase": "PICK",
+        "epoch": 3,
+        "barcode": "00012345",
+        "quantity": "1.0001"
+      }
+    },
+    {
+      "id": "neg-quantity-whitespace",
+      "field": "payload.quantity",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED",
+      "expected": {
+        "result": "REJECT",
+        "http_status": 422,
+        "error_code": "NONCANONICAL_QUANTITY",
+        "effect": "NONE",
+        "receipt": "NONE"
+      },
+      "note": "No whitespace.",
+      "invalid_input": {
+        "operation": "SCAN_PICK",
+        "phase": "PICK",
+        "epoch": 3,
+        "barcode": "00012345",
+        "quantity": " 1.000"
+      }
+    },
+    {
+      "id": "neg-quantity-exponent",
+      "field": "payload.quantity",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED",
+      "expected": {
+        "result": "REJECT",
+        "http_status": 422,
+        "error_code": "NONCANONICAL_QUANTITY",
+        "effect": "NONE",
+        "receipt": "NONE"
+      },
+      "note": "No exponent form.",
+      "invalid_input": {
+        "operation": "SCAN_PICK",
+        "phase": "PICK",
+        "epoch": 3,
+        "barcode": "00012345",
+        "quantity": "1e0"
+      }
+    },
+    {
+      "id": "neg-quantity-zero-scan",
+      "field": "payload.quantity",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED",
+      "expected": {
+        "result": "REJECT",
+        "http_status": 422,
+        "error_code": "POSITIVE_QUANTITY_REQUIRED",
+        "effect": "NONE",
+        "receipt": "NONE"
+      },
+      "note": "Scan/undo quantities must be > 0.",
+      "invalid_input": {
+        "operation": "SCAN_PICK",
+        "phase": "PICK",
+        "epoch": 3,
+        "barcode": "00012345",
+        "quantity": "0.000"
+      }
+    },
+    {
+      "id": "neg-quantity-negative",
+      "field": "payload.quantity",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED",
+      "expected": {
+        "result": "REJECT",
+        "http_status": 422,
+        "error_code": "NONCANONICAL_QUANTITY",
+        "effect": "NONE",
+        "receipt": "NONE"
+      },
+      "note": "Negative quantities are not canonical.",
+      "invalid_input": {
+        "operation": "SCAN_PICK",
+        "phase": "PICK",
+        "epoch": 3,
+        "barcode": "00012345",
+        "quantity": "-1.000"
+      }
+    },
+    {
+      "id": "neg-quantity-overflow",
+      "field": "payload.quantity",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED",
+      "expected": {
+        "result": "REJECT",
+        "http_status": 422,
+        "error_code": "QUANTITY_OUT_OF_RANGE",
+        "effect": "NONE",
+        "receipt": "NONE"
+      },
+      "note": "Above 999999999999999.999.",
+      "invalid_input": {
+        "operation": "SCAN_PICK",
+        "phase": "PICK",
+        "epoch": 3,
+        "barcode": "00012345",
+        "quantity": "1000000000000000.000"
+      }
+    },
+    {
+      "id": "neg-epoch-negative",
+      "field": "payload.epoch",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED",
+      "expected": {
+        "result": "REJECT",
+        "http_status": 422,
+        "error_code": "INVALID_EPOCH",
+        "effect": "NONE",
+        "receipt": "NONE"
+      },
+      "note": "Epoch range 0..2147483647.",
+      "invalid_input": {
+        "operation": "SCAN_PICK",
+        "phase": "PICK",
+        "epoch": -1,
+        "barcode": "00012345",
+        "quantity": "1.000"
+      }
+    },
+    {
+      "id": "neg-epoch-overflow",
+      "field": "payload.epoch",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED",
+      "expected": {
+        "result": "REJECT",
+        "http_status": 422,
+        "error_code": "INVALID_EPOCH",
+        "effect": "NONE",
+        "receipt": "NONE"
+      },
+      "note": "Epoch range 0..2147483647.",
+      "invalid_input": {
+        "operation": "SCAN_PICK",
+        "phase": "PICK",
+        "epoch": 2147483648,
+        "barcode": "00012345",
+        "quantity": "1.000"
+      }
+    },
+    {
+      "id": "neg-epoch-string",
+      "field": "payload.epoch",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED",
+      "expected": {
+        "result": "REJECT",
+        "http_status": 422,
+        "error_code": "INVALID_EPOCH",
+        "effect": "NONE",
+        "receipt": "NONE"
+      },
+      "note": "Integers only.",
+      "invalid_input": {
+        "operation": "SCAN_PICK",
+        "phase": "PICK",
+        "epoch": "3",
+        "barcode": "00012345",
+        "quantity": "1.000"
+      }
+    },
+    {
+      "id": "neg-epoch-fraction",
+      "field": "payload.epoch",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED",
+      "invalid_input": {
+        "operation": "SCAN_PICK",
+        "phase": "PICK",
+        "epoch": 3.5,
+        "barcode": "00012345",
+        "quantity": "1.000"
+      },
+      "expected": {
+        "result": "REJECT",
+        "http_status": 422,
+        "error_code": "INVALID_EPOCH",
+        "effect": "NONE",
+        "receipt": "NONE"
+      },
+      "note": "A non-integer value is rejected (F-5)."
+    },
+    {
+      "id": "neg-allocation-zero",
+      "field": "payload.allocation_id",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED",
+      "expected": {
+        "result": "REJECT",
+        "http_status": 422,
+        "error_code": "INVALID_ALLOCATION",
+        "effect": "NONE",
+        "receipt": "NONE"
+      },
+      "note": "Range 1..2147483647.",
+      "invalid_input": {
+        "operation": "SCAN_PICK",
+        "phase": "PICK",
+        "epoch": 3,
+        "barcode": "00012345",
+        "quantity": "1.000",
+        "allocation_id": 0
+      }
+    },
+    {
+      "id": "neg-allocation-overflow",
+      "field": "payload.allocation_id",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED",
+      "expected": {
+        "result": "REJECT",
+        "http_status": 422,
+        "error_code": "INVALID_ALLOCATION",
+        "effect": "NONE",
+        "receipt": "NONE"
+      },
+      "note": "Range 1..2147483647.",
+      "invalid_input": {
+        "operation": "SCAN_PICK",
+        "phase": "PICK",
+        "epoch": 3,
+        "barcode": "00012345",
+        "quantity": "1.000",
+        "allocation_id": 2147483648
+      }
+    },
+    {
+      "id": "neg-allocation-string",
+      "field": "payload.allocation_id",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED",
+      "expected": {
+        "result": "REJECT",
+        "http_status": 422,
+        "error_code": "INVALID_ALLOCATION",
+        "effect": "NONE",
+        "receipt": "NONE"
+      },
+      "note": "Integers only.",
+      "invalid_input": {
+        "operation": "SCAN_PICK",
+        "phase": "PICK",
+        "epoch": 3,
+        "barcode": "00012345",
+        "quantity": "1.000",
+        "allocation_id": "42"
+      }
+    },
+    {
+      "id": "neg-allocation-boolean",
+      "field": "payload.allocation_id",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED",
+      "expected": {
+        "result": "REJECT",
+        "http_status": 422,
+        "error_code": "INVALID_ALLOCATION",
+        "effect": "NONE",
+        "receipt": "NONE"
+      },
+      "note": "Booleans are not integers.",
+      "invalid_input": {
+        "operation": "SCAN_PICK",
+        "phase": "PICK",
+        "epoch": 3,
+        "barcode": "00012345",
+        "quantity": "1.000",
+        "allocation_id": true
+      }
+    },
+    {
+      "id": "neg-unknown-field",
+      "field": "payload",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED",
+      "expected": {
+        "result": "REJECT",
+        "http_status": 422,
+        "error_code": "UNKNOWN_FIELD",
+        "effect": "NONE",
+        "receipt": "NONE"
+      },
+      "note": "Unknown fields are rejected.",
+      "invalid_input": {
+        "operation": "SCAN_PICK",
+        "phase": "PICK",
+        "epoch": 3,
+        "barcode": "00012345",
+        "quantity": "1.000",
+        "note": "x"
+      }
+    },
+    {
+      "id": "neg-operation-phase-mismatch",
+      "field": "payload.phase",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED",
+      "expected": {
+        "result": "REJECT",
+        "http_status": 422,
+        "error_code": "INVALID_OPERATION_PAYLOAD",
+        "effect": "NONE",
+        "receipt": "NONE"
+      },
+      "note": "SCAN_PICK requires phase PICK; a phase cannot change alone.",
+      "invalid_input": {
+        "operation": "SCAN_PICK",
+        "phase": "PACK",
+        "epoch": 3,
+        "barcode": "00012345",
+        "quantity": "1.000"
+      }
+    },
+    {
+      "id": "neg-undo-with-barcode",
+      "field": "payload.barcode",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED",
+      "expected": {
+        "result": "REJECT",
+        "http_status": 422,
+        "error_code": "INVALID_OPERATION_PAYLOAD",
+        "effect": "NONE",
+        "receipt": "NONE"
+      },
+      "note": "Undo carries no barcode.",
+      "invalid_input": {
+        "operation": "UNDO_PICK",
+        "phase": "PICK",
+        "epoch": 3,
+        "barcode": "00012345",
+        "allocation_id": 42,
+        "quantity": "1.000"
+      }
+    },
+    {
+      "id": "neg-undo-without-allocation",
+      "field": "payload.allocation_id",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED",
+      "expected": {
+        "result": "REJECT",
+        "http_status": 422,
+        "error_code": "INVALID_OPERATION_PAYLOAD",
+        "effect": "NONE",
+        "receipt": "NONE"
+      },
+      "note": "Undo requires allocation_id.",
+      "invalid_input": {
+        "operation": "UNDO_PICK",
+        "phase": "PICK",
+        "epoch": 3,
+        "quantity": "1.000"
+      }
+    },
+    {
+      "id": "neg-scan-without-barcode",
+      "field": "payload.barcode",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED",
+      "expected": {
+        "result": "REJECT",
+        "http_status": 422,
+        "error_code": "INVALID_OPERATION_PAYLOAD",
+        "effect": "NONE",
+        "receipt": "NONE"
+      },
+      "note": "Scan requires a barcode.",
+      "invalid_input": {
+        "operation": "SCAN_PICK",
+        "phase": "PICK",
+        "epoch": 3,
+        "quantity": "1.000"
+      }
+    },
+    {
+      "id": "neg-barcode-empty",
+      "field": "payload.barcode",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED",
+      "expected": {
+        "result": "REJECT",
+        "http_status": 422,
+        "error_code": "INVALID_BARCODE",
+        "effect": "NONE",
+        "receipt": "NONE"
+      },
+      "note": "Minimum length 1.",
+      "invalid_input": {
+        "operation": "SCAN_PICK",
+        "phase": "PICK",
+        "epoch": 3,
+        "barcode": "",
+        "quantity": "1.000"
+      }
+    },
+    {
+      "id": "neg-key-uppercase",
+      "field": "key",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED",
+      "expected": {
+        "result": "REJECT",
+        "http_status": 422,
+        "error_code": "INVALID_KEY",
+        "effect": "NONE",
+        "receipt": "NONE"
+      },
+      "note": "Lowercase canonical UUID only.",
+      "invalid_input": "8C0E4A1B-2F3D-4C5E-9A7B-1D2E3F4A5B6C"
+    },
+    {
+      "id": "neg-key-braced",
+      "field": "key",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED",
+      "expected": {
+        "result": "REJECT",
+        "http_status": 422,
+        "error_code": "INVALID_KEY",
+        "effect": "NONE",
+        "receipt": "NONE"
+      },
+      "note": "No braces.",
+      "invalid_input": "{8c0e4a1b-2f3d-4c5e-9a7b-1d2e3f4a5b6c}"
+    },
+    {
+      "id": "neg-key-not-v4",
+      "field": "key",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED",
+      "expected": {
+        "result": "REJECT",
+        "http_status": 422,
+        "error_code": "INVALID_KEY",
+        "effect": "NONE",
+        "receipt": "NONE"
+      },
+      "note": "Version nibble must be 4.",
+      "invalid_input": "8c0e4a1b-2f3d-1c5e-9a7b-1d2e3f4a5b6c"
+    },
+    {
+      "id": "neg-key-not-uuid",
+      "field": "key",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED",
+      "expected": {
+        "result": "REJECT",
+        "http_status": 422,
+        "error_code": "INVALID_KEY",
+        "effect": "NONE",
+        "receipt": "NONE"
+      },
+      "note": "UUIDv4 required on coordinated routes.",
+      "invalid_input": "scan-1"
+    },
+    {
+      "id": "neg-key-bad-variant",
+      "field": "key",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED",
+      "expected": {
+        "result": "REJECT",
+        "http_status": 422,
+        "error_code": "INVALID_KEY",
+        "effect": "NONE",
+        "receipt": "NONE"
+      },
+      "note": "RFC 4122 variant (8, 9, a or b) required.",
+      "invalid_input": "8c0e4a1b-2f3d-4c5e-7a7b-1d2e3f4a5b6c"
+    }
+  ],
+  "d14_pending_vectors": [
+    {
+      "id": "d14-barcode-101-ascii",
+      "field": "payload.barcode",
+      "invalid_input": {
+        "operation": "SCAN_PICK",
+        "phase": "PICK",
+        "epoch": 3,
+        "barcode": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "quantity": "1.000"
+      },
+      "status": "PENDING_D14_UNRESOLVED",
+      "expected": {
+        "result": "UNDECIDED",
+        "depends_on": "D-14"
+      },
+      "note": "Accepted by the client (max 200), rejected by backend FulfillmentScan (max_length 100)."
+    },
+    {
+      "id": "d14-barcode-200-ascii",
+      "field": "payload.barcode",
+      "invalid_input": {
+        "operation": "SCAN_PICK",
+        "phase": "PICK",
+        "epoch": 3,
+        "barcode": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "quantity": "1.000"
+      },
+      "status": "PENDING_D14_UNRESOLVED",
+      "expected": {
+        "result": "UNDECIDED",
+        "depends_on": "D-14"
+      },
+      "note": "Client maximum; above products.barcode String(100)."
+    },
+    {
+      "id": "d14-barcode-thai",
+      "field": "payload.barcode",
+      "invalid_input": {
+        "operation": "SCAN_PICK",
+        "phase": "PICK",
+        "epoch": 3,
+        "barcode": "\u0e01123",
+        "quantity": "1.000"
+      },
+      "status": "PENDING_D14_UNRESOLVED",
+      "expected": {
+        "result": "UNDECIDED",
+        "depends_on": "D-14"
+      },
+      "note": "Non-ASCII BMP characters; charset policy unresolved."
+    },
+    {
+      "id": "d14-barcode-astral",
+      "field": "payload.barcode",
+      "invalid_input": {
+        "operation": "SCAN_PICK",
+        "phase": "PICK",
+        "epoch": 3,
+        "barcode": "\ud83d\ude00",
+        "quantity": "1.000"
+      },
+      "status": "PENDING_D14_UNRESOLVED",
+      "expected": {
+        "result": "UNDECIDED",
+        "depends_on": "D-14"
+      },
+      "note": "Astral character: 2 UTF-16 code units (JavaScript length) vs 1 code point (Python, PostgreSQL)."
+    },
+    {
+      "id": "d14-barcode-nfd",
+      "field": "payload.barcode",
+      "invalid_input": {
+        "operation": "SCAN_PICK",
+        "phase": "PICK",
+        "epoch": 3,
+        "barcode": "e\u0301",
+        "quantity": "1.000"
+      },
+      "status": "PENDING_D14_UNRESOLVED",
+      "expected": {
+        "result": "UNDECIDED",
+        "depends_on": "D-14"
+      },
+      "note": "Decomposed form; this draft does not normalize (byte-exact identity), pending D-14."
+    }
+  ],
+  "binding_vectors": [
+    {
+      "id": "bind-actor-mismatch",
+      "session_actor": 7,
+      "request_scope": {
+        "deployment": "3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f",
+        "actor": 8,
+        "order": 101
+      },
+      "expected": {
+        "result": "REJECT",
+        "http_status": 409,
+        "error_code": "ACTOR_MISMATCH",
+        "effect": "NONE"
+      },
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED"
+    },
+    {
+      "id": "bind-order-mismatch",
+      "path_order": 101,
+      "request_scope": {
+        "deployment": "3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f",
+        "actor": 7,
+        "order": 102
+      },
+      "expected": {
+        "result": "REJECT",
+        "http_status": 422,
+        "error_code": "ORDER_MISMATCH",
+        "effect": "NONE"
+      },
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED"
+    },
+    {
+      "id": "bind-namespace-mismatch",
+      "server_namespace": "3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f",
+      "request_scope": {
+        "deployment": "00000000-0000-4000-8000-000000000000",
+        "actor": 7,
+        "order": 101
+      },
+      "expected": {
+        "result": "REJECT",
+        "http_status": 409,
+        "error_code": "NAMESPACE_MISMATCH",
+        "effect": "NONE"
+      },
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED"
+    },
+    {
+      "id": "bind-fingerprint-mismatch",
+      "supplied_fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+      "server_recomputed": "client-fingerprint/1 of the request",
+      "expected": {
+        "result": "REJECT",
+        "http_status": 422,
+        "error_code": "FINGERPRINT_MISMATCH",
+        "effect": "NONE"
+      },
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED"
+    },
+    {
+      "id": "bind-key-header-mismatch",
+      "header_idempotency_key": "8c0e4a1b-2f3d-4c5e-9a7b-1d2e3f4a5b6c",
+      "body_key": "9d1f5b2c-3a4e-4d6f-8b8c-2e3f4a5b6c7d",
+      "expected": {
+        "result": "REJECT",
+        "http_status": 422,
+        "error_code": "KEY_MISMATCH",
+        "effect": "NONE"
+      },
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED"
+    },
+    {
+      "id": "bind-cross-actor-key",
+      "existing_receipt_actor": 7,
+      "session_actor": 9,
+      "expected": {
+        "result": "REJECT",
+        "http_status": 409,
+        "error_code": "FULFILLMENT_KEY_UNAVAILABLE",
+        "effect": "NONE",
+        "privacy": "identical status, body and headers to an absent key the caller may not use; no receipt metadata"
+      },
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED"
+    }
+  ],
+  "integer_rules": {
+    "epoch": [
+      0,
+      2147483647
+    ],
+    "identifiers": [
+      1,
+      2147483647
+    ],
+    "lexical_forms": "3 and 3.0 are not distinguishable after the BFF (contract C-19)"
+  },
+  "equivalence_vectors": [
+    {
+      "id": "eq-epoch-float-text",
+      "field": "payload.epoch",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED",
+      "invalid_input_descriptor": {
+        "descriptor": "JSON_NUMBER_TEXT",
+        "path": "payload.epoch",
+        "json_text_value": "3.0"
+      },
+      "expected": {
+        "result": "ACCEPT_AS_INTEGER",
+        "parsed_value": 3,
+        "canonical_equivalent_to": "scan-pick-leading-zeros",
+        "canonical_json": "{\"payload\":{\"barcode\":\"00012345\",\"epoch\":3,\"operation\":\"SCAN_PICK\",\"phase\":\"PICK\",\"quantity\":\"1.000\"},\"scope\":{\"actor\":7,\"deployment\":\"3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f\",\"order\":101}}",
+        "client_fingerprint": "4b18b7930843373846bae89cd8a9246d1c6469a038b845329ec89ffa9ebf9a33"
+      },
+      "note": "Replaces neg-epoch-float-text under the owner-approved semantic integer rule (F-5). The JSON text 3.0 for epoch parses to the integer 3, so the canonical form and digest equal those of the epoch-3 vector."
+    }
+  ],
+  "remediation_history": [
+    {
+      "date": "2026-10-27",
+      "findings": [
+        "F-5",
+        "F-6"
+      ],
+      "changes": [
+        "classification added to all 19 computed vectors",
+        "conflict_set baseline_id / variant_ids added",
+        "neg-epoch-float-text replaced by eq-epoch-float-text (equivalence) and neg-epoch-fraction (3.5) under the semantic integer rule",
+        "canonical-json/1 numbers rule and integer_rules updated"
+      ],
+      "digests_changed": false
+    }
+  ]
+}

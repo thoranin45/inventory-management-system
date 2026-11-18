@@ -1,0 +1,924 @@
+{
+  "fixture": "wp5_contract_vectors_addendum",
+  "fixture_version": 3,
+  "status": "DRAFT (Contract Freeze Addendum documentation draft, revision 3). Not frozen. Policies are OWNER-SELECTED directions, PROPOSED, CONDITIONAL or UNRESOLVED as labelled in docs/wp5-contract-freeze-addendum.md.",
+  "relationship": {
+    "w50_fixture": "tests/fixtures/wp5_contract_vectors.json",
+    "w50_fixture_sha256": "d2200f83b6268dd84fab84f3a0c5b00f76b96ea7d7aa758e1a051492d9e92329",
+    "note": "The accepted W5-0 fixture and its 19 computed vectors remain unchanged regression evidence; this file adds separately versioned expectations.",
+    "previous_revision": {
+      "fixture_version": 2,
+      "sha256": "588b104398c9b3acf909468ac11a1bba0c3a7ca6f8e030bc71a5fa4e3e718e73",
+      "audit": "Codex revision 2 delta audit SHA-256 983b25dbd1c0382defb5b3c5f5a080db3b84f4584e16a192dc2b2e884323e442 (BLOCKED)"
+    }
+  },
+  "verification_disclaimer": "Computed values were produced by copies of the repository algorithms (and a PROPOSED lifecycle algorithm) by the same author. They are NOT independent verification and NOT verification of repository implementations.",
+  "algorithms": {
+    "client-fingerprint/1": "as W5-0 fixture",
+    "canonical-json/1": "as W5-0 fixture; U+001D is escaped \\u001d (C0 control) and preserved",
+    "business-fingerprint/attempt/1": "as W5-0 fixture",
+    "business-fingerprint/lifecycle/1": "PROPOSED, as W5-0 contract section 5.4"
+  },
+  "barcode_rules": {
+    "identity": "exact Unicode scalar sequence incl. U+001D; no trim, case change or normalization; leading zeros preserved (D-14 OWNER-SELECTED)",
+    "length": "1..100 code points on every layer",
+    "always_rejected": [
+      "U+0000",
+      "lone surrogates"
+    ],
+    "other_controls_and_whitespace": "UNRESOLVED (O-9)"
+  },
+  "barcode_positive_vectors": [
+    {
+      "id": "bc-gs1-element-string",
+      "description": "GS1 element string with U+001D Group Separator preserved exactly (D-14).",
+      "input": {
+        "scope": {
+          "deployment": "3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f",
+          "actor": 7,
+          "order": 101
+        },
+        "payload": {
+          "operation": "SCAN_PICK",
+          "phase": "PICK",
+          "epoch": 3,
+          "barcode": "0104012345678901\u001d10ABC123",
+          "quantity": "1.000"
+        }
+      },
+      "canonical_json": "{\"payload\":{\"barcode\":\"0104012345678901\\u001d10ABC123\",\"epoch\":3,\"operation\":\"SCAN_PICK\",\"phase\":\"PICK\",\"quantity\":\"1.000\"},\"scope\":{\"actor\":7,\"deployment\":\"3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f\",\"order\":101}}",
+      "client_fingerprint": {
+        "algorithm": "client-fingerprint/1",
+        "value": "c33e9ae94772a897970b3ceaf63ad6d206f6dd3815861b1a67bbe854e23c1a0e"
+      },
+      "business_fingerprint": {
+        "algorithm": "business-fingerprint/attempt/1",
+        "value": "3b9a39e04017b31f26432aef449aa5f2b1e25d301cfdbe8666a825dffb207496"
+      },
+      "classification": {
+        "canonical_digest_valid": true,
+        "request_schema_valid_under_d14": true,
+        "business_prerequisites": [
+          "valid current claim credential at the payload epoch",
+          "order PICKING and coordinated",
+          "a product whose barcode equals the payload barcode exactly"
+        ],
+        "business_outcome": "NOT_IMPLIED: a valid digest is not an authorized or successful operation"
+      },
+      "provenance": {
+        "computed": "2026-10-27, Contract Freeze Addendum DRAFT build (scratchpad w50/addendum)",
+        "method": "EXECUTED_AGAINST_COPIED_ALGORITHMS",
+        "independent": false
+      },
+      "verification": {
+        "repository_client_digest": "PENDING (W5-6: frontend digest() in Vitest)",
+        "repository_business_fingerprint": "PENDING (W5-2: repository function in pytest; lifecycle algorithm not yet implemented)",
+        "codex_independent_recomputation": "VERIFIED against fixture v1 by the Codex addendum audit (SHA-256 4bea69a0...f5f4f) and against v2 by the Codex delta audit (SHA-256 983b25db...e442): canonical/client digests 14/14, backend attempt fingerprint 10/10, proposed lifecycle algorithm 4/4. Values unchanged in v3."
+      }
+    },
+    {
+      "id": "bc-thai",
+      "description": "Non-ASCII BMP characters; Unicode identity preserved.",
+      "input": {
+        "scope": {
+          "deployment": "3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f",
+          "actor": 7,
+          "order": 101
+        },
+        "payload": {
+          "operation": "SCAN_PICK",
+          "phase": "PICK",
+          "epoch": 3,
+          "barcode": "\u0e01\u0e02123",
+          "quantity": "1.000"
+        }
+      },
+      "canonical_json": "{\"payload\":{\"barcode\":\"\u0e01\u0e02123\",\"epoch\":3,\"operation\":\"SCAN_PICK\",\"phase\":\"PICK\",\"quantity\":\"1.000\"},\"scope\":{\"actor\":7,\"deployment\":\"3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f\",\"order\":101}}",
+      "client_fingerprint": {
+        "algorithm": "client-fingerprint/1",
+        "value": "f3f0bcdd5384df72345a318d6dc3b50f3be7a80795d5d50018cb08b21e903e25"
+      },
+      "business_fingerprint": {
+        "algorithm": "business-fingerprint/attempt/1",
+        "value": "d2cfc263bdd943a348430de59a03ecbe8e7fb59ab32b7840697f6b797bb1b694"
+      },
+      "classification": {
+        "canonical_digest_valid": true,
+        "request_schema_valid_under_d14": true,
+        "business_prerequisites": [
+          "valid current claim credential at the payload epoch",
+          "order PICKING and coordinated",
+          "a product whose barcode equals the payload barcode exactly"
+        ],
+        "business_outcome": "NOT_IMPLIED: a valid digest is not an authorized or successful operation"
+      },
+      "provenance": {
+        "computed": "2026-10-27, Contract Freeze Addendum DRAFT build (scratchpad w50/addendum)",
+        "method": "EXECUTED_AGAINST_COPIED_ALGORITHMS",
+        "independent": false
+      },
+      "verification": {
+        "repository_client_digest": "PENDING (W5-6: frontend digest() in Vitest)",
+        "repository_business_fingerprint": "PENDING (W5-2: repository function in pytest; lifecycle algorithm not yet implemented)",
+        "codex_independent_recomputation": "VERIFIED against fixture v1 by the Codex addendum audit (SHA-256 4bea69a0...f5f4f) and against v2 by the Codex delta audit (SHA-256 983b25db...e442): canonical/client digests 14/14, backend attempt fingerprint 10/10, proposed lifecycle algorithm 4/4. Values unchanged in v3."
+      }
+    },
+    {
+      "id": "bc-astral-single",
+      "description": "One code point, two UTF-16 code units; counts as length 1.",
+      "input": {
+        "scope": {
+          "deployment": "3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f",
+          "actor": 7,
+          "order": 101
+        },
+        "payload": {
+          "operation": "SCAN_PICK",
+          "phase": "PICK",
+          "epoch": 3,
+          "barcode": "\ud83d\ude00",
+          "quantity": "1.000"
+        }
+      },
+      "canonical_json": "{\"payload\":{\"barcode\":\"\ud83d\ude00\",\"epoch\":3,\"operation\":\"SCAN_PICK\",\"phase\":\"PICK\",\"quantity\":\"1.000\"},\"scope\":{\"actor\":7,\"deployment\":\"3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f\",\"order\":101}}",
+      "client_fingerprint": {
+        "algorithm": "client-fingerprint/1",
+        "value": "89d581ffb32b617c34ebb1470a2cab945f52a757aa49e53af3cadcb17a898355"
+      },
+      "business_fingerprint": {
+        "algorithm": "business-fingerprint/attempt/1",
+        "value": "d8d431fc9055370fefee458ab9c4ae565aae59884bb32353527ad1f4b9d8bfe3"
+      },
+      "classification": {
+        "canonical_digest_valid": true,
+        "request_schema_valid_under_d14": true,
+        "business_prerequisites": [
+          "valid current claim credential at the payload epoch",
+          "order PICKING and coordinated",
+          "a product whose barcode equals the payload barcode exactly"
+        ],
+        "business_outcome": "NOT_IMPLIED: a valid digest is not an authorized or successful operation",
+        "note": "Current SAFE.3 client schema counts UTF-16 units (max 200); W5-6 must count code points (max 100)."
+      },
+      "provenance": {
+        "computed": "2026-10-27, Contract Freeze Addendum DRAFT build (scratchpad w50/addendum)",
+        "method": "EXECUTED_AGAINST_COPIED_ALGORITHMS",
+        "independent": false
+      },
+      "verification": {
+        "repository_client_digest": "PENDING (W5-6: frontend digest() in Vitest)",
+        "repository_business_fingerprint": "PENDING (W5-2: repository function in pytest; lifecycle algorithm not yet implemented)",
+        "codex_independent_recomputation": "VERIFIED against fixture v1 by the Codex addendum audit (SHA-256 4bea69a0...f5f4f) and against v2 by the Codex delta audit (SHA-256 983b25db...e442): canonical/client digests 14/14, backend attempt fingerprint 10/10, proposed lifecycle algorithm 4/4. Values unchanged in v3."
+      }
+    },
+    {
+      "id": "bc-astral-100-code-points",
+      "description": "Exactly 100 code points (200 UTF-16 units): ACCEPT; proves code-point length semantics.",
+      "input": {
+        "scope": {
+          "deployment": "3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f",
+          "actor": 7,
+          "order": 101
+        },
+        "payload": {
+          "operation": "SCAN_PICK",
+          "phase": "PICK",
+          "epoch": 3,
+          "barcode": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00",
+          "quantity": "1.000"
+        }
+      },
+      "canonical_json": "{\"payload\":{\"barcode\":\"\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\",\"epoch\":3,\"operation\":\"SCAN_PICK\",\"phase\":\"PICK\",\"quantity\":\"1.000\"},\"scope\":{\"actor\":7,\"deployment\":\"3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f\",\"order\":101}}",
+      "client_fingerprint": {
+        "algorithm": "client-fingerprint/1",
+        "value": "58b57f99a9add9517aa7b3c547662a938cd3ae3770b1586c7ba14a7555666de5"
+      },
+      "business_fingerprint": {
+        "algorithm": "business-fingerprint/attempt/1",
+        "value": "d4c3c1951221fb829542518d0760c21e2f66f3cd50652e1e48863010825429aa"
+      },
+      "classification": {
+        "canonical_digest_valid": true,
+        "request_schema_valid_under_d14": true,
+        "business_prerequisites": [
+          "valid current claim credential at the payload epoch",
+          "order PICKING and coordinated",
+          "a product whose barcode equals the payload barcode exactly"
+        ],
+        "business_outcome": "NOT_IMPLIED: a valid digest is not an authorized or successful operation",
+        "note": "Current SAFE.3 client schema counts UTF-16 units (max 200); W5-6 must count code points (max 100)."
+      },
+      "provenance": {
+        "computed": "2026-10-27, Contract Freeze Addendum DRAFT build (scratchpad w50/addendum)",
+        "method": "EXECUTED_AGAINST_COPIED_ALGORITHMS",
+        "independent": false
+      },
+      "verification": {
+        "repository_client_digest": "PENDING (W5-6: frontend digest() in Vitest)",
+        "repository_business_fingerprint": "PENDING (W5-2: repository function in pytest; lifecycle algorithm not yet implemented)",
+        "codex_independent_recomputation": "VERIFIED against fixture v1 by the Codex addendum audit (SHA-256 4bea69a0...f5f4f) and against v2 by the Codex delta audit (SHA-256 983b25db...e442): canonical/client digests 14/14, backend attempt fingerprint 10/10, proposed lifecycle algorithm 4/4. Values unchanged in v3."
+      }
+    },
+    {
+      "id": "bc-nfc-e-acute",
+      "description": "Precomposed e-acute (NFC).",
+      "input": {
+        "scope": {
+          "deployment": "3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f",
+          "actor": 7,
+          "order": 101
+        },
+        "payload": {
+          "operation": "SCAN_PICK",
+          "phase": "PICK",
+          "epoch": 3,
+          "barcode": "\u00e9",
+          "quantity": "1.000"
+        }
+      },
+      "canonical_json": "{\"payload\":{\"barcode\":\"\u00e9\",\"epoch\":3,\"operation\":\"SCAN_PICK\",\"phase\":\"PICK\",\"quantity\":\"1.000\"},\"scope\":{\"actor\":7,\"deployment\":\"3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f\",\"order\":101}}",
+      "client_fingerprint": {
+        "algorithm": "client-fingerprint/1",
+        "value": "eedfa74a56b4ed0f6eb24f7d2672c4210553d27da62f187e8304e351fbe63f06"
+      },
+      "business_fingerprint": {
+        "algorithm": "business-fingerprint/attempt/1",
+        "value": "3a22b23e8b63d98c867ed46fb4c209062d01c30f77e1a5e42cf54ca845421c1c"
+      },
+      "classification": {
+        "canonical_digest_valid": true,
+        "request_schema_valid_under_d14": true,
+        "business_prerequisites": [
+          "valid current claim credential at the payload epoch",
+          "order PICKING and coordinated",
+          "a product whose barcode equals the payload barcode exactly"
+        ],
+        "business_outcome": "NOT_IMPLIED: a valid digest is not an authorized or successful operation"
+      },
+      "provenance": {
+        "computed": "2026-10-27, Contract Freeze Addendum DRAFT build (scratchpad w50/addendum)",
+        "method": "EXECUTED_AGAINST_COPIED_ALGORITHMS",
+        "independent": false
+      },
+      "verification": {
+        "repository_client_digest": "PENDING (W5-6: frontend digest() in Vitest)",
+        "repository_business_fingerprint": "PENDING (W5-2: repository function in pytest; lifecycle algorithm not yet implemented)",
+        "codex_independent_recomputation": "VERIFIED against fixture v1 by the Codex addendum audit (SHA-256 4bea69a0...f5f4f) and against v2 by the Codex delta audit (SHA-256 983b25db...e442): canonical/client digests 14/14, backend attempt fingerprint 10/10, proposed lifecycle algorithm 4/4. Values unchanged in v3."
+      }
+    },
+    {
+      "id": "bc-nfd-e-acute",
+      "description": "Decomposed e + combining acute (NFD): a DIFFERENT identity from bc-nfc-e-acute (no normalization).",
+      "input": {
+        "scope": {
+          "deployment": "3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f",
+          "actor": 7,
+          "order": 101
+        },
+        "payload": {
+          "operation": "SCAN_PICK",
+          "phase": "PICK",
+          "epoch": 3,
+          "barcode": "e\u0301",
+          "quantity": "1.000"
+        }
+      },
+      "canonical_json": "{\"payload\":{\"barcode\":\"e\u0301\",\"epoch\":3,\"operation\":\"SCAN_PICK\",\"phase\":\"PICK\",\"quantity\":\"1.000\"},\"scope\":{\"actor\":7,\"deployment\":\"3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f\",\"order\":101}}",
+      "client_fingerprint": {
+        "algorithm": "client-fingerprint/1",
+        "value": "1380d91c7d70a4546256456a99ef9a2019a0934959c8b1fd7d6b5963343ec0ea"
+      },
+      "business_fingerprint": {
+        "algorithm": "business-fingerprint/attempt/1",
+        "value": "7a8362ba39d35f0056cab6b1476de466c02c019e2c0bcfc45e90d6b5d2b896dd"
+      },
+      "classification": {
+        "canonical_digest_valid": true,
+        "request_schema_valid_under_d14": true,
+        "business_prerequisites": [
+          "valid current claim credential at the payload epoch",
+          "order PICKING and coordinated",
+          "a product whose barcode equals the payload barcode exactly"
+        ],
+        "business_outcome": "NOT_IMPLIED: a valid digest is not an authorized or successful operation"
+      },
+      "provenance": {
+        "computed": "2026-10-27, Contract Freeze Addendum DRAFT build (scratchpad w50/addendum)",
+        "method": "EXECUTED_AGAINST_COPIED_ALGORITHMS",
+        "independent": false
+      },
+      "verification": {
+        "repository_client_digest": "PENDING (W5-6: frontend digest() in Vitest)",
+        "repository_business_fingerprint": "PENDING (W5-2: repository function in pytest; lifecycle algorithm not yet implemented)",
+        "codex_independent_recomputation": "VERIFIED against fixture v1 by the Codex addendum audit (SHA-256 4bea69a0...f5f4f) and against v2 by the Codex delta audit (SHA-256 983b25db...e442): canonical/client digests 14/14, backend attempt fingerprint 10/10, proposed lifecycle algorithm 4/4. Values unchanged in v3."
+      }
+    },
+    {
+      "id": "bc-leading-zeros-100",
+      "description": "100 ASCII code points with leading zeros preserved.",
+      "input": {
+        "scope": {
+          "deployment": "3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f",
+          "actor": 7,
+          "order": 101
+        },
+        "payload": {
+          "operation": "SCAN_PICK",
+          "phase": "PICK",
+          "epoch": 3,
+          "barcode": "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001",
+          "quantity": "1.000"
+        }
+      },
+      "canonical_json": "{\"payload\":{\"barcode\":\"0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001\",\"epoch\":3,\"operation\":\"SCAN_PICK\",\"phase\":\"PICK\",\"quantity\":\"1.000\"},\"scope\":{\"actor\":7,\"deployment\":\"3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f\",\"order\":101}}",
+      "client_fingerprint": {
+        "algorithm": "client-fingerprint/1",
+        "value": "79b5d493e57ba39eb79e72da5cfbe007b289a83a7b6135ea02894152ad483e4e"
+      },
+      "business_fingerprint": {
+        "algorithm": "business-fingerprint/attempt/1",
+        "value": "e59019f35305e3b9416496ad2727b7a19b32eeab7b55b77d92f3d80edfd7f20b"
+      },
+      "classification": {
+        "canonical_digest_valid": true,
+        "request_schema_valid_under_d14": true,
+        "business_prerequisites": [
+          "valid current claim credential at the payload epoch",
+          "order PICKING and coordinated",
+          "a product whose barcode equals the payload barcode exactly"
+        ],
+        "business_outcome": "NOT_IMPLIED: a valid digest is not an authorized or successful operation"
+      },
+      "provenance": {
+        "computed": "2026-10-27, Contract Freeze Addendum DRAFT build (scratchpad w50/addendum)",
+        "method": "EXECUTED_AGAINST_COPIED_ALGORITHMS",
+        "independent": false
+      },
+      "verification": {
+        "repository_client_digest": "PENDING (W5-6: frontend digest() in Vitest)",
+        "repository_business_fingerprint": "PENDING (W5-2: repository function in pytest; lifecycle algorithm not yet implemented)",
+        "codex_independent_recomputation": "VERIFIED against fixture v1 by the Codex addendum audit (SHA-256 4bea69a0...f5f4f) and against v2 by the Codex delta audit (SHA-256 983b25db...e442): canonical/client digests 14/14, backend attempt fingerprint 10/10, proposed lifecycle algorithm 4/4. Values unchanged in v3."
+      }
+    }
+  ],
+  "barcode_pending_o9_vectors": [
+    {
+      "id": "bc-o9-edge-whitespace",
+      "description": "Leading/trailing spaces: identity-preserving (never trimmed); acceptability UNRESOLVED (O-9).",
+      "input": {
+        "scope": {
+          "deployment": "3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f",
+          "actor": 7,
+          "order": 101
+        },
+        "payload": {
+          "operation": "SCAN_PICK",
+          "phase": "PICK",
+          "epoch": 3,
+          "barcode": " 00012345 ",
+          "quantity": "1.000"
+        }
+      },
+      "canonical_json": "{\"payload\":{\"barcode\":\" 00012345 \",\"epoch\":3,\"operation\":\"SCAN_PICK\",\"phase\":\"PICK\",\"quantity\":\"1.000\"},\"scope\":{\"actor\":7,\"deployment\":\"3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f\",\"order\":101}}",
+      "client_fingerprint": {
+        "algorithm": "client-fingerprint/1",
+        "value": "a7b1284c37fb02428426ed0b9484c61b47d87f1e15bb64b51678ae7259d04e9a"
+      },
+      "business_fingerprint": {
+        "algorithm": "business-fingerprint/attempt/1",
+        "value": "12309cb35ab8efa197a62c11df079dcbef2cc447ec5152f93897c6352b39fa3f"
+      },
+      "classification": {
+        "canonical_digest_valid": true,
+        "request_schema_valid_under_d14": "UNRESOLVED_O9",
+        "business_prerequisites": [
+          "valid current claim credential at the payload epoch",
+          "order PICKING and coordinated",
+          "a product whose barcode equals the payload barcode exactly"
+        ],
+        "business_outcome": "NOT_IMPLIED: a valid digest is not an authorized or successful operation"
+      },
+      "provenance": {
+        "computed": "2026-10-27, Contract Freeze Addendum DRAFT build (scratchpad w50/addendum)",
+        "method": "EXECUTED_AGAINST_COPIED_ALGORITHMS",
+        "independent": false
+      },
+      "verification": {
+        "repository_client_digest": "PENDING (W5-6: frontend digest() in Vitest)",
+        "repository_business_fingerprint": "PENDING (W5-2: repository function in pytest; lifecycle algorithm not yet implemented)",
+        "codex_independent_recomputation": "VERIFIED against fixture v1 by the Codex addendum audit (SHA-256 4bea69a0...f5f4f) and against v2 by the Codex delta audit (SHA-256 983b25db...e442): canonical/client digests 14/14, backend attempt fingerprint 10/10, proposed lifecycle algorithm 4/4. Values unchanged in v3."
+      }
+    },
+    {
+      "id": "bc-o9-tab-control",
+      "description": "C0 control other than U+001D: acceptability UNRESOLVED (O-9).",
+      "input": {
+        "scope": {
+          "deployment": "3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f",
+          "actor": 7,
+          "order": 101
+        },
+        "payload": {
+          "operation": "SCAN_PICK",
+          "phase": "PICK",
+          "epoch": 3,
+          "barcode": "000\t12345",
+          "quantity": "1.000"
+        }
+      },
+      "canonical_json": "{\"payload\":{\"barcode\":\"000\\t12345\",\"epoch\":3,\"operation\":\"SCAN_PICK\",\"phase\":\"PICK\",\"quantity\":\"1.000\"},\"scope\":{\"actor\":7,\"deployment\":\"3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f\",\"order\":101}}",
+      "client_fingerprint": {
+        "algorithm": "client-fingerprint/1",
+        "value": "9ccb8b4e051d458a225850d2985b534f84092287f6cf3b2bc36128c4beb8d5df"
+      },
+      "business_fingerprint": {
+        "algorithm": "business-fingerprint/attempt/1",
+        "value": "11ca50431f8e090b1b341afe2d72fe480f403a070cc3dbedbc811b457524e7c1"
+      },
+      "classification": {
+        "canonical_digest_valid": true,
+        "request_schema_valid_under_d14": "UNRESOLVED_O9",
+        "business_prerequisites": [
+          "valid current claim credential at the payload epoch",
+          "order PICKING and coordinated",
+          "a product whose barcode equals the payload barcode exactly"
+        ],
+        "business_outcome": "NOT_IMPLIED: a valid digest is not an authorized or successful operation"
+      },
+      "provenance": {
+        "computed": "2026-10-27, Contract Freeze Addendum DRAFT build (scratchpad w50/addendum)",
+        "method": "EXECUTED_AGAINST_COPIED_ALGORITHMS",
+        "independent": false
+      },
+      "verification": {
+        "repository_client_digest": "PENDING (W5-6: frontend digest() in Vitest)",
+        "repository_business_fingerprint": "PENDING (W5-2: repository function in pytest; lifecycle algorithm not yet implemented)",
+        "codex_independent_recomputation": "VERIFIED against fixture v1 by the Codex addendum audit (SHA-256 4bea69a0...f5f4f) and against v2 by the Codex delta audit (SHA-256 983b25db...e442): canonical/client digests 14/14, backend attempt fingerprint 10/10, proposed lifecycle algorithm 4/4. Values unchanged in v3."
+      }
+    },
+    {
+      "id": "bc-o9-zero-width",
+      "description": "Zero-width space: acceptability UNRESOLVED (O-9).",
+      "input": {
+        "scope": {
+          "deployment": "3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f",
+          "actor": 7,
+          "order": 101
+        },
+        "payload": {
+          "operation": "SCAN_PICK",
+          "phase": "PICK",
+          "epoch": 3,
+          "barcode": "000\u200b12345",
+          "quantity": "1.000"
+        }
+      },
+      "canonical_json": "{\"payload\":{\"barcode\":\"000\u200b12345\",\"epoch\":3,\"operation\":\"SCAN_PICK\",\"phase\":\"PICK\",\"quantity\":\"1.000\"},\"scope\":{\"actor\":7,\"deployment\":\"3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f\",\"order\":101}}",
+      "client_fingerprint": {
+        "algorithm": "client-fingerprint/1",
+        "value": "c58f721fdf32e9fe60e78e46171bf910b3f9a1d8d58703031a4a9ba974a9e25c"
+      },
+      "business_fingerprint": {
+        "algorithm": "business-fingerprint/attempt/1",
+        "value": "9ba37d613596d9fd9e72bbdd5c44344140832df47ea36595ca93a5f0cf7c2932"
+      },
+      "classification": {
+        "canonical_digest_valid": true,
+        "request_schema_valid_under_d14": "UNRESOLVED_O9",
+        "business_prerequisites": [
+          "valid current claim credential at the payload epoch",
+          "order PICKING and coordinated",
+          "a product whose barcode equals the payload barcode exactly"
+        ],
+        "business_outcome": "NOT_IMPLIED: a valid digest is not an authorized or successful operation"
+      },
+      "provenance": {
+        "computed": "2026-10-27, Contract Freeze Addendum DRAFT build (scratchpad w50/addendum)",
+        "method": "EXECUTED_AGAINST_COPIED_ALGORITHMS",
+        "independent": false
+      },
+      "verification": {
+        "repository_client_digest": "PENDING (W5-6: frontend digest() in Vitest)",
+        "repository_business_fingerprint": "PENDING (W5-2: repository function in pytest; lifecycle algorithm not yet implemented)",
+        "codex_independent_recomputation": "VERIFIED against fixture v1 by the Codex addendum audit (SHA-256 4bea69a0...f5f4f) and against v2 by the Codex delta audit (SHA-256 983b25db...e442): canonical/client digests 14/14, backend attempt fingerprint 10/10, proposed lifecycle algorithm 4/4. Values unchanged in v3."
+      }
+    }
+  ],
+  "barcode_negative_vectors": [
+    {
+      "id": "bc-neg-nul",
+      "field": "payload.barcode",
+      "invalid_input_descriptor": {
+        "descriptor": "CONTAINS_U0000",
+        "json_text_value": "\"000\\u000012345\""
+      },
+      "expected": {
+        "result": "REJECT",
+        "http_status": 422,
+        "error_code": "INVALID_BARCODE",
+        "effect": "NONE",
+        "receipt": "NONE"
+      },
+      "note": "PostgreSQL text cannot store U+0000.",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED"
+    },
+    {
+      "id": "bc-neg-lone-surrogate",
+      "field": "payload.barcode",
+      "invalid_input_descriptor": {
+        "descriptor": "LONE_SURROGATE",
+        "json_text_value": "\"\\ud800\""
+      },
+      "expected": {
+        "result": "REJECT",
+        "http_status": 422,
+        "error_code": "INVALID_UNICODE",
+        "effect": "NONE",
+        "receipt": "NONE"
+      },
+      "note": "Not a Unicode scalar value.",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED"
+    },
+    {
+      "id": "bc-neg-101-ascii",
+      "field": "payload.barcode",
+      "invalid_input": {
+        "operation": "SCAN_PICK",
+        "phase": "PICK",
+        "epoch": 3,
+        "barcode": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "quantity": "1.000"
+      },
+      "expected": {
+        "result": "REJECT",
+        "http_status": 422,
+        "error_code": "INVALID_BARCODE",
+        "effect": "NONE",
+        "receipt": "NONE"
+      },
+      "note": "101 code points.",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED"
+    },
+    {
+      "id": "bc-neg-101-astral",
+      "field": "payload.barcode",
+      "invalid_input": {
+        "operation": "SCAN_PICK",
+        "phase": "PICK",
+        "epoch": 3,
+        "barcode": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00",
+        "quantity": "1.000"
+      },
+      "expected": {
+        "result": "REJECT",
+        "http_status": 422,
+        "error_code": "INVALID_BARCODE",
+        "effect": "NONE",
+        "receipt": "NONE"
+      },
+      "note": "101 code points (202 UTF-16 units): rejected by code-point length.",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED"
+    },
+    {
+      "id": "bc-neg-empty",
+      "field": "payload.barcode",
+      "invalid_input": {
+        "operation": "SCAN_PICK",
+        "phase": "PICK",
+        "epoch": 3,
+        "barcode": "",
+        "quantity": "1.000"
+      },
+      "expected": {
+        "result": "REJECT",
+        "http_status": 422,
+        "error_code": "INVALID_BARCODE",
+        "effect": "NONE",
+        "receipt": "NONE"
+      },
+      "note": "Minimum 1 code point.",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED"
+    }
+  ],
+  "scanner_transformation_vectors": [
+    {
+      "id": "scan-no-trim",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED",
+      "descriptor": "The live coordinated input submits ' 00012345 ' (leading and trailing space) unchanged; it must not apply use-scanner.ts raw.trim().",
+      "expected": {
+        "submitted_barcode": " 00012345 ",
+        "equals_vector": "bc-o9-edge-whitespace (identity form)"
+      }
+    },
+    {
+      "id": "scan-min-one",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED",
+      "descriptor": "A one-character scan '0' is submitted; the legacy minChars 3 rule must not apply.",
+      "expected": {
+        "submitted_barcode": "0"
+      }
+    },
+    {
+      "id": "scan-repeat-while-pending",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED",
+      "descriptor": "A second physical scan arrives while the first attempt is SENDING or OUTCOME_UNKNOWN (input gate closed; SAFE.3 coordinator.ts:101-104 and 114-120).",
+      "expected": {
+        "attempts_created": 1,
+        "dispatches": 1,
+        "queued": 0,
+        "second_scan": "REFUSED_VISIBLY (BUSY / INPUT_GATE_CLOSED)"
+      }
+    },
+    {
+      "id": "scan-repeat-after-settle",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED",
+      "descriptor": "The first attempt is terminal; the operator explicitly confirms a new physical action and scans the identical barcode.",
+      "expected": {
+        "attempts": 2,
+        "distinct_keys": true,
+        "client_fingerprints_equal": true,
+        "second_dispatched_after_first_settled": true
+      }
+    },
+    {
+      "id": "scan-closed-gate-input-discarded",
+      "status": "PROPOSED_EXPECTATION_NOT_EXECUTED",
+      "policy_status": "PROPOSED (BC-2), not owner-selected",
+      "descriptor": "Characters received while the input gate is closed are discarded and never form part of a later submission.",
+      "expected": {
+        "later_submission_contains_closed_gate_input": false
+      }
+    },
+    {
+      "id": "scan-gs-transmission",
+      "status": "PENDING_SCANNER_ASSESSMENT",
+      "descriptor": "Hardware wedge / camera / manual paths must deliver U+001D unchanged for GS1 element strings; behavior per device is UNKNOWN.",
+      "expected": {
+        "submitted_equals": "bc-gs1-element-string payload.barcode"
+      }
+    }
+  ],
+  "lifecycle_vectors": [
+    {
+      "id": "life-enroll",
+      "description": "ENROLL from CONFIRMED: expectedEpoch 0; APPLIED result epoch 1 (O-3).",
+      "input": {
+        "scope": {
+          "deployment": "3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f",
+          "actor": 7,
+          "order": 101
+        },
+        "payload": {
+          "kind": "ENROLL",
+          "phase": "PICK",
+          "expectedEpoch": 0,
+          "progressRevision": "0"
+        }
+      },
+      "canonical_json": "{\"payload\":{\"expectedEpoch\":0,\"kind\":\"ENROLL\",\"phase\":\"PICK\",\"progressRevision\":\"0\"},\"scope\":{\"actor\":7,\"deployment\":\"3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f\",\"order\":101}}",
+      "client_fingerprint": {
+        "algorithm": "client-fingerprint/1",
+        "value": "949d307188671a6be5d2f3826b03fdd76059e5e9b8b51eea1f17fbad3a18062e"
+      },
+      "business_fingerprint": {
+        "algorithm": "business-fingerprint/lifecycle/1 (PROPOSED)",
+        "value": "6b8594f0f8ccc17a607d8a9fc0da368e42fcad046cae173cbb31eafacaaaff94"
+      },
+      "classification": {
+        "role": "positive",
+        "client_schema_valid_today": false,
+        "note": "ENROLL is not in the current SAFE.3 lifecycle kind enum; requires the W5-6 client extension.",
+        "business_prerequisites": [
+          "journal basis J-1 PRE_ENROLLMENT",
+          "order CONFIRMED",
+          "epoch 0",
+          "no marker",
+          "zero counters",
+          "no unresolved reconciliation",
+          "no restore hold",
+          "admission ACTIVE",
+          "trusted restore provenance"
+        ],
+        "canonical_digest_valid": true,
+        "business_outcome": "NOT_IMPLIED",
+        "credential": "NONE (ENROLL is credential-free)",
+        "retry": "B-2: an operator-confirmed retry reuses this exact input, canonical_json and fingerprints (same intent identity); never a new identity."
+      },
+      "provenance": {
+        "computed": "2026-10-27, Contract Freeze Addendum DRAFT build (scratchpad w50/addendum)",
+        "method": "EXECUTED_AGAINST_COPIED_ALGORITHMS",
+        "independent": false
+      },
+      "verification": {
+        "repository_client_digest": "PENDING (W5-6: frontend digest() in Vitest)",
+        "repository_business_fingerprint": "PENDING (W5-2: repository function in pytest; lifecycle algorithm not yet implemented)",
+        "codex_independent_recomputation": "VERIFIED against fixture v1 by the Codex addendum audit (SHA-256 4bea69a0...f5f4f) and against v2 by the Codex delta audit (SHA-256 983b25db...e442): canonical/client digests 14/14, backend attempt fingerprint 10/10, proposed lifecycle algorithm 4/4. Values unchanged in v3."
+      }
+    },
+    {
+      "id": "life-acquire-after-enroll",
+      "description": "First ACQUIRE after ENROLL: expectedEpoch 1; APPLIED result epoch 2.",
+      "input": {
+        "scope": {
+          "deployment": "3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f",
+          "actor": 7,
+          "order": 101
+        },
+        "payload": {
+          "kind": "ACQUIRE",
+          "phase": "PICK",
+          "expectedEpoch": 1,
+          "progressRevision": "0"
+        }
+      },
+      "canonical_json": "{\"payload\":{\"expectedEpoch\":1,\"kind\":\"ACQUIRE\",\"phase\":\"PICK\",\"progressRevision\":\"0\"},\"scope\":{\"actor\":7,\"deployment\":\"3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f\",\"order\":101}}",
+      "client_fingerprint": {
+        "algorithm": "client-fingerprint/1",
+        "value": "7ebeb2c43160cd189dc557ba06f712d28340eb397cf30f9f55615d39edb24913"
+      },
+      "business_fingerprint": {
+        "algorithm": "business-fingerprint/lifecycle/1 (PROPOSED)",
+        "value": "ad94f4523870a49f643e3a3a58e27bb6ee859fcf5caab1fe96bfd55517a970e0"
+      },
+      "classification": {
+        "role": "positive",
+        "client_schema_valid_today": true,
+        "business_prerequisites": [
+          "APPLIED ENROLL (epoch 1) and no intervening authorized epoch-advancing transition (otherwise expectedEpoch must equal the current authoritative epoch, AC-1)",
+          "actor has work authorization (enrolled_by or an active grantee)",
+          "no holder",
+          "no unresolved reconciliation",
+          "admission ACTIVE",
+          "epoch headroom (O-6)"
+        ],
+        "canonical_digest_valid": true,
+        "business_outcome": "NOT_IMPLIED",
+        "epoch_source": "Trusted server context only; the client never derives, increments or fabricates an epoch (AC-1).",
+        "after_grant_fence": "If an Admin grant advanced the epoch to 2, this exact intent is REJECTED as stale (durable receipt) and is never re-sent; a new intent must carry the current epoch."
+      },
+      "provenance": {
+        "computed": "2026-10-27, Contract Freeze Addendum DRAFT build (scratchpad w50/addendum)",
+        "method": "EXECUTED_AGAINST_COPIED_ALGORITHMS",
+        "independent": false
+      },
+      "verification": {
+        "repository_client_digest": "PENDING (W5-6: frontend digest() in Vitest)",
+        "repository_business_fingerprint": "PENDING (W5-2: repository function in pytest; lifecycle algorithm not yet implemented)",
+        "codex_independent_recomputation": "VERIFIED against fixture v1 by the Codex addendum audit (SHA-256 4bea69a0...f5f4f) and against v2 by the Codex delta audit (SHA-256 983b25db...e442): canonical/client digests 14/14, backend attempt fingerprint 10/10, proposed lifecycle algorithm 4/4. Values unchanged in v3."
+      }
+    },
+    {
+      "id": "life-acquire-premature",
+      "description": "ACQUIRE sent with expectedEpoch 0: after ENROLL it can never apply (stale epoch) and is recorded REJECTED.",
+      "input": {
+        "scope": {
+          "deployment": "3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f",
+          "actor": 7,
+          "order": 101
+        },
+        "payload": {
+          "kind": "ACQUIRE",
+          "phase": "PICK",
+          "expectedEpoch": 0,
+          "progressRevision": "0"
+        }
+      },
+      "canonical_json": "{\"payload\":{\"expectedEpoch\":0,\"kind\":\"ACQUIRE\",\"phase\":\"PICK\",\"progressRevision\":\"0\"},\"scope\":{\"actor\":7,\"deployment\":\"3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f\",\"order\":101}}",
+      "client_fingerprint": {
+        "algorithm": "client-fingerprint/1",
+        "value": "b106209a60463b1b0dce282302abe2d58e06a388ba0247fe80d4305f39c564b3"
+      },
+      "business_fingerprint": {
+        "algorithm": "business-fingerprint/lifecycle/1 (PROPOSED)",
+        "value": "a04ccdd55875db0b2539a4182e05eb69904df5f4e0cc02cdec28d96276a0044c"
+      },
+      "classification": {
+        "role": "expected_rejection",
+        "client_schema_valid_today": true,
+        "expected_after_enroll": "REJECTED (stale expected epoch); durable receipt; never applies",
+        "canonical_digest_valid": true,
+        "business_outcome": "NOT_IMPLIED"
+      },
+      "provenance": {
+        "computed": "2026-10-27, Contract Freeze Addendum DRAFT build (scratchpad w50/addendum)",
+        "method": "EXECUTED_AGAINST_COPIED_ALGORITHMS",
+        "independent": false
+      },
+      "verification": {
+        "repository_client_digest": "PENDING (W5-6: frontend digest() in Vitest)",
+        "repository_business_fingerprint": "PENDING (W5-2: repository function in pytest; lifecycle algorithm not yet implemented)",
+        "codex_independent_recomputation": "VERIFIED against fixture v1 by the Codex addendum audit (SHA-256 4bea69a0...f5f4f) and against v2 by the Codex delta audit (SHA-256 983b25db...e442): canonical/client digests 14/14, backend attempt fingerprint 10/10, proposed lifecycle algorithm 4/4. Values unchanged in v3."
+      }
+    },
+    {
+      "id": "life-complete-with-counts",
+      "description": "PICK COMPLETE carrying operator-confirmed exact counts and progress revision (D-5).",
+      "input": {
+        "scope": {
+          "deployment": "3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f",
+          "actor": 7,
+          "order": 101
+        },
+        "payload": {
+          "kind": "COMPLETE",
+          "phase": "PICK",
+          "expectedEpoch": 2,
+          "progressRevision": "5",
+          "counts": [
+            {
+              "allocation_id": 42,
+              "picked": "2.500",
+              "packed": "0.000"
+            }
+          ]
+        }
+      },
+      "canonical_json": "{\"payload\":{\"counts\":[{\"allocation_id\":42,\"packed\":\"0.000\",\"picked\":\"2.500\"}],\"expectedEpoch\":2,\"kind\":\"COMPLETE\",\"phase\":\"PICK\",\"progressRevision\":\"5\"},\"scope\":{\"actor\":7,\"deployment\":\"3f1d9c2e-8b4a-4c6e-9f00-6a1b2c3d4e5f\",\"order\":101}}",
+      "client_fingerprint": {
+        "algorithm": "client-fingerprint/1",
+        "value": "e42b8c4d2cbe02b4503af58a5b66884702cd6172d63cbd4323d56cb58d8653ea"
+      },
+      "business_fingerprint": {
+        "algorithm": "business-fingerprint/lifecycle/1 (PROPOSED)",
+        "value": "524cf235ded33f153a4b546d3250450feb50c06ceea46f6bf9970f629ef1807b"
+      },
+      "classification": {
+        "role": "positive",
+        "client_schema_valid_today": true,
+        "note": "Schema-valid today; sending counts requires the W5-6 client change and the W5-2/W5-4 backend contract.",
+        "business_prerequisites": [
+          "valid claim at epoch 2",
+          "progress revision 5 current",
+          "counts equal allocated and fully counted",
+          "no unresolved reconciliation"
+        ],
+        "canonical_digest_valid": true,
+        "business_outcome": "NOT_IMPLIED",
+        "client_schema_reference": "frontend/src/lib/fulfillment/contracts.ts:42 lifecyclePayloadSchema (COMPLETE with optional counts)",
+        "current_ui_sends_counts": false,
+        "current_ui_reference": "frontend/src/components/work/fulfillment-safe/safe-workflow-panel.tsx:36 sends COMPLETE without counts",
+        "backend_capability_today": "NONE (no lifecycle COMPLETE-with-counts route; claim router unmounted)"
+      },
+      "provenance": {
+        "computed": "2026-10-27, Contract Freeze Addendum DRAFT build (scratchpad w50/addendum)",
+        "method": "EXECUTED_AGAINST_COPIED_ALGORITHMS",
+        "independent": false
+      },
+      "verification": {
+        "repository_client_digest": "PENDING (W5-6: frontend digest() in Vitest)",
+        "repository_business_fingerprint": "PENDING (W5-2: repository function in pytest; lifecycle algorithm not yet implemented)",
+        "codex_independent_recomputation": "VERIFIED against fixture v1 by the Codex addendum audit (SHA-256 4bea69a0...f5f4f) and against v2 by the Codex delta audit (SHA-256 983b25db...e442): canonical/client digests 14/14, backend attempt fingerprint 10/10, proposed lifecycle algorithm 4/4. Values unchanged in v3."
+      }
+    }
+  ],
+  "epoch_transition_model": {
+    "status": "OWNER-SELECTED PRINCIPLE; NUMERIC THRESHOLDS UNRESOLVED (O-6, EP-1); proof obligations, not established guarantees",
+    "classes": {
+      "creates_held_claim": [
+        "ACQUIRE",
+        "TAKEOVER"
+      ],
+      "advances_and_leaves_no_claim": [
+        "RELEASE",
+        "COMPLETE",
+        "JOURNAL_RESET",
+        "RESTORE_FENCE",
+        "RESOLUTION_FENCE",
+        "GRANT_FENCE",
+        "CASE_FENCE",
+        "ENROLL (0 -> 1 only)"
+      ],
+      "does_not_advance": [
+        "SUPERVISED_CANCELLATION_APPROVAL",
+        "GUARDED_SHIPMENT",
+        "RESTORE_RELEASE (other than its SAFE.4 resolution fence)",
+        "LIFECYCLE_FENCE tombstone",
+        "every REJECTED outcome"
+      ]
+    },
+    "properties": {
+      "P1_safety": "every advances_and_leaves_no_claim transition remains permitted while expected_epoch <= MAX-1; claim creation requires headroom so a claim created after the headroom rule is enforced exists only at epoch <= MAX-1. Not assumed for existing or restored data: current code permits ACQUIRE from MAX-1 to MAX.",
+      "P2_liveness": "phase-aware reserve plus the supervised-cancellation exit; at MAX with no held claim (checked under the order lock) the does_not_advance exits remain available; no finite reserve guarantees completion through unbounded recovery"
+    },
+    "MAX": 2147483647,
+    "thresholds": null,
+    "held_claim_at_MAX": "Pre-existing or restored claims at MAX are blocked by the exhausted-claim gate: every guarded mutation refused, no fence, operations at MAX stay UNKNOWN, supervised escalation required; recovery only by a separately approved policy (EP-2, RC-1). No reset, wraparound, widening or arbitrary advance."
+  },
+  "revision_history": [
+    {
+      "fixture_version": 1,
+      "sha256": "4794a1f4e2fb711f457e95be56a35c44521553eb2747de7a1ebcf2f536290778",
+      "note": "Initial addendum DRAFT."
+    },
+    {
+      "fixture_version": 2,
+      "note": "Codex addendum audit remediation: F-10 (scan-no-trim equality; schema validity separated from UI and backend capability), F-8 (state-based repeated-scan vectors), F-2 (ENROLL bootstrap prerequisites), epoch classes. All 14 computed vectors (input, canonical_json, client and business fingerprints) are carried over unchanged."
+    },
+    {
+      "fixture_version": 3,
+      "sha256_of_previous": "588b104398c9b3acf909468ac11a1bba0c3a7ca6f8e030bc71a5fa4e3e718e73",
+      "note": "Codex delta audit remediation: R2-2 (first ACQUIRE validates the current authoritative epoch) and R2-3 (held claims at MAX are not assumed absent). Classification and model text only; all 14 computed vectors (input, canonical_json, client and business fingerprints) are carried over unchanged."
+    }
+  ],
+  "policy_provenance": "OWN-1, OWN-2, OWN-3 and OWN-3R are chat authorization, transcript only; see docs/wp5-contract-freeze-addendum.md section A1. Labels in this file never imply implementation or runtime verification."
+}
