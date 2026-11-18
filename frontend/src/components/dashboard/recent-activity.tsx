@@ -7,6 +7,7 @@ import { ErrorState, LoadingState } from "@/components/ui/states";
 import { QuantityDisplay } from "@/components/ui/quantity-display";
 import { useRecentActivity } from "@/lib/query/hooks";
 import { agoFromIso } from "@/lib/format";
+import { useT } from "@/lib/i18n/client";
 
 /**
  * Nearest real backend source for the prototype's "Recent activity" band:
@@ -16,12 +17,13 @@ import { agoFromIso } from "@/lib/format";
  */
 export function RecentActivity() {
   const { data, isLoading, isError, error, refetch } = useRecentActivity();
+  const t = useT();
 
   return (
     <Panel className="wc-activity">
       <PanelHead
-        title="Recent activity"
-        aside={data ? `${data.length} stock movements` : undefined}
+        title={t("dashboard.activityTitle")}
+        aside={data ? t("dashboard.activityAside", { n: data.length }) : undefined}
       />
       <div className="flex flex-col">
         {isLoading ? (
@@ -31,7 +33,7 @@ export function RecentActivity() {
         ) : !data || data.length === 0 ? (
           <div className="flex flex-col items-center gap-2 p-8 text-center text-[12px] text-[var(--muted)]">
             <Activity aria-hidden className="h-5 w-5 text-[var(--faint)]" />
-            No stock movements recorded yet.
+            {t("dashboard.activityEmpty")}
           </div>
         ) : (
           data.slice(0, 10).map((tx) => (
@@ -47,10 +49,10 @@ export function RecentActivity() {
               </span>
               <span className="flex min-w-0 flex-col leading-[1.35]">
                 <span className="text-[12.5px] font-semibold">
-                  {(tx.transaction_type ?? "movement").replace(/_/g, " ")}
+                  {(tx.transaction_type ?? t("dashboard.movementFallback")).replace(/_/g, " ")}
                 </span>
                 <span className="truncate text-[11px] text-[var(--muted)]">
-                  {tx.remark || `product #${tx.product_id ?? "—"}`}
+                  {tx.remark || t("dashboard.productFallback", { id: tx.product_id ?? "—" })}
                 </span>
               </span>
               <QuantityDisplay value={tx.quantity} className="ml-auto flex-none text-[12px] font-medium" />

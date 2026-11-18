@@ -1,6 +1,9 @@
+"use client";
+
 import { Panel, PanelHead } from "@/components/ui/panel";
 import { compareDecimals, ratio, sumDecimals } from "@/lib/decimal";
 import { formatQty } from "@/lib/format";
+import { useT } from "@/lib/i18n/client";
 import type { DashboardSummary } from "@/lib/api/schemas/dashboard";
 
 /**
@@ -11,12 +14,13 @@ import type { DashboardSummary } from "@/lib/api/schemas/dashboard";
  * only Number derived is the CSS bar width via `ratio()`.
  */
 export function InventoryCondition({ data }: { data: DashboardSummary }) {
+  const t = useT();
   const inv = data.inventory;
   const parts: { key: string; label: string; color: string; value: string }[] = [
-    { key: "avail", label: "Available", color: "var(--success)", value: inv.operational_available_quantity },
-    { key: "res", label: "Reserved", color: "var(--faint)", value: inv.reserved_quantity },
-    { key: "tr", label: "In transit", color: "var(--accent)", value: inv.in_transit_quantity },
-    { key: "exp", label: "Expired", color: "var(--danger)", value: inv.expired_quantity },
+    { key: "avail", label: t("dashboard.available"), color: "var(--success)", value: inv.operational_available_quantity },
+    { key: "res", label: t("dashboard.reserved"), color: "var(--faint)", value: inv.reserved_quantity },
+    { key: "tr", label: t("dashboard.inTransit"), color: "var(--accent)", value: inv.in_transit_quantity },
+    { key: "exp", label: t("dashboard.expired"), color: "var(--danger)", value: inv.expired_quantity },
   ];
 
   const segSum = sumDecimals(parts.map((p) => p.value));
@@ -28,7 +32,7 @@ export function InventoryCondition({ data }: { data: DashboardSummary }) {
 
   return (
     <Panel className="wc-condition">
-      <PanelHead title="Inventory condition" aside={`${formatQty(owned)} owned`} />
+      <PanelHead title={t("dashboard.conditionTitle")} aside={t("dashboard.ownedAside", { qty: formatQty(owned) })} />
       <div className="p-[18px]">
         {hasStock ? (
           <>
@@ -57,15 +61,15 @@ export function InventoryCondition({ data }: { data: DashboardSummary }) {
             </div>
             <p className="mt-[10px] text-[11px] text-[var(--muted)]">
               {reconciles
-                ? `Available + Reserved + In transit + Expired = ${formatQty(segSum)} = Owned.`
-                : `Segments shown sum to ${formatQty(segSum)} of ${formatQty(owned)} owned.`}
+                ? t("dashboard.conditionReconciles", { qty: formatQty(segSum) })
+                : t("dashboard.conditionPartial", { sum: formatQty(segSum), owned: formatQty(owned) })}
             </p>
             <p className="mono mt-3 inline-flex items-center gap-[6px] rounded-[var(--r-full)] bg-[var(--warning-subtle)] px-[9px] py-1 text-[11px] text-[var(--warning)]">
-              Near expiry {formatQty(inv.near_expiry_quantity)} · overlay
+              {t("dashboard.nearExpiryOverlay", { qty: formatQty(inv.near_expiry_quantity) })}
             </p>
           </>
         ) : (
-          <p className="py-2 text-[12px] text-[var(--muted)]">No stock on record.</p>
+          <p className="py-2 text-[12px] text-[var(--muted)]">{t("dashboard.noStock")}</p>
         )}
       </div>
     </Panel>

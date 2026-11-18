@@ -1,22 +1,26 @@
+"use client";
+
 import { Panel, PanelHead } from "@/components/ui/panel";
 import { formatCount } from "@/lib/format";
+import { useT } from "@/lib/i18n/client";
 import type { DashboardSummary } from "@/lib/api/schemas/dashboard";
 
 export function TodaySummary({ data }: { data: DashboardSummary }) {
+  const t = useT();
   const rows: [string, number][] = [
-    ["Orders confirmed", data.sales.CONFIRMED],
-    ["In picking", data.sales.PICKING],
-    ["In packing", data.sales.PACKING],
-    ["Ready to ship", data.sales.READY_TO_SHIP],
-    ["Shipped today", data.sales.shipped_today],
-    ["PO received today", data.purchase_orders.received_today],
-    ["Transfers in transit", data.transfers.IN_TRANSIT],
-    ["Blocked sales", data.sales.attention_required],
+    [t("dashboard.ordersConfirmed"), data.sales.CONFIRMED],
+    [t("dashboard.inPicking"), data.sales.PICKING],
+    [t("dashboard.inPacking"), data.sales.PACKING],
+    [t("dashboard.readyToShip"), data.sales.READY_TO_SHIP],
+    [t("dashboard.shippedToday"), data.sales.shipped_today],
+    [t("dashboard.poReceivedToday"), data.purchase_orders.received_today],
+    [t("dashboard.transfersInTransit"), data.transfers.IN_TRANSIT],
+    [t("dashboard.blockedSales"), data.sales.attention_required],
   ];
 
   return (
     <Panel className="wc-summary">
-      <PanelHead title="Today’s summary" />
+      <PanelHead title={t("dashboard.summaryTitle")} />
       <div className="p-[18px]">
         <div className="flex flex-col">
           {rows.map(([label, value]) => (
