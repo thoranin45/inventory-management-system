@@ -1,9 +1,9 @@
-import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { FulfillmentConsole } from "@/components/work/fulfillment-console";
+import { pageMetadata } from "@/lib/i18n/server";
 
-export const metadata: Metadata = { title: "Pack console" };
+export const generateMetadata = () => pageMetadata("pageTitle.packConsole");
 
 export default async function PackConsolePage(props: PageProps<"/packing/[id]">) {
   const { id } = await props.params;

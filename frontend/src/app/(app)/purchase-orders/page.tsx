@@ -1,11 +1,11 @@
 import { Suspense } from "react";
-import type { Metadata } from "next";
 
 import { PurchaseOrdersView } from "@/components/purchase-orders/purchase-orders-view";
 import { LoadingState } from "@/components/ui/states";
 import { Msg } from "@/components/ui/msg";
+import { pageMetadata } from "@/lib/i18n/server";
 
-export const metadata: Metadata = { title: "Purchase Orders" };
+export const generateMetadata = () => pageMetadata("pageTitle.purchaseOrders");
 
 export default function PurchaseOrdersPage() {
   return (

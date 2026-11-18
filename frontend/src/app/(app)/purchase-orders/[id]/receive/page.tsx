@@ -1,9 +1,9 @@
-import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { ReceivingConsole } from "@/components/purchase-orders/receiving-console";
+import { pageMetadata } from "@/lib/i18n/server";
 
-export const metadata: Metadata = { title: "Receiving" };
+export const generateMetadata = () => pageMetadata("pageTitle.poReceive");
 
 export default async function ReceivingPage(props: PageProps<"/purchase-orders/[id]/receive">) {
   const { id } = await props.params;

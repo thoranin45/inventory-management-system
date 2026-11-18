@@ -1,8 +1,8 @@
-import type { Metadata } from "next";
 
 import { ReportsLanding } from "@/components/reports/reports-landing";
+import { pageMetadata } from "@/lib/i18n/server";
 
-export const metadata: Metadata = { title: "Reports" };
+export const generateMetadata = () => pageMetadata("pageTitle.reports");
 
 export default function ReportsPage() {
   return <ReportsLanding />;

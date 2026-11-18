@@ -1,12 +1,10 @@
 "use client";
 
 import * as React from "react";
-import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent } from "@/components/ui/dialog";
 import { isApiError } from "@/lib/api/errors";
-import { masterDataErrorCopy } from "@/lib/api/schemas/master-data";
 import { useT } from "@/lib/i18n/client";
 import { masterDataErrorText } from "@/lib/master-data-copy";
 
@@ -85,11 +83,4 @@ export function DeleteConfirmDialog({
       </DialogContent>
     </Dialog>
   );
-}
-
-/** Toast helper shared by master-data mutation error handlers. */
-export function toastMutationError(fallback: string, error: unknown) {
-  const msg = isApiError(error) ? (masterDataErrorCopy(error.message) ?? error.userMessage) : fallback;
-  const rid = isApiError(error) ? error.requestId : undefined;
-  toast.error(fallback, { description: rid ? `${msg} · Request ${rid}` : msg });
 }
