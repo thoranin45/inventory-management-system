@@ -1,3 +1,5 @@
+"use client";
+
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 
@@ -5,6 +7,7 @@ import { Panel, PanelHead } from "@/components/ui/panel";
 import { isZero } from "@/lib/decimal";
 import { formatQty } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { useT } from "@/lib/i18n/client";
 import type { AttentionSummary, DashboardSummary } from "@/lib/api/schemas/dashboard";
 
 type Severity = "warning" | "danger" | "accent" | "ok";
@@ -55,40 +58,41 @@ export function NeedsAttention({
   dashboard: DashboardSummary;
   attention?: AttentionSummary;
 }) {
+  const t = useT();
   const inv = dashboard.inventory;
   const blocked = dashboard.sales.attention_required;
   const lowStock = attention?.low_operational_stock ?? 0;
 
   return (
     <Panel className="flex flex-col">
-      <PanelHead title="Needs attention" />
+      <PanelHead title={t("dashboard.attentionTitle")} />
       <div className="flex flex-1 flex-col justify-between">
         <AttnRow
           severity={lowStock ? "warning" : "ok"}
-          name="Low stock"
-          figure={`${lowStock} ${lowStock === 1 ? "SKU" : "SKUs"}`}
-          sub={lowStock ? "operational available below threshold" : "all above reorder point"}
+          name={t("dashboard.lowStock")}
+          figure={t(lowStock === 1 ? "dashboard.skuOne" : "dashboard.skuMany", { n: lowStock })}
+          sub={lowStock ? t("dashboard.lowStockSub") : t("dashboard.lowStockOk")}
           href="/products"
         />
         <AttnRow
           severity={!isZero(inv.expired_quantity) ? "danger" : "ok"}
-          name="Expired inventory"
+          name={t("dashboard.expiredInventory")}
           figure={formatQty(inv.expired_quantity)}
-          sub={`units · blocks ${blocked} ${blocked === 1 ? "sale" : "sales"}`}
+          sub={t(blocked === 1 ? "dashboard.expiredSubOne" : "dashboard.expiredSubMany", { n: blocked })}
           href="/stock"
         />
         <AttnRow
           severity={!isZero(inv.near_expiry_quantity) ? "warning" : "ok"}
-          name="Near expiry"
+          name={t("dashboard.nearExpiry")}
           figure={formatQty(inv.near_expiry_quantity)}
-          sub="units · subset of available, ≤ 90 days"
+          sub={t("dashboard.nearExpirySub")}
           href="/stock"
         />
         <AttnRow
           severity={blocked ? "accent" : "ok"}
-          name="Blocked sales"
-          figure={`${blocked} ${blocked === 1 ? "order" : "orders"}`}
-          sub={blocked ? "cannot ship on an expired lot" : "no blocked orders"}
+          name={t("dashboard.blockedSales")}
+          figure={t(blocked === 1 ? "dashboard.orderOne" : "dashboard.orderMany", { n: blocked })}
+          sub={blocked ? t("dashboard.blockedSub") : t("dashboard.blockedOk")}
           href="/sales"
         />
       </div>

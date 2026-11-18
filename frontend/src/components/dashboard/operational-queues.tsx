@@ -1,3 +1,5 @@
+"use client";
+
 import Link from "next/link";
 import {
   ChevronRight,
@@ -10,6 +12,7 @@ import type { LucideIcon } from "lucide-react";
 
 import { Panel, PanelHead } from "@/components/ui/panel";
 import { formatCount } from "@/lib/format";
+import { useT } from "@/lib/i18n/client";
 import type { DashboardSummary } from "@/lib/api/schemas/dashboard";
 
 function QueueRow({
@@ -49,28 +52,29 @@ function QueueRow({
 }
 
 export function OperationalQueues({ data }: { data: DashboardSummary }) {
+  const t = useT();
   const s = data.sales;
   const openTransfers = data.transfers.IN_TRANSIT + data.transfers.PARTIALLY_RECEIVED;
   const active = s.PICKING + s.PACKING + s.READY_TO_SHIP + data.purchase_orders.pending_receiving + openTransfers;
 
   return (
     <Panel className="wc-queues">
-      <PanelHead title="Operational queues" aside={`${active} active`} />
+      <PanelHead title={t("dashboard.queuesTitle")} aside={t("dashboard.activeAside", { n: active })} />
       <div className="flex flex-col">
-        <QueueRow icon={PackageSearch} name="Picking" desc="orders being picked" count={s.PICKING} href="/picking" />
-        <QueueRow icon={ClipboardCheck} name="Packing" desc="orders being verified" count={s.PACKING} href="/packing" />
-        <QueueRow icon={Truck} name="Ready to ship" desc="awaiting dispatch" count={s.READY_TO_SHIP} href="/sales" />
+        <QueueRow icon={PackageSearch} name={t("dashboard.picking")} desc={t("dashboard.pickingDesc")} count={s.PICKING} href="/picking" />
+        <QueueRow icon={ClipboardCheck} name={t("dashboard.packing")} desc={t("dashboard.packingDesc")} count={s.PACKING} href="/packing" />
+        <QueueRow icon={Truck} name={t("dashboard.readyToShip")} desc={t("dashboard.readyToShipDesc")} count={s.READY_TO_SHIP} href="/sales" />
         <QueueRow
           icon={Truck}
-          name="PO receiving"
-          desc="purchase orders inbound"
+          name={t("dashboard.poReceiving")}
+          desc={t("dashboard.poReceivingDesc")}
           count={data.purchase_orders.pending_receiving}
           href="/purchase-orders"
         />
         <QueueRow
           icon={ArrowLeftRight}
-          name="Transfers"
-          desc="in transit / partial"
+          name={t("dashboard.transfers")}
+          desc={t("dashboard.transfersDesc")}
           count={openTransfers}
           href="/transfers"
         />

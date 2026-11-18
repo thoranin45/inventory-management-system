@@ -110,6 +110,20 @@ const R5_SCOPE = [
   "components/work/work-queue.tsx",
 ];
 
+// R6 (P6, remaining screens) — batch 1: dashboard, audit, page loading states, error and 404 pages.
+const R6_SCOPE = [
+  "app/(app)/error.tsx",
+  "app/not-found.tsx",
+  "components/audit/audit-view.tsx",
+  "components/dashboard/dashboard-view.tsx",
+  "components/dashboard/inventory-condition.tsx",
+  "components/dashboard/kpi-zone.tsx",
+  "components/dashboard/needs-attention.tsx",
+  "components/dashboard/operational-queues.tsx",
+  "components/dashboard/recent-activity.tsx",
+  "components/dashboard/today-summary.tsx",
+];
+
 const JSX_TEXT = />\s*([A-Z][a-z]+(?:[ '’&,.:/-]+[A-Za-z]+)*[.…!?]?)\s*</g;
 const PROP_TEXT = /\b(?:aria-label|placeholder|title|label|heading|emptyText|ariaLabel)=["{]["`]?([A-Z][a-z]+[^"`}]*)["`]/g;
 const ALLOW = /^(?:AKKRATHARA|Ctrl K|Ctrl|Esc|EN|SKU|FEFO|FIFO|ID|OK)$/;
@@ -168,6 +182,16 @@ describe("untranslated string tracking (D4)", () => {
 
   it("R5-scope screens and order parts contain no hard-coded English", () => {
     for (const file of R5_SCOPE) expect(counts[file] ?? 0, `${file}: ${englishLiterals(readFileSync(join(SRC, file), "utf8"))}`).toBe(0);
+  });
+
+  it("R6-scope screens contain no hard-coded English", () => {
+    for (const file of R6_SCOPE) expect(counts[file] ?? 0, `${file}: ${englishLiterals(readFileSync(join(SRC, file), "utf8"))}`).toBe(0);
+  });
+
+  it("every app page's loading state is localized", () => {
+    const pages = sourceFiles(join(SRC, "app/(app)")).filter((f) => f.endsWith("page.tsx"));
+    const offenders = pages.filter((f) => /<LoadingState[^>]*label="/.test(readFileSync(f, "utf8")));
+    expect(offenders.map((f) => relative(SRC, f))).toEqual([]);
   });
 
   it("no file gains untranslated strings beyond the recorded baseline", () => {

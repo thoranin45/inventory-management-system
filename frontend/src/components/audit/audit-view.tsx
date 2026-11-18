@@ -13,11 +13,13 @@ import { isAdmin } from "@/lib/auth/permissions";
 import { useAuditLogs } from "@/lib/query/audit";
 import { auditActionLabel, auditEntityLabel, type AuditLog } from "@/lib/api/schemas/audit";
 import { formatIsoDate } from "@/lib/format";
+import { useT } from "@/lib/i18n/client";
 
 const PAGE_LOCAL_CAP = 200;
 
 export function AuditView() {
   const { user } = useSession();
+  const t = useT();
   const admin = isAdmin(user.role);
   const q = useAuditLogs(admin);
   const [search, setSearch] = React.useState("");
@@ -26,10 +28,10 @@ export function AuditView() {
   if (!admin) {
     return (
       <div className="flex flex-col gap-5">
-        <PageHeader title="Audit log" subtitle="Administrators only" />
+        <PageHeader title={t("audit.title")} subtitle={t("audit.adminsOnlySubtitle")} />
         <EmptyState
-          title="Admins only"
-          message="The audit log is restricted to administrators. Ask an admin if you need an entry checked."
+          title={t("audit.adminsOnlyTitle")}
+          message={t("audit.adminsOnlyBody")}
         />
       </div>
     );
@@ -46,12 +48,12 @@ export function AuditView() {
   const rows = showAll ? filtered : filtered.slice(0, PAGE_LOCAL_CAP);
 
   const columns: Column<AuditLog>[] = [
-    { key: "when", header: "When", cell: (r) => <span className="mono text-[var(--muted)]">{formatIsoDate(r.created_at)}</span> },
-    { key: "actor", header: "Actor", cell: (r) => <span className="font-medium">{r.username ?? "—"}</span> },
-    { key: "action", header: "Action", cell: (r) => <StatusBadge tone="neutral" label={auditActionLabel(r.action)} /> },
+    { key: "when", header: t("audit.colWhen"), cell: (r) => <span className="mono text-[var(--muted)]">{formatIsoDate(r.created_at)}</span> },
+    { key: "actor", header: t("audit.colActor"), cell: (r) => <span className="font-medium">{r.username ?? "—"}</span> },
+    { key: "action", header: t("audit.colAction"), cell: (r) => <StatusBadge tone="neutral" label={auditActionLabel(r.action)} /> },
     {
       key: "entity",
-      header: "Entity",
+      header: t("audit.colEntity"),
       cell: (r) => (
         <span className="text-[var(--muted)]">
           {auditEntityLabel(r.table_name)}
@@ -59,34 +61,34 @@ export function AuditView() {
         </span>
       ),
     },
-    { key: "desc", header: "Description", secondary: true, cell: (r) => <span className="text-[12px] text-[var(--muted)]">{r.description ?? "—"}</span> },
+    { key: "desc", header: t("audit.colDescription"), secondary: true, cell: (r) => <span className="text-[12px] text-[var(--muted)]">{r.description ?? "—"}</span> },
   ];
 
   return (
     <div className="flex flex-col gap-5">
       <PageHeader
-        title="Audit log"
+        title={t("audit.title")}
         subtitle={
           q.data
-            ? `${all.length} events · newest first · the backend returns the full log (no server paging)`
-            : "Loading…"
+            ? t("audit.subtitle", { n: all.length })
+            : t("common.loading")
         }
       />
 
       <SearchInput
         value={search}
         onCommit={setSearch}
-        placeholder="Actor, action, entity, description…"
-        ariaLabel="Search audit log"
+        placeholder={t("audit.searchPlaceholder")}
+        ariaLabel={t("audit.searchLabel")}
         className="max-w-[340px]"
       />
 
       {q.isLoading ? (
-        <LoadingState label="Loading audit log…" />
+        <LoadingState label={t("pages.loadingAudit")} />
       ) : q.isError ? (
         <ErrorState error={q.error} onRetry={() => void q.refetch()} />
       ) : filtered.length === 0 ? (
-        <EmptyState message={term ? `No audit events match “${search}”.` : "No audit events found."} />
+        <EmptyState message={term ? t("audit.noMatch", { term: search }) : t("audit.empty")} />
       ) : (
         <>
           <DataTable<AuditLog>
@@ -111,7 +113,7 @@ export function AuditView() {
           />
           {!showAll && filtered.length > PAGE_LOCAL_CAP ? (
             <Button variant="secondary" className="self-start" onClick={() => setShowAll(true)}>
-              Show all {filtered.length} events (page-local)
+              {t("audit.showAll", { n: filtered.length })}
             </Button>
           ) : null}
         </>

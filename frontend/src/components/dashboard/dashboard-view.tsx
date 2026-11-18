@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { ErrorState, Skeleton } from "@/components/ui/states";
 import { useAttentionSummary, useDashboardSummary } from "@/lib/query/hooks";
 import { formatIsoDate } from "@/lib/format";
+import { useT } from "@/lib/i18n/client";
 import { InventoryCondition } from "./inventory-condition";
 import { KpiZone } from "./kpi-zone";
 import { NeedsAttention } from "./needs-attention";
@@ -17,15 +18,16 @@ import { TodaySummary } from "./today-summary";
 export function DashboardView() {
   const summary = useDashboardSummary();
   const attention = useAttentionSummary();
+  const t = useT();
 
   const subtitle = summary.data
-    ? `Operational overview · as of ${formatIsoDate(summary.data.as_of_date)} · business time UTC+7`
-    : "Operational overview";
+    ? t("dashboard.subtitleAsOf", { date: formatIsoDate(summary.data.as_of_date) })
+    : t("dashboard.subtitle");
 
   return (
     <div className="wc-dash">
       <PageHeader
-        title="Dashboard"
+        title={t("dashboard.title")}
         subtitle={subtitle}
         actions={
           <Button
@@ -36,7 +38,7 @@ export function DashboardView() {
             }}
           >
             <RotateCcw aria-hidden className="h-[15px] w-[15px]" />
-            Refresh
+            {t("dashboard.refresh")}
           </Button>
         }
       />
