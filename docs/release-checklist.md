@@ -26,6 +26,9 @@
 - [ ] Frontend CI job **Frontend checks** green on the release commit:
       `npm ci`, `npm run typecheck`, `npm run lint`, `npm test`,
       `npm run build` (locally: `npm run check` in `frontend/`, Node 22).
+- [ ] E2E job **Playwright smoke (E2E)** green on the release commit
+      (`.github/workflows/e2e.yml`; fresh database; see
+      `frontend/e2e/smoke/README.md`). Not a required check yet, so look at it.
 - [ ] `main` branch protection requires `Frontend checks` and
       `Pytest on Python 3.12`; no `[skip ci]` commits on the release PR.
 - [ ] Live contract tests are only ever run with `npm run test:live` against a

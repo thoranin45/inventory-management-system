@@ -1,0 +1,152 @@
+name: E2E Tests
+
+# P8: Playwright smoke suite against the REAL stack on a FRESH database:
+#   Next.js (BFF) -> FastAPI -> PostgreSQL, migrated from zero, first admin
+#   created by scripts/create_first_admin.py.
+#
+# NOT a required check (the main-protection ruleset requires only
+# "Pytest on Python 3.12" and "Frontend checks"). Making it required is a
+# separate, Owner-approved ruleset change.
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  e2e:
+    name: Playwright smoke (E2E)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: inventory_e2e_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d inventory_e2e_db"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # Throwaway CI database and secret; nothing here is a real credential.
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/inventory_e2e_db
+      DB_HOST: localhost
+      DB_PORT: "5432"
+      DB_NAME: inventory_e2e_db
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      SECRET_KEY: github-actions-e2e-secret-key-min-32-bytes
+      ENV: test
+      # The suite signs in twice through the UI and fetches API tokens to
+      # arrange data; the production brute-force limit (5 per 5 min) would
+      # throttle that. Production keeps its default.
+      AUTH_RATE_LIMIT_MAX_REQUESTS: "1000"
+      PYTHONUNBUFFERED: "1"
+      NEXT_TELEMETRY_DISABLED: "1"
+      E2E_BASE_URL: http://127.0.0.1:3000
+      E2E_API_URL: http://127.0.0.1:8081/api/v1
+      E2E_ADMIN_USERNAME: e2e-admin
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install backend dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Migrate the fresh database
+        run: alembic upgrade head
+
+      - name: Create the first administrator
+        run: |
+          pw="$(openssl rand -hex 24)"
+          echo "::add-mask::$pw"
+          echo "E2E_ADMIN_PASSWORD=$pw" >> "$GITHUB_ENV"
+          ADMIN_USERNAME="$E2E_ADMIN_USERNAME" ADMIN_PASSWORD="$pw" python scripts/create_first_admin.py
+
+      - name: Start the API
+        run: |
+          nohup uvicorn app.main:app --host 127.0.0.1 --port 8081 > "$RUNNER_TEMP/api.log" 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8081/ready | grep -q '"ready"'; then exit 0; fi
+            sleep 2
+          done
+          cat "$RUNNER_TEMP/api.log"; exit 1
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+
+      - name: Build the frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Start the frontend
+        working-directory: frontend
+        env:
+          API_BASE_URL: http://127.0.0.1:8081
+        run: |
+          nohup npx next start -H 127.0.0.1 -p 3000 > "$RUNNER_TEMP/web.log" 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -fsS -o /dev/null http://127.0.0.1:3000/login; then exit 0; fi
+            sleep 2
+          done
+          cat "$RUNNER_TEMP/web.log"; exit 1
+
+      - name: Install Chromium for Playwright
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run the smoke suite
+        working-directory: frontend
+        run: npx playwright test -c playwright.e2e.config.ts
+
+      - name: Server logs
+        if: failure()
+        run: |
+          echo "::group::api.log"; tail -n 200 "$RUNNER_TEMP/api.log" || true; echo "::endgroup::"
+          echo "::group::web.log"; tail -n 200 "$RUNNER_TEMP/web.log" || true; echo "::endgroup::"
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-report
+          path: |
+            frontend/e2e-report/
+            frontend/e2e-results/
+          retention-days: 7
