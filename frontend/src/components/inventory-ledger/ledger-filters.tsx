@@ -10,6 +10,8 @@ import { useProducts } from "@/lib/query/hooks";
 import { useWarehouses } from "@/lib/query/warehouses";
 import { MOVEMENT_GROUPS, type LedgerItem } from "@/lib/api/schemas/inventory-movements";
 import type { ReportParamKey } from "@/lib/reports/use-report-params";
+import { useT } from "@/lib/i18n/client";
+import { MOVEMENT_GROUP_KEY } from "@/lib/ledger-copy";
 
 const fieldCls =
   "h-9 rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 text-[12.5px] tabular-nums outline-hidden focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-[var(--focus)]";
@@ -59,6 +61,7 @@ export function LedgerFilters({
   showDateHint: boolean;
   sortOrder: "asc" | "desc";
 }) {
+  const t = useT();
   const [term, setTerm] = React.useState("");
   const productQ = useProducts(term.trim().length >= 2 ? { page: 1, page_size: 20, search: term.trim() } : { page: 1, page_size: 20 });
   const productItems: ComboboxItem[] = (productQ.data?.items ?? []).map((p) => ({
@@ -75,10 +78,10 @@ export function LedgerFilters({
     const fromList = productQ.data?.items.find((p) => p.id === id);
     return {
       id,
-      label: fromRows?.product_name ?? fromList?.product_name ?? `Product #${id}`,
+      label: fromRows?.product_name ?? fromList?.product_name ?? t("reports.productFallback", { id }),
       sublabel: fromRows?.sku ?? fromList?.sku ?? undefined,
     };
-  }, [values.product_id, rows, productQ.data]);
+  }, [values.product_id, rows, productQ.data, t]);
 
   // Historical view: every warehouse incl. inactive ones, labelled — never hidden.
   const warehousesQ = useWarehouses(false);
@@ -88,37 +91,37 @@ export function LedgerFilters({
   return (
     <>
       <div className="min-w-[220px] flex-1 sm:max-w-[300px]">
-        <Labeled label="Product">
+        <Labeled label={t("reports.colProduct")}>
           <Combobox
-            ariaLabel="Filter by product"
+            ariaLabel={t("ledger.filterProduct")}
             value={selectedProduct}
             items={productItems}
             loading={productQ.isFetching}
             onSearch={setTerm}
-            placeholder="Any product"
+            placeholder={t("ledger.anyProduct")}
             onChange={(item) => onChange({ product_id: item ? String(item.id) : null, batch_id: null })}
           />
         </Labeled>
       </div>
 
-      <Labeled label="Warehouse" htmlFor="lf-warehouse">
+      <Labeled label={t("ledger.warehouse")} htmlFor="lf-warehouse">
         <select
           id="lf-warehouse"
           className={fieldCls}
           value={values.warehouse_id ?? ""}
           onChange={(e) => onChange({ warehouse_id: e.currentTarget.value || null, location_id: null })}
         >
-          <option value="">All warehouses</option>
+          <option value="">{t("ledger.allWarehouses")}</option>
           {warehouses.map((w) => (
             <option key={w.id} value={String(w.id)}>
               {w.warehouse_code} · {w.warehouse_name}
-              {w.is_active ? "" : " (inactive)"}
+              {w.is_active ? "" : ` (${t("ledger.inactive")})`}
             </option>
           ))}
         </select>
       </Labeled>
 
-      <Labeled label="Location" htmlFor="lf-location">
+      <Labeled label={t("ledger.location")} htmlFor="lf-location">
         <select
           id="lf-location"
           className={fieldCls}
@@ -126,45 +129,45 @@ export function LedgerFilters({
           disabled={!selectedWarehouse}
           onChange={(e) => onChange({ location_id: e.currentTarget.value || null })}
         >
-          <option value="">All locations</option>
+          <option value="">{t("ledger.allLocations")}</option>
           {(selectedWarehouse?.locations ?? []).map((l) => (
             <option key={l.id} value={String(l.id)}>
               {l.location_code}
               {l.location_name ? ` · ${l.location_name}` : ""}
-              {l.is_active ? "" : " (inactive)"}
+              {l.is_active ? "" : ` (${t("ledger.inactive")})`}
             </option>
           ))}
         </select>
       </Labeled>
 
-      <Labeled label="Type" htmlFor="lf-group">
+      <Labeled label={t("reports.type")} htmlFor="lf-group">
         <select
           id="lf-group"
           className={fieldCls}
           value={values.movement_group ?? ""}
           onChange={(e) => onChange({ movement_group: e.currentTarget.value || null })}
         >
-          <option value="">All movements</option>
+          <option value="">{t("ledger.allMovements")}</option>
           {MOVEMENT_GROUPS.map((g) => (
             <option key={g.key} value={g.key}>
-              {g.label}
+              {MOVEMENT_GROUP_KEY[g.key] ? t(MOVEMENT_GROUP_KEY[g.key]) : g.label}
             </option>
           ))}
         </select>
       </Labeled>
 
       <div className="min-w-[160px] sm:max-w-[200px]">
-        <Labeled label="Reference no.">
+        <Labeled label={t("ledger.referenceNo")}>
           <SearchInput
             value={values.reference_number ?? ""}
             onCommit={(val) => onChange({ reference_number: val.trim() || null })}
-            placeholder="ADJ-… / PO-… / lot"
-            ariaLabel="Exact reference number"
+            placeholder={t("ledger.referencePh")}
+            ariaLabel={t("ledger.referenceAria")}
           />
         </Labeled>
       </div>
 
-      <Labeled label="From" htmlFor="lf-from">
+      <Labeled label={t("reports.from")} htmlFor="lf-from">
         <input
           id="lf-from"
           type="date"
@@ -174,7 +177,7 @@ export function LedgerFilters({
           onChange={(e) => onChange({ from_date: e.currentTarget.value || null })}
         />
       </Labeled>
-      <Labeled label="To" htmlFor="lf-to">
+      <Labeled label={t("reports.to")} htmlFor="lf-to">
         <input
           id="lf-to"
           type="date"
@@ -185,26 +188,26 @@ export function LedgerFilters({
         />
       </Labeled>
 
-      <Labeled label="Order" htmlFor="lf-order">
+      <Labeled label={t("ledger.order")} htmlFor="lf-order">
         <select
           id="lf-order"
           className={fieldCls}
           value={sortOrder}
           onChange={(e) => onChange({ sort_order: e.currentTarget.value === "asc" ? "asc" : null })}
         >
-          <option value="desc">Newest first</option>
-          <option value="asc">Oldest first</option>
+          <option value="desc">{t("ledger.newestFirst")}</option>
+          <option value="asc">{t("ledger.oldestFirst")}</option>
         </select>
       </Labeled>
 
       {admin ? (
         <div className="min-w-[140px] sm:max-w-[180px]">
-          <Labeled label="Performed by">
+          <Labeled label={t("ledger.performedBy")}>
             <SearchInput
               value={values.actor ?? ""}
               onCommit={(val) => onChange({ actor: val.trim() || null })}
-              placeholder="Exact username"
-              ariaLabel="Filter by operator username"
+              placeholder={t("ledger.exactUsername")}
+              ariaLabel={t("ledger.filterOperator")}
             />
           </Labeled>
         </div>
@@ -216,13 +219,13 @@ export function LedgerFilters({
           checked={values.include_transit === "true"}
           onChange={(e) => onChange({ include_transit: e.currentTarget.checked ? "true" : null })}
         />
-        Show in-transit legs
+        {t("ledger.showTransit")}
       </label>
 
       {values.batch_id ? (
         <span className="inline-flex h-9 items-center gap-1 rounded-[var(--r-full)] border border-[var(--border)] px-3 text-[12px]">
-          Lot #{values.batch_id}
-          <button type="button" aria-label="Remove lot filter" onClick={() => onChange({ batch_id: null })}>
+          {t("ledger.lotNo", { id: values.batch_id })}
+          <button type="button" aria-label={t("ledger.removeLot")} onClick={() => onChange({ batch_id: null })}>
             <X aria-hidden className="h-3.5 w-3.5" />
           </button>
         </span>
@@ -231,13 +234,13 @@ export function LedgerFilters({
       {activeFilterCount(values) ? (
         <Button variant="ghost" onClick={onClear}>
           <X aria-hidden className="h-4 w-4" />
-          Clear filters
+          {t("reports.clearFilters")}
         </Button>
       ) : null}
 
       {showDateHint ? (
         <p role="status" className="basis-full text-[12px] text-[var(--warning)]">
-          Choose both a From and a To date to filter by business day (Asia/Bangkok).
+          {t("ledger.dateHint")}
         </p>
       ) : null}
     </>

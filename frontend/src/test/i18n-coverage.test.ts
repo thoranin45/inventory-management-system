@@ -151,6 +151,14 @@ const R6_SCOPE = [
   "components/reports/reports-landing.tsx",
   "components/reports/sales-report.tsx",
   "components/reports/transfers-report.tsx",
+  // P6 batch 4
+  "components/inventory-ledger/ledger-filters.tsx",
+  "components/inventory-ledger/ledger-view.tsx",
+  "components/transfers/create-transfer.tsx",
+  "components/transfers/transfer-actions.tsx",
+  "components/transfers/transfer-detail.tsx",
+  "components/transfers/transfer-lifecycle.tsx",
+  "components/transfers/transfers-view.tsx",
 ];
 
 const JSX_TEXT = />\s*([A-Z][a-z]+(?:[ '’&,.:/-]+[A-Za-z]+)*[.…!?]?)\s*</g;

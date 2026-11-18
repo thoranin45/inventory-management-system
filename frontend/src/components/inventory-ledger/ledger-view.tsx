@@ -24,6 +24,11 @@ import {
   type LedgerItem,
 } from "@/lib/api/schemas/inventory-movements";
 import { LedgerFilters, activeFilterCount } from "./ledger-filters";
+import { useT } from "@/lib/i18n/client";
+import type { MessageKey, MessageVars } from "@/lib/i18n/translate";
+import { ledgerTypeText, sourceLabelText } from "@/lib/ledger-copy";
+
+type T = (key: MessageKey, vars?: MessageVars) => string;
 
 export const LEDGER_KEYS: readonly ReportParamKey[] = [
   "page",
@@ -62,27 +67,30 @@ export function SignedQuantity({ value, className }: { value: string; className?
  * value as-is, labelled, because no conversion of it would be honest.
  */
 export function When({ row }: { row: LedgerItem }) {
+  const t = useT();
   if (row.timestamp_verified && row.occurred_at) {
     return <span className="mono whitespace-nowrap text-[var(--muted)]">{formatBusinessDateTime(row.occurred_at)}</span>;
   }
   return (
     <span
       className="mono whitespace-nowrap text-[var(--muted)]"
-      title="Stored time whose time zone is not verified — shown as recorded, not converted to Bangkok time"
+      title={t("ledger.zoneUnverifiedTitle")}
     >
       {formatStoredWallClock(row.created_at)}
-      <span className="ml-1 text-[10.5px] font-semibold uppercase text-[var(--warning)]">zone unverified</span>
+      <span className="ml-1 text-[10.5px] font-semibold uppercase text-[var(--warning)]">{t("ledger.zoneUnverified")}</span>
     </span>
   );
 }
 
 function TypeBadge({ row }: { row: LedgerItem }) {
+  const t = useT();
   const meta = ledgerTypeMeta(row.movement_type);
-  return <StatusBadge tone={meta.tone} label={meta.label} />;
+  return <StatusBadge tone={meta.tone} label={ledgerTypeText(t, row.movement_type)} />;
 }
 
 function Inactive() {
-  return <span className="ml-1 text-[10.5px] font-semibold uppercase text-[var(--faint)]">inactive</span>;
+  const t = useT();
+  return <span className="ml-1 text-[10.5px] font-semibold uppercase text-[var(--faint)]">{t("ledger.inactive")}</span>;
 }
 
 function whereLabel(row: LedgerItem): React.ReactNode {
@@ -95,26 +103,29 @@ function whereLabel(row: LedgerItem): React.ReactNode {
   );
 }
 
-function lotLabel(row: LedgerItem): string {
+function lotLabel(t: T, row: LedgerItem): string {
   if (!row.batch) return "—";
   const lot = row.batch.lot_no ?? `#${row.batch.id}`;
-  return row.batch.expiry_date ? `${lot} · exp ${row.batch.expiry_date}` : lot;
+  return row.batch.expiry_date ? `${lot} · ${t("transfers.expShort", { date: row.batch.expiry_date })}` : lot;
 }
 
 export function RedactedIndicator() {
+  const t = useT();
   return (
     <span
       className="inline-flex items-center gap-1 text-[11px] text-[var(--faint)]"
-      title="Private adjustment details are visible only to the requester and admins"
+      title={t("ledger.privateTitle")}
     >
       <Lock aria-hidden className="h-3 w-3" />
-      Private details hidden
+      {t("ledger.privateHidden")}
     </span>
   );
 }
 
 function SourceCell({ row, onOpenRequest }: { row: LedgerItem; onOpenRequest: (id: number) => void }) {
+  const t = useT();
   const link = sourceLink(row);
+  const label = sourceLabelText(t, row);
   const stop = (e: React.SyntheticEvent) => e.stopPropagation();
   return (
     <span className="flex flex-col gap-0.5">
@@ -140,7 +151,7 @@ function SourceCell({ row, onOpenRequest }: { row: LedgerItem; onOpenRequest: (i
           {link.label}
         </Link>
       ) : (
-        <span className="mono text-[var(--muted)]">{link.label}</span>
+        <span className="mono text-[var(--muted)]">{label}</span>
       )}
       {isRedacted(row) ? <RedactedIndicator /> : null}
     </span>
@@ -148,6 +159,7 @@ function SourceCell({ row, onOpenRequest }: { row: LedgerItem; onOpenRequest: (i
 }
 
 export function InventoryLedgerView() {
+  const t = useT();
   const { user } = useSession();
   const admin = isAdmin(user.role);
   const rp = useReportParams(LEDGER_KEYS, { page_size: 25, sort_order: "desc" });
@@ -185,29 +197,29 @@ export function InventoryLedgerView() {
   const columns: Column<LedgerItem>[] = [
     {
       key: "when",
-      header: "When (Bangkok)",
+      header: t("ledger.whenBangkok"),
       cell: (r) => <When row={r} />,
     },
-    { key: "type", header: "Type", cell: (r) => <TypeBadge row={r} /> },
+    { key: "type", header: t("reports.colType"), cell: (r) => <TypeBadge row={r} /> },
     {
       key: "product",
-      header: "Product",
+      header: t("reports.colProduct"),
       cell: (r) => (
         <div>
           <div className="font-medium">
-            {r.product.product_name ?? `Product #${r.product.id}`}
+            {r.product.product_name ?? t("reports.productFallback", { id: r.product.id })}
             {r.product.is_active ? null : <Inactive />}
           </div>
           <div className="mono text-[11px] text-[var(--faint)]">{r.product.sku}</div>
         </div>
       ),
     },
-    { key: "where", header: "Warehouse / location", cell: whereLabel },
-    { key: "lot", header: "Lot", secondary: true, cell: (r) => <span className="mono">{lotLabel(r)}</span> },
-    { key: "qty", header: "Quantity", align: "right", cell: (r) => <SignedQuantity value={r.quantity} /> },
+    { key: "where", header: t("ledger.warehouseLocation"), cell: whereLabel },
+    { key: "lot", header: t("reports.colLot"), secondary: true, cell: (r) => <span className="mono">{lotLabel(t, r)}</span> },
+    { key: "qty", header: t("reports.colQuantity"), align: "right", cell: (r) => <SignedQuantity value={r.quantity} /> },
     {
       key: "balance",
-      header: "Balance",
+      header: t("ledger.balance"),
       align: "right",
       secondary: true,
       cell: (r) => (
@@ -216,12 +228,12 @@ export function InventoryLedgerView() {
         </span>
       ),
     },
-    { key: "source", header: "Reference", cell: (r) => <SourceCell row={r} onOpenRequest={setRequestId} /> },
+    { key: "source", header: t("reports.colReference"), cell: (r) => <SourceCell row={r} onOpenRequest={setRequestId} /> },
     {
       key: "by",
-      header: "By",
+      header: t("ledger.by"),
       secondary: true,
-      cell: (r) => <span className="text-[var(--muted)]">{r.created_by?.username ?? "system"}</span>,
+      cell: (r) => <span className="text-[var(--muted)]">{r.created_by?.username ?? t("ledger.system")}</span>,
     },
   ];
 
@@ -241,13 +253,11 @@ export function InventoryLedgerView() {
   return (
     <div className="flex flex-col gap-5">
       <PageHeader
-        title="Inventory Ledger"
+        title={t("ledger.title")}
         subtitle={
           pg
-            ? `${pg.total_items} movements · verified by recorded time, ${
-                rp.sortOrder === "asc" ? "oldest first" : "newest first"
-              }; then unverified history by stored time`
-            : "Loading…"
+            ? t(rp.sortOrder === "asc" ? "ledger.subtitleAsc" : "ledger.subtitleDesc", { n: pg.total_items })
+            : t("common.loading")
         }
         actions={
           isMobile ? (
@@ -258,7 +268,8 @@ export function InventoryLedgerView() {
               aria-controls="ledger-filters"
             >
               <SlidersHorizontal aria-hidden className="h-4 w-4" />
-              Filters{filterCount ? ` (${filterCount})` : ""}
+              {t("ledger.filters")}
+              {filterCount ? ` (${filterCount})` : ""}
             </Button>
           ) : null
         }
@@ -272,9 +283,7 @@ export function InventoryLedgerView() {
 
       {bothDates && rows.some((r) => !r.timestamp_verified) ? (
         <p role="note" className="rounded-[var(--r-sm)] bg-[var(--surface-sunken)] p-2 text-[12px] text-[var(--muted)]">
-          Some rows have a stored time whose time zone is not verified (“zone unverified”). They are included when
-          they could fall on the selected business days under any time zone, so the date filter may show up to 14
-          hours of extra unverified rows at either edge. Verified rows match the selected days exactly.
+          {t("ledger.unverifiedNote")}
         </p>
       ) : null}
 
@@ -287,7 +296,7 @@ export function InventoryLedgerView() {
         isFetching={q.isFetching}
         error={q.isError ? q.error : undefined}
         onRetry={() => void q.refetch()}
-        emptyMessage="No movements match these filters."
+        emptyMessage={t("ledger.empty")}
         pagination={
           pg
             ? {
@@ -302,7 +311,7 @@ export function InventoryLedgerView() {
         renderCard={(r) => ({
           title: (
             <span className="flex w-full items-baseline justify-between gap-3">
-              <span>{r.product.product_name ?? `Product #${r.product.id}`}</span>
+              <span>{r.product.product_name ?? t("reports.productFallback", { id: r.product.id })}</span>
               <SignedQuantity value={r.quantity} className="text-[15px]" />
             </span>
           ),
@@ -311,11 +320,11 @@ export function InventoryLedgerView() {
             <>
               <span>
                 {whereLabel(r)}
-                {r.batch ? <span className="mono"> · {lotLabel(r)}</span> : null}
+                {r.batch ? <span className="mono"> · {lotLabel(t, r)}</span> : null}
               </span>
               <SourceCell row={r} onOpenRequest={setRequestId} />
               <span className="mono text-[var(--muted)]">
-                <When row={r} /> · {r.created_by?.username ?? "system"}
+                <When row={r} /> · {r.created_by?.username ?? t("ledger.system")}
               </span>
             </>
           ),
@@ -323,7 +332,7 @@ export function InventoryLedgerView() {
       />
 
       <Drawer open={detail !== null} onOpenChange={(open) => (open ? null : setDetail(null))}>
-        <DrawerContent title={detail ? `Movement #${detail.id}` : "Movement"}>
+        <DrawerContent title={detail ? t("ledger.movementNo", { id: detail.id }) : t("ledger.movement")}>
           {detail ? (
             <LedgerRowDetail
               row={detail}
@@ -337,17 +346,17 @@ export function InventoryLedgerView() {
               }}
             />
           ) : (
-            <EmptyState message="No movement selected." />
+            <EmptyState message={t("ledger.noMovement")} />
           )}
         </DrawerContent>
       </Drawer>
 
       <Drawer open={requestId !== null} onOpenChange={(open) => (open ? null : setRequestId(null))}>
-        <DrawerContent title="Adjustment request">
+        <DrawerContent title={t("ledger.adjustmentRequest")}>
           {requestId !== null ? (
             <StockAdjustmentRequestDetailBody id={requestId} role={user.role} currentUserId={user.id} onDone={() => setRequestId(null)} />
           ) : (
-            <EmptyState message="No request selected." />
+            <EmptyState message={t("ledger.noRequest")} />
           )}
         </DrawerContent>
       </Drawer>
@@ -373,6 +382,7 @@ export function LedgerRowDetail({
   onFilter: (patch: Partial<Record<ReportParamKey, string | null>>) => void;
   onOpenRequest: (id: number) => void;
 }) {
+  const t = useT();
   const link = sourceLink(row);
   const adj = row.adjustment;
   return (
@@ -382,28 +392,28 @@ export function LedgerRowDetail({
         <SignedQuantity value={row.quantity} className="text-[18px]" />
       </div>
       <div>
-        <Row label="When (Bangkok)">
+        <Row label={t("ledger.whenBangkok")}>
           <When row={row} />
         </Row>
-        <Row label="Product">
+        <Row label={t("reports.colProduct")}>
           {row.product.product_name} <span className="mono text-[var(--faint)]">{row.product.sku}</span>
           {row.product.is_active ? null : <Inactive />}
         </Row>
-        <Row label="Warehouse">
+        <Row label={t("ledger.warehouse")}>
           {row.warehouse.warehouse_name} ({row.warehouse.warehouse_code}){row.warehouse.is_active ? null : <Inactive />}
         </Row>
-        <Row label="Location">
+        <Row label={t("ledger.location")}>
           {row.location.location_name ?? row.location.location_code}
           {row.location.location_name ? <span className="mono text-[var(--faint)]"> ({row.location.location_code})</span> : null}
           {row.location.is_active ? null : <Inactive />}
         </Row>
-        <Row label="Lot">{lotLabel(row)}</Row>
-        <Row label="Balance">
+        <Row label={t("reports.colLot")}>{lotLabel(t, row)}</Row>
+        <Row label={t("ledger.balance")}>
           <span className="mono">
             {formatSignedQty(row.balance_before).replace(/^\+/, "")} → {formatSignedQty(row.balance_after).replace(/^\+/, "")}
           </span>
         </Row>
-        <Row label="Reference">
+        <Row label={t("reports.colReference")}>
           {link.kind === "adjustment" ? (
             <button type="button" className="mono text-[var(--accent)] hover:underline" onClick={() => onOpenRequest(link.requestId)}>
               {link.label}
@@ -413,28 +423,28 @@ export function LedgerRowDetail({
               {link.label}
             </Link>
           ) : (
-            <span className="mono">{link.label}</span>
+            <span className="mono">{sourceLabelText(t, row)}</span>
           )}
           {row.source.receipt_number ? <div className="mono text-[11px] text-[var(--faint)]">{row.source.receipt_number}</div> : null}
         </Row>
         {adj ? (
           <>
-            <Row label="Reason">{adj.reason_code ?? "—"}</Row>
-            <Row label="Requested by">{adj.requested_by?.username ?? (adj.redacted ? <RedactedIndicator /> : "—")}</Row>
-            <Row label="Notes">{adj.notes ?? (adj.redacted ? <RedactedIndicator /> : "—")}</Row>
+            <Row label={t("ledger.reason")}>{adj.reason_code ?? "—"}</Row>
+            <Row label={t("ledger.requestedBy")}>{adj.requested_by?.username ?? (adj.redacted ? <RedactedIndicator /> : "—")}</Row>
+            <Row label={t("ledger.notes")}>{adj.notes ?? (adj.redacted ? <RedactedIndicator /> : "—")}</Row>
           </>
         ) : null}
-        <Row label="Performed by">{row.created_by?.username ?? "system"}</Row>
-        <Row label="Remark">{row.remark ?? (row.remark_redacted ? <RedactedIndicator /> : "—")}</Row>
-        {row.is_transit_leg ? <Row label="Leg">Internal in-transit leg (system transit storage)</Row> : null}
+        <Row label={t("ledger.performedBy")}>{row.created_by?.username ?? t("ledger.system")}</Row>
+        <Row label={t("transfers.remark")}>{row.remark ?? (row.remark_redacted ? <RedactedIndicator /> : "—")}</Row>
+        {row.is_transit_leg ? <Row label={t("ledger.leg")}>{t("ledger.transitLeg")}</Row> : null}
       </div>
       <div className="flex flex-wrap gap-2">
         <Button variant="secondary" size="sm" onClick={() => onFilter({ product_id: String(row.product.id) })}>
-          This product’s history
+          {t("ledger.productHistory")}
         </Button>
         {row.batch ? (
           <Button variant="secondary" size="sm" onClick={() => onFilter({ product_id: String(row.product.id), batch_id: String(row.batch!.id) })}>
-            This lot’s history
+            {t("ledger.lotHistory")}
           </Button>
         ) : null}
         <Button
@@ -442,7 +452,7 @@ export function LedgerRowDetail({
           size="sm"
           onClick={() => onFilter({ warehouse_id: String(row.warehouse.id), location_id: String(row.location.id) })}
         >
-          This location
+          {t("ledger.thisLocation")}
         </Button>
       </div>
     </div>

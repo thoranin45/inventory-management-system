@@ -3,6 +3,8 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { transferListResponse } from "@/test/fixtures";
+import { LanguageProvider } from "@/lib/i18n/client";
+import { DICTIONARIES } from "@/lib/i18n/translate";
 
 const replace = vi.fn();
 let search = "";
@@ -78,5 +80,22 @@ describe("TransfersView", () => {
     const url = replace.mock.calls.at(-1)![0] as string;
     expect(url).toMatch(/sort_by=transfer_number/);
     expect(url).toMatch(/sort_order=desc/);
+  });
+
+  it("renders in Thai: status tabs, actions and the legacy badge", () => {
+    const th = DICTIONARIES.th;
+    render(
+      <LanguageProvider initialLocale="th">
+        <TransfersView />
+      </LanguageProvider>,
+    );
+    expect(screen.getByText(th.reports.legacyCompleted)).toBeInTheDocument();
+    expect(screen.queryByText("Legacy completed")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: th.transfers.newTransfer })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: th.transfers.viewInTransit })).toHaveAttribute("href", "/stock?tab=in-transit");
+    const labels = Array.from(screen.getAllByRole("tablist")[0].querySelectorAll("button")).map((b) => b.textContent?.trim());
+    expect(labels).toContain(th.status.DRAFT);
+    expect(labels).toContain(th.status.IN_TRANSIT);
+    expect(labels).not.toContain("Draft");
   });
 });

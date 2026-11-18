@@ -13,9 +13,11 @@ import { Button } from "@/components/ui/button";
 import { useListParams } from "@/lib/list-params";
 import { useTransfers, useWarehouseNames } from "@/lib/query/transfers";
 import { formatIsoDate } from "@/lib/format";
-import { TRANSFER_FILTER_TABS, type TransferDetail, type TransferRow } from "@/lib/api/schemas/transfers";
+import { TRANSFER_FILTER_TABS, TRANSFER_STATUS_LABEL, type TransferDetail, type TransferRow } from "@/lib/api/schemas/transfers";
 import { TransferDetailDrawer } from "./transfer-detail";
 import { CreateTransferDrawer } from "./create-transfer";
+import { useT } from "@/lib/i18n/client";
+import { statusText } from "@/lib/reports/report-copy";
 
 function pct(n: number): string {
   if (!Number.isFinite(n)) return "0%";
@@ -23,6 +25,7 @@ function pct(n: number): string {
 }
 
 export function TransfersView() {
+  const t = useT();
   const { state, setSearch, setPage, setFilter, cycleSort } = useListParams({
     sortOrder: "desc",
     filter: "all",
@@ -30,7 +33,7 @@ export function TransfersView() {
   });
 
   const filter = state.filter ?? "all";
-  const tab = TRANSFER_FILTER_TABS.find((t) => t.key === filter) ?? TRANSFER_FILTER_TABS[0];
+  const tab = TRANSFER_FILTER_TABS.find((x) => x.key === filter) ?? TRANSFER_FILTER_TABS[0];
 
   const query = React.useMemo(
     () => ({
@@ -82,81 +85,81 @@ export function TransfersView() {
 
   // Directory names first (inactive ones labelled), then the row's own name.
   const whNames = useWarehouseNames().data ?? {};
-  const wh = (id: number, name: string | null) => whNames[id] ?? name ?? `Warehouse #${id}`;
+  const wh = (id: number, name: string | null) => whNames[id] ?? name ?? t("reports.warehouseFallback", { id });
 
   const columns: Column<TransferRow>[] = [
     {
       key: "transfer_number",
-      header: "Transfer #",
+      header: t("reports.colTransfer"),
       sortField: "transfer_number",
       cell: (r) => <span className="mono font-medium">{r.transfer_number}</span>,
     },
-    { key: "source", header: "Source", cell: (r) => <span>{wh(r.source_warehouse_id, r.source_warehouse_name)}</span> },
+    { key: "source", header: t("transfers.colSource"), cell: (r) => <span>{wh(r.source_warehouse_id, r.source_warehouse_name)}</span> },
     {
       key: "destination",
-      header: "Destination",
+      header: t("transfers.colDestination"),
       cell: (r) => <span>{wh(r.destination_warehouse_id, r.destination_warehouse_name)}</span>,
     },
     {
       key: "status",
-      header: "Status",
+      header: t("reports.colStatus"),
       sortField: "status",
       cell: (r) =>
         r.legacy_completed ? (
-          <StatusBadge tone="neutral" label="Legacy completed" />
+          <StatusBadge tone="neutral" label={t("reports.legacyCompleted")} />
         ) : (
           <StatusBadge status={r.status.toUpperCase()} />
         ),
     },
     {
       key: "lines",
-      header: "Lines",
+      header: t("reports.colLines"),
       align: "right",
       secondary: true,
       cell: (r) => <span className="tnum text-[var(--muted)]">{r.line_count}</span>,
     },
     {
       key: "total",
-      header: "Total",
+      header: t("reports.colTotal"),
       align: "right",
       secondary: true,
       cell: (r) => <QuantityDisplay value={r.total_quantity} className="text-[var(--muted)]" />,
     },
     {
       key: "dispatched",
-      header: "Dispatched",
+      header: t("reports.colDispatched"),
       align: "right",
       cell: (r) => <QuantityDisplay value={r.dispatched_quantity} />,
     },
     {
       key: "received",
-      header: "Received",
+      header: t("reports.colReceived"),
       align: "right",
       cell: (r) => <QuantityDisplay value={r.received_quantity} />,
     },
     {
       key: "outstanding",
-      header: "Outstanding",
+      header: t("reports.colOutstanding"),
       align: "right",
       secondary: true,
       cell: (r) => <QuantityDisplay value={r.outstanding_quantity} className="text-[var(--muted)]" />,
     },
     {
       key: "progress",
-      header: "Progress",
+      header: t("reports.colProgress"),
       align: "right",
       cell: (r) => <span className="tnum">{pct(r.progress_pct)}</span>,
     },
     {
       key: "dispatched_at",
-      header: "Dispatched at",
+      header: t("reports.colDispatchedAt"),
       sortField: "dispatched_at",
       secondary: true,
       cell: (r) => <span className="mono text-[var(--muted)]">{formatIsoDate(r.dispatched_at)}</span>,
     },
     {
       key: "latest_receipt",
-      header: "Latest receipt",
+      header: t("reports.colLatestReceipt"),
       cell: (r) => <span className="mono text-[var(--muted)]">{formatIsoDate(r.latest_receipt_at)}</span>,
     },
   ];
@@ -166,15 +169,15 @@ export function TransfersView() {
   return (
     <div className="flex flex-col gap-5">
       <PageHeader
-        title="Inventory Transfers"
-        subtitle={data ? `${total} transfers · source → transit → destination` : "Loading transfers…"}
+        title={t("transfers.title")}
+        subtitle={data ? t("transfers.subtitle", { n: total }) : t("transfers.loading")}
         actions={
           <div className="flex flex-wrap gap-2">
             <Button asChild variant="secondary">
-              <Link href="/stock?tab=in-transit">View in-transit inventory</Link>
+              <Link href="/stock?tab=in-transit">{t("transfers.viewInTransit")}</Link>
             </Button>
             <Button variant="primary" onClick={() => setCreateOpen(true)}>
-              New transfer
+              {t("transfers.newTransfer")}
             </Button>
           </div>
         }
@@ -182,16 +185,19 @@ export function TransfersView() {
 
       <div className="flex flex-wrap items-center gap-3">
         <FilterStrip
-          ariaLabel="Transfer status filter"
-          options={TRANSFER_FILTER_TABS.map((t) => ({ key: t.key, label: t.label }))}
+          ariaLabel={t("transfers.filterAria")}
+          options={TRANSFER_FILTER_TABS.map((x) => ({
+            key: x.key,
+            label: x.key === "all" ? t("orders.tabAll") : statusText(t, x.key, TRANSFER_STATUS_LABEL),
+          }))}
           value={filter}
           onChange={setFilter}
         />
         <SearchInput
           value={state.search}
           onCommit={setSearch}
-          placeholder="Transfer number…"
-          ariaLabel="Search transfers"
+          placeholder={t("reports.phTransfers")}
+          ariaLabel={t("transfers.searchAria")}
           className="max-w-[320px]"
         />
       </div>
@@ -205,7 +211,7 @@ export function TransfersView() {
         isFetching={isFetching}
         error={isError ? error : undefined}
         onRetry={() => void refetch()}
-        emptyMessage="No transfers match the current filter."
+        emptyMessage={t("transfers.emptyFilter")}
         sort={state.sortBy ? { field: state.sortBy, order: state.sortOrder } : null}
         onSort={cycleSort}
         pagination={
@@ -222,7 +228,7 @@ export function TransfersView() {
         renderCard={(r) => ({
           title: <span className="mono">{r.transfer_number}</span>,
           badge: r.legacy_completed ? (
-            <StatusBadge tone="neutral" label="Legacy" />
+            <StatusBadge tone="neutral" label={t("transfers.legacy")} />
           ) : (
             <StatusBadge status={r.status.toUpperCase()} />
           ),
@@ -231,10 +237,10 @@ export function TransfersView() {
               <span>
                 {wh(r.source_warehouse_id, r.source_warehouse_name)} → {wh(r.destination_warehouse_id, r.destination_warehouse_name)}
               </span>
-              <span>{r.line_count} lines</span>
+              <span>{t("transfers.lineCount", { n: r.line_count })}</span>
               <span>
                 <QuantityDisplay value={r.received_quantity} className="font-medium" /> /{" "}
-                <QuantityDisplay value={r.dispatched_quantity} /> received
+                <QuantityDisplay value={r.dispatched_quantity} /> {t("transfer.received")}
               </span>
             </>
           ),

@@ -1,13 +1,6 @@
 {
-  "components/inventory-ledger/ledger-filters.tsx": 22,
-  "components/inventory-ledger/ledger-view.tsx": 21,
   "components/master-data/delete-confirm.tsx": 1,
   "components/master-data/master-data-screen.tsx": 5,
   "components/session-provider.tsx": 1,
-  "components/transfers/create-transfer.tsx": 13,
-  "components/transfers/transfer-actions.tsx": 5,
-  "components/transfers/transfer-detail.tsx": 23,
-  "components/transfers/transfer-lifecycle.tsx": 4,
-  "components/transfers/transfers-view.tsx": 8,
   "lib/i18n/client.tsx": 1
 }
