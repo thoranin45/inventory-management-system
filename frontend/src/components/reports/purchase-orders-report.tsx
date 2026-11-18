@@ -12,10 +12,13 @@ import { usePurchaseOrdersReport } from "@/lib/query/reports";
 import { useReportParams } from "@/lib/reports/use-report-params";
 import { PO_STATUSES, PO_STATUS_LABEL, type PurchaseOrderRow } from "@/lib/api/schemas/purchase-orders";
 import { formatIsoDate } from "@/lib/format";
+import { useT } from "@/lib/i18n/client";
+import { statusText } from "@/lib/reports/report-copy";
 
 const CONTROLS = ["search", "status", "page", "page_size"] as const;
 
 export function PurchaseOrdersReport() {
+  const t = useT();
   const rp = useReportParams([...CONTROLS], { page_size: 25 });
   const q = usePurchaseOrdersReport({
     page: rp.page,
@@ -27,15 +30,15 @@ export function PurchaseOrdersReport() {
   const pg = q.data?.data.pagination;
 
   const columns: Column<PurchaseOrderRow>[] = [
-    { key: "po", header: "PO #", cell: (r) => <span className="mono">{r.po_number}</span> },
-    { key: "supplier", header: "Supplier", cell: (r) => <span className="font-medium">{r.supplier_name ?? `Supplier #${r.supplier_id ?? "—"}`}</span> },
-    { key: "status", header: "Status", cell: (r) => <StatusBadge status={r.status} /> },
-    { key: "ordered", header: "Ordered", align: "right", cell: (r) => <QuantityDisplay value={r.ordered_quantity} /> },
-    { key: "received", header: "Received", align: "right", cell: (r) => <QuantityDisplay value={r.received_quantity} /> },
-    { key: "remaining", header: "Remaining", align: "right", cell: (r) => <QuantityDisplay value={r.remaining_quantity} className="text-[var(--muted)]" /> },
-    { key: "total", header: "Total", align: "right", secondary: true, cell: (r) => <MoneyDisplay value={r.total_amount} /> },
-    { key: "progress", header: "Progress", cell: (r) => <ProgressRing done={r.received_quantity} total={r.ordered_quantity} size={26} label={`${r.receiving_pct}% received`} /> },
-    { key: "last", header: "Last receipt", secondary: true, cell: (r) => <span className="mono text-[var(--muted)]">{r.last_receipt_at ? formatIsoDate(r.last_receipt_at) : "—"}</span> },
+    { key: "po", header: t("reports.colPo"), cell: (r) => <span className="mono">{r.po_number}</span> },
+    { key: "supplier", header: t("reports.colSupplier"), cell: (r) => <span className="font-medium">{r.supplier_name ?? t("reports.supplierFallback", { id: r.supplier_id ?? "—" })}</span> },
+    { key: "status", header: t("reports.colStatus"), cell: (r) => <StatusBadge status={r.status} /> },
+    { key: "ordered", header: t("reports.colOrdered"), align: "right", cell: (r) => <QuantityDisplay value={r.ordered_quantity} /> },
+    { key: "received", header: t("reports.colReceived"), align: "right", cell: (r) => <QuantityDisplay value={r.received_quantity} /> },
+    { key: "remaining", header: t("reports.colRemaining"), align: "right", cell: (r) => <QuantityDisplay value={r.remaining_quantity} className="text-[var(--muted)]" /> },
+    { key: "total", header: t("reports.colTotal"), align: "right", secondary: true, cell: (r) => <MoneyDisplay value={r.total_amount} /> },
+    { key: "progress", header: t("reports.colProgress"), cell: (r) => <ProgressRing done={r.received_quantity} total={r.ordered_quantity} size={26} label={t("reports.pctReceived", { pct: r.receiving_pct })} /> },
+    { key: "last", header: t("reports.colLastReceipt"), secondary: true, cell: (r) => <span className="mono text-[var(--muted)]">{r.last_receipt_at ? formatIsoDate(r.last_receipt_at) : "—"}</span> },
   ];
 
   return (
@@ -43,12 +46,12 @@ export function PurchaseOrdersReport() {
       slug="purchase-orders"
       query={q}
       isEmpty={rows.length === 0}
-      emptyMessage="No purchase orders for the selected filters."
+      emptyMessage={t("reports.emptyPo")}
       filters={
         <ReportsFilterBar
           controls={["search", "status"]}
-          searchPlaceholder="PO number, supplier…"
-          statusOptions={PO_STATUSES.map((s) => ({ value: s, label: PO_STATUS_LABEL[s] ?? s }))}
+          searchPlaceholder={t("reports.phPo")}
+          statusOptions={PO_STATUSES.map((s) => ({ value: s, label: statusText(t, s, PO_STATUS_LABEL) }))}
           values={rp.values}
           onChange={rp.setParams}
           onClear={rp.clearFilters}
@@ -72,7 +75,7 @@ export function PurchaseOrdersReport() {
             <>
               <span className="mono">{r.po_number}</span>
               <span>
-                Recv <QuantityDisplay value={r.received_quantity} className="font-medium" /> /{" "}
+                {t("reports.recv")} <QuantityDisplay value={r.received_quantity} className="font-medium" /> /{" "}
                 <QuantityDisplay value={r.ordered_quantity} className="font-medium" />
               </span>
               <span>{r.receiving_pct}%</span>

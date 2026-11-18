@@ -137,6 +137,20 @@ const R6_SCOPE = [
   "components/products/product-form-fields.tsx",
   "components/products/product-image.tsx",
   "components/products/products-view.tsx",
+  // P6 batch 3
+  "components/reports/expired-stock-report.tsx",
+  "components/reports/in-transit-report.tsx",
+  "components/reports/low-stock-report.tsx",
+  "components/reports/mini-bars.tsx",
+  "components/reports/movement-history-report.tsx",
+  "components/reports/near-expiry-report.tsx",
+  "components/reports/operational-stock-report.tsx",
+  "components/reports/purchase-orders-report.tsx",
+  "components/reports/report-shell.tsx",
+  "components/reports/reports-filter-bar.tsx",
+  "components/reports/reports-landing.tsx",
+  "components/reports/sales-report.tsx",
+  "components/reports/transfers-report.tsx",
 ];
 
 const JSX_TEXT = />\s*([A-Z][a-z]+(?:[ '’&,.:/-]+[A-Za-z]+)*[.…!?]?)\s*</g;

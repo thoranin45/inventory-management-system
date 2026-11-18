@@ -5,7 +5,9 @@ import { X } from "lucide-react";
 
 import { SearchInput } from "@/components/ui/search-input";
 import { Button } from "@/components/ui/button";
-import { MOVEMENT_TYPES, movementTypeLabel } from "@/lib/api/schemas/reports";
+import { MOVEMENT_TYPES } from "@/lib/api/schemas/reports";
+import { useT } from "@/lib/i18n/client";
+import { movementTypeText } from "@/lib/reports/report-copy";
 import type { ReportParamKey } from "@/lib/reports/use-report-params";
 
 const fieldCls =
@@ -39,12 +41,13 @@ function Labeled({ label, htmlFor, children }: { label: string; htmlFor?: string
 export function ReportsFilterBar({
   controls,
   statusOptions,
-  searchPlaceholder = "Search…",
+  searchPlaceholder,
   numeric,
   values,
   onChange,
   onClear,
 }: Props) {
+  const t = useT();
   const has = (k: ReportParamKey) => controls.includes(k);
   const anySet = controls.some((k) => k !== "page" && k !== "page_size" && k !== "sort_by" && k !== "sort_order" && values[k]);
 
@@ -55,21 +58,21 @@ export function ReportsFilterBar({
           <SearchInput
             value={values.search ?? ""}
             onCommit={(v) => onChange({ search: v || null })}
-            placeholder={searchPlaceholder}
-            ariaLabel="Search report"
+            placeholder={searchPlaceholder ?? t("common.searchPlaceholder")}
+            ariaLabel={t("reports.searchReport")}
           />
         </div>
       ) : null}
 
       {has("status") && statusOptions ? (
-        <Labeled label="Status" htmlFor="rf-status">
+        <Labeled label={t("reports.status")} htmlFor="rf-status">
           <select
             id="rf-status"
             className={fieldCls}
             value={values.status ?? ""}
             onChange={(e) => onChange({ status: e.currentTarget.value || null })}
           >
-            <option value="">All</option>
+            <option value="">{t("reports.all")}</option>
             {statusOptions.map((o) => (
               <option key={o.value} value={o.value}>
                 {o.label}
@@ -80,17 +83,17 @@ export function ReportsFilterBar({
       ) : null}
 
       {has("transaction_type") ? (
-        <Labeled label="Type" htmlFor="rf-type">
+        <Labeled label={t("reports.type")} htmlFor="rf-type">
           <select
             id="rf-type"
             className={fieldCls}
             value={values.transaction_type ?? ""}
             onChange={(e) => onChange({ transaction_type: e.currentTarget.value || null })}
           >
-            <option value="">All types</option>
-            {MOVEMENT_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {movementTypeLabel(t)}
+            <option value="">{t("reports.allTypes")}</option>
+            {MOVEMENT_TYPES.map((code) => (
+              <option key={code} value={code}>
+                {movementTypeText(t, code)}
               </option>
             ))}
           </select>
@@ -98,7 +101,7 @@ export function ReportsFilterBar({
       ) : null}
 
       {has("date_from") ? (
-        <Labeled label="From" htmlFor="rf-from">
+        <Labeled label={t("reports.from")} htmlFor="rf-from">
           <input
             id="rf-from"
             type="date"
@@ -111,7 +114,7 @@ export function ReportsFilterBar({
       ) : null}
 
       {has("date_to") ? (
-        <Labeled label="To" htmlFor="rf-to">
+        <Labeled label={t("reports.to")} htmlFor="rf-to">
           <input
             id="rf-to"
             type="date"
@@ -147,7 +150,7 @@ export function ReportsFilterBar({
       {anySet ? (
         <Button variant="ghost" size="sm" onClick={onClear} className="mb-[1px]">
           <X aria-hidden className="h-3.5 w-3.5" />
-          Clear filters
+          {t("reports.clearFilters")}
         </Button>
       ) : null}
     </>

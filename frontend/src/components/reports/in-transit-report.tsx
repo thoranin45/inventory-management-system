@@ -9,13 +9,15 @@ import { useInTransitReport } from "@/lib/query/reports";
 import type { InTransitStockRow } from "@/lib/api/schemas/reports";
 import { useProductLookup } from "@/lib/query/sales";
 import { compareDecimals, sumDecimals } from "@/lib/decimal";
+import { useT } from "@/lib/i18n/client";
 
 export function InTransitReport() {
+  const t = useT();
   const q = useInTransitReport({});
   const rows = React.useMemo(() => q.data?.items ?? [], [q.data]);
 
   const lookup = useProductLookup(rows.map((r) => r.product_id));
-  const name = (id: number) => lookup.data?.[id]?.product_name ?? `Product #${id}`;
+  const name = (id: number) => lookup.data?.[id]?.product_name ?? t("reports.productFallback", { id });
   const sku = (id: number) => lookup.data?.[id]?.sku ?? "";
 
   const total = React.useMemo(() => sumDecimals(rows.map((r) => r.on_hand_qty), 3), [rows]);
@@ -24,7 +26,7 @@ export function InTransitReport() {
   const columns: Column<InTransitStockRow>[] = [
     {
       key: "product",
-      header: "Product",
+      header: t("reports.colProduct"),
       cell: (r) => (
         <div>
           <div className="font-medium">{name(r.product_id)}</div>
@@ -32,9 +34,9 @@ export function InTransitReport() {
         </div>
       ),
     },
-    { key: "batch", header: "Batch", cell: (r) => <span className="mono text-[var(--muted)]">{r.batch_id != null ? `#${r.batch_id}` : "non-batch"}</span> },
-    { key: "loc", header: "Holding", cell: () => <span className="text-[12px] text-[var(--muted)]">System transit</span> },
-    { key: "qty", header: "In transit", align: "right", cell: (r) => <QuantityDisplay value={r.on_hand_qty} className="font-semibold" /> },
+    { key: "batch", header: t("reports.colBatch"), cell: (r) => <span className="mono text-[var(--muted)]">{r.batch_id != null ? `#${r.batch_id}` : t("reports.nonBatch")}</span> },
+    { key: "loc", header: t("reports.colHolding"), cell: () => <span className="text-[12px] text-[var(--muted)]">{t("reports.systemTransit")}</span> },
+    { key: "qty", header: t("reports.colInTransit"), align: "right", cell: (r) => <QuantityDisplay value={r.on_hand_qty} className="font-semibold" /> },
   ];
 
   return (
@@ -42,14 +44,8 @@ export function InTransitReport() {
       slug="in-transit"
       query={q}
       isEmpty={nonZero.length === 0}
-      emptyMessage="Nothing is currently held in system transit."
-      footNote={
-        <>
-          {total} total in the transit warehouse across {rows.length} balance row
-          {rows.length === 1 ? "" : "s"}. Transit is a system-controlled holding area — these are
-          balance rows, not attributed to any one transfer.
-        </>
-      }
+      emptyMessage={t("reports.emptyTransit")}
+      footNote={t(rows.length === 1 ? "reports.footTransitOne" : "reports.footTransitMany", { total, n: rows.length })}
     >
       <DataTable<InTransitStockRow>
         columns={columns}
@@ -60,10 +56,10 @@ export function InTransitReport() {
           title: name(r.product_id),
           meta: (
             <>
-              <span className="mono">{r.batch_id != null ? `batch #${r.batch_id}` : "non-batch"}</span>
-              <span>System transit</span>
+              <span className="mono">{r.batch_id != null ? t("reports.batchNo", { id: r.batch_id }) : t("reports.nonBatch")}</span>
+              <span>{t("reports.systemTransit")}</span>
               <span>
-                <QuantityDisplay value={r.on_hand_qty} className="font-medium" /> in transit
+                <QuantityDisplay value={r.on_hand_qty} className="font-medium" /> {t("reports.inTransitSuffix")}
               </span>
             </>
           ),

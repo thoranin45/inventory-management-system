@@ -7,9 +7,10 @@ import { ArrowLeft, Download, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
 import { isApiError } from "@/lib/api/errors";
-import { reportErrorCopy } from "@/lib/api/schemas/reports";
+import { useT } from "@/lib/i18n/client";
 import { useReportExport } from "@/lib/query/reports";
 import { REPORTS_BY_SLUG } from "@/lib/reports/registry";
+import { REPORT_TITLE_KEY, reportErrorText } from "@/lib/reports/report-copy";
 
 interface QueryLike {
   isLoading: boolean;
@@ -45,12 +46,14 @@ export function ReportShell({
   footNote?: React.ReactNode;
   children: React.ReactNode;
 }) {
+  const t = useT();
   const def = REPORTS_BY_SLUG[slug];
+  const keys = REPORT_TITLE_KEY[slug];
   const exporter = useReportExport();
 
   const err = query.isError ? query.error : null;
   const apiErr = isApiError(err) ? err : null;
-  const errCopy = apiErr ? reportErrorCopy(apiErr.message) ?? apiErr.userMessage : null;
+  const errCopy = apiErr ? reportErrorText(t, apiErr.message, apiErr.userMessage) : null;
 
   return (
     <div className="flex flex-col gap-5">
@@ -60,13 +63,15 @@ export function ReportShell({
           className="flex w-fit items-center gap-1 text-[12px] font-medium text-[var(--muted)] hover:text-[var(--accent)]"
         >
           <ArrowLeft aria-hidden className="h-3.5 w-3.5" />
-          Reports
+          {t("reports.title")}
         </Link>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="text-[22px] font-semibold tracking-[-0.01em]">{def?.title ?? "Report"}</h1>
+            <h1 className="text-[22px] font-semibold tracking-[-0.01em]">{keys ? t(keys.title) : (def?.title ?? t("reports.reportFallback"))}</h1>
             {def?.blurb ? (
-              <p className="mt-[5px] max-w-[64ch] text-[12.5px] leading-[1.45] text-[var(--faint)]">{def.blurb}</p>
+              <p className="mt-[5px] max-w-[64ch] text-[12.5px] leading-[1.45] text-[var(--faint)]">
+                {keys ? t(keys.blurb) : def.blurb}
+              </p>
             ) : null}
           </div>
           {exportPath ? (
@@ -80,7 +85,7 @@ export function ReportShell({
               ) : (
                 <Download aria-hidden className="h-4 w-4" />
               )}
-              {exporter.running ? "Preparing…" : "Export .xlsx"}
+              {exporter.running ? t("reports.preparing") : t("reports.exportXlsx")}
             </Button>
           ) : null}
         </div>
@@ -89,7 +94,7 @@ export function ReportShell({
       {filters ? <div className="flex flex-wrap items-end gap-3">{filters}</div> : null}
 
       {query.isLoading ? (
-        <LoadingState label="Loading report…" />
+        <LoadingState label={t("reports.loadingReport")} />
       ) : err ? (
         <ErrorState error={err} onRetry={() => void query.refetch()} />
       ) : isEmpty ? (
