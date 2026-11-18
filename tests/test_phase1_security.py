@@ -40,6 +40,14 @@ BUSINESS_ROUTES = sorted({
 })
 
 
+def test_business_route_matrix_covers_the_mounted_api():
+    # Guard: the permission matrix below is generated from app.routes. If a
+    # framework change stops exposing included routes as APIRoute objects
+    # (FastAPI >= 0.137 wraps them), the matrix would silently shrink to
+    # almost nothing while still passing.
+    assert len(BUSINESS_ROUTES) >= 100, len(BUSINESS_ROUTES)
+
+
 def _admin_only(method: str, path: str) -> bool:
     if path.startswith("/api/v1/audit-logs") or path == "/api/v1/auth/register":
         return True
