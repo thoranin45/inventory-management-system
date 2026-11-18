@@ -5,6 +5,9 @@ import { Ban, Check, CircleDashed, FileText, PackageCheck, PackagePlus, Triangle
 
 import { TRANSFER_PIPELINE, TRANSFER_STATUS_LABEL, type TransferStatus } from "@/lib/api/schemas/transfers";
 import { cn } from "@/lib/utils";
+import { useT } from "@/lib/i18n/client";
+import type { MessageKey } from "@/lib/i18n/translate";
+import { statusText } from "@/lib/reports/report-copy";
 
 type NodeState = "completed" | "current" | "upcoming" | "blocked";
 
@@ -15,11 +18,11 @@ const STEP_ICON: Record<string, React.ComponentType<{ className?: string }>> = {
   COMPLETED: PackageCheck,
 };
 
-const STATE_WORD: Record<NodeState, string> = {
-  completed: "Done",
-  current: "In progress",
-  upcoming: "Not started",
-  blocked: "Blocked",
+const STATE_WORD: Record<NodeState, MessageKey> = {
+  completed: "transfers.stepDone",
+  current: "transfers.stepCurrent",
+  upcoming: "transfers.stepUpcoming",
+  blocked: "transfers.stepBlocked",
 };
 
 /**
@@ -40,6 +43,7 @@ export function TransferLifecycle({
   blockedReason?: string | null;
   className?: string;
 }) {
+  const t = useT();
   const upper = status.toUpperCase();
   const cancelled = upper === "CANCELLED";
   const blocked = !cancelled && !!blockedReason;
@@ -55,17 +59,15 @@ export function TransferLifecycle({
           <PackageCheck className="h-[13px] w-[13px]" />
         </span>
         <div className="min-w-0">
-          <div className="text-[13px] font-semibold">Legacy completed transfer</div>
-          <div className="text-[11.5px] text-[var(--muted)]">
-            Completed before transit-lifecycle tracking — no line-level dispatch / receipt progress is recorded.
-          </div>
+          <div className="text-[13px] font-semibold">{t("transfers.legacyTransfer")}</div>
+          <div className="text-[11.5px] text-[var(--muted)]">{t("transfers.legacyTransferBody")}</div>
         </div>
       </div>
     );
   }
 
   return (
-    <ol className={cn("flex flex-col", className)} aria-label="Transfer lifecycle">
+    <ol className={cn("flex flex-col", className)} aria-label={t("transfers.lifecycleAria")}>
       {cancelled ? (
         <li className="flex items-start gap-3 py-2">
           <span
@@ -75,10 +77,8 @@ export function TransferLifecycle({
             <Ban className="h-[13px] w-[13px]" />
           </span>
           <div className="min-w-0">
-            <div className="text-[13px] font-semibold text-[var(--danger)]">Cancelled</div>
-            <div className="text-[11.5px] text-[var(--muted)]">
-              This transfer was cancelled while a draft and was never dispatched.
-            </div>
+            <div className="text-[13px] font-semibold text-[var(--danger)]">{t("status.CANCELLED")}</div>
+            <div className="text-[11.5px] text-[var(--muted)]">{t("transfers.cancelledBody")}</div>
           </div>
         </li>
       ) : (
@@ -131,9 +131,9 @@ export function TransferLifecycle({
                   )}
                   aria-current={state === "current" || state === "blocked" ? "step" : undefined}
                 >
-                  {TRANSFER_STATUS_LABEL[step] ?? step}
+                  {statusText(t, step, TRANSFER_STATUS_LABEL)}
                 </div>
-                <div className="text-[11px] text-[var(--muted)]">{STATE_WORD[state]}</div>
+                <div className="text-[11px] text-[var(--muted)]">{t(STATE_WORD[state])}</div>
               </div>
             </li>
           );

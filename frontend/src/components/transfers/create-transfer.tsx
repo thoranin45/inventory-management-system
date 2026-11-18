@@ -18,6 +18,8 @@ import { useWarehouses } from "@/lib/query/warehouses";
 import { createTransferInput, type CreateTransferInput, type TransferDetail } from "@/lib/api/schemas/transfers";
 import type { Warehouse } from "@/lib/api/schemas/warehouses";
 import { cn } from "@/lib/utils";
+import { useT } from "@/lib/i18n/client";
+import { transferFormText } from "@/lib/transfer-copy";
 
 type FormValues = CreateTransferInput;
 const EMPTY_LINE = { product_id: 0, batch_id: null as number | null, from_location_id: 0, to_location_id: 0, quantity: "" };
@@ -26,11 +28,13 @@ const inputCls =
   "min-h-11 rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-[13px] tabular-nums outline-hidden focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-[var(--focus)]";
 
 function Field({ label, error, children, htmlFor }: { label: string; error?: string; children: React.ReactNode; htmlFor?: string }) {
+  const t = useT();
+  const shown = transferFormText(t, error);
   return (
     <label className="flex flex-col gap-1" htmlFor={htmlFor}>
       <span className="text-[12px] font-semibold text-[var(--muted)]">{label}</span>
       {children}
-      {error ? <span className="text-[11px] text-[var(--danger)]">{error}</span> : null}
+      {shown ? <span className="text-[11px] text-[var(--danger)]">{shown}</span> : null}
     </label>
   );
 }
@@ -90,6 +94,7 @@ function TransferLine({
   selectedProduct: ComboboxItem | null;
   sourcePair: StoragePair | null;
 }) {
+  const t = useT();
   const [term, setTerm] = React.useState("");
   const debounced = useDebounced(term, 250);
   const search = useGlobalSearch(debounced, debounced.trim().length >= 2);
@@ -121,57 +126,64 @@ function TransferLine({
   return (
     <div className="rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--surface)] p-3">
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--faint)]">Line {index + 1}</span>
+        <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--faint)]">{t("transfers.lineN", { n: index + 1 })}</span>
         {canRemove ? (
-          <Button size="icon" variant="ghost" aria-label={`Remove line ${index + 1}`} onClick={onRemove}>
+          <Button size="icon" variant="ghost" aria-label={t("transfers.removeLine", { n: index + 1 })} onClick={onRemove}>
             <Trash2 aria-hidden className="h-4 w-4" />
           </Button>
         ) : null}
       </div>
 
       <div className="flex flex-col gap-3">
-        <Field label="Product" error={errors.product_id} htmlFor={`tr-line-${index}-product`}>
+        <Field label={t("reports.colProduct")} error={errors.product_id} htmlFor={`tr-line-${index}-product`}>
           <Combobox
             id={`tr-line-${index}-product`}
-            ariaLabel={`Search products for line ${index + 1}`}
+            ariaLabel={t("transfers.searchProductsLine", { n: index + 1 })}
             value={selectedProduct}
             onChange={(item) => onProduct(index, item)}
             onSearch={setTerm}
             items={productItems}
             loading={search.isFetching}
-            placeholder="Search products by SKU or name…"
-            emptyText={debounced.trim().length < 2 ? "Type at least 2 characters" : "No products match"}
+            placeholder={t("transfers.searchProductsPh")}
+            emptyText={debounced.trim().length < 2 ? t("transfers.typeTwo") : t("transfers.noProductsMatch")}
           />
         </Field>
 
         {productId > 0 && sourcePair ? (
           isBatchTracked ? (
-            <Field label="Source batch" error={errors.batch_id} htmlFor={`tr-line-${index}-batch`}>
+            <Field label={t("transfers.sourceBatch")} error={errors.batch_id} htmlFor={`tr-line-${index}-batch`}>
               <select
                 id={`tr-line-${index}-batch`}
                 className={inputCls}
                 value={batchId ?? ""}
                 onChange={(e) => onBatch(index, e.target.value ? Number(e.target.value) : null)}
               >
-                <option value="">Choose a batch…</option>
+                <option value="">{t("transfers.chooseBatch")}</option>
                 {usable.map((b) => (
                   <option key={b.id} value={b.batch_id ?? ""} disabled={b.is_expired}>
-                    batch #{b.batch_id}
-                    {b.batch_expiry_date ? ` · exp ${b.batch_expiry_date}` : ""}
-                    {b.is_expired ? " · EXPIRED — cannot dispatch" : ` · avail ${b.available_qty}`}
+                    {t("reports.batchNo", { id: b.batch_id ?? "" })}
+                    {b.batch_expiry_date ? ` · ${t("transfers.expShort", { date: b.batch_expiry_date })}` : ""}
+                    {` · ${b.is_expired ? t("transfers.expiredCannotDispatch") : t("transfers.availShort", { qty: b.available_qty })}`}
                   </option>
                 ))}
               </select>
             </Field>
           ) : (
             <p className="text-[11.5px] text-[var(--muted)]">
-              Non-batch product · {avail === "0" ? "no stock at the source" : <>available <QuantityDisplay value={avail} /></>}
+              {t("transfers.nonBatchProduct")} ·{" "}
+              {avail === "0" ? (
+                t("transfers.noStockAtSource")
+              ) : (
+                <>
+                  {t("transfers.available")} <QuantityDisplay value={avail} />
+                </>
+              )}
             </p>
           )
         ) : null}
 
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Quantity" error={errors.quantity} htmlFor={`tr-line-${index}-qty`}>
+          <Field label={t("reports.colQuantity")} error={errors.quantity} htmlFor={`tr-line-${index}-qty`}>
             <input
               id={`tr-line-${index}-qty`}
               inputMode="decimal"
@@ -184,18 +196,20 @@ function TransferLine({
           <div className="flex flex-col justify-end text-[11.5px] text-[var(--muted)]">
             {chosen ? (
               chosen.is_expired ? (
-                <span className="text-[var(--danger)]">Expired batch — pick another</span>
+                <span className="text-[var(--danger)]">{t("transfers.expiredPickAnother")}</span>
               ) : (
                 <span>
-                  available at source: <QuantityDisplay value={avail} className="font-semibold text-[var(--foreground)]" />
+                  {t("transfers.availableAtSource")} <QuantityDisplay value={avail} className="font-semibold text-[var(--foreground)]" />
                 </span>
               )
             ) : (
-              <span>Pick a source with stock</span>
+              <span>{t("transfers.pickSourceWithStock")}</span>
             )}
           </div>
         </div>
-        {overAvail ? <p className="text-[11px] text-[var(--danger)]">Only {avail} available at the source</p> : null}
+        {overAvail ? (
+          <p className="text-[11px] text-[var(--danger)]">{t("transfers.onlyAvailable", { qty: avail })}</p>
+        ) : null}
       </div>
     </div>
   );
@@ -203,6 +217,7 @@ function TransferLine({
 
 /* ---------------- form ---------------- */
 function CreateForm({ onClose, onCreated }: { onClose: () => void; onCreated: (d: TransferDetail) => void }) {
+  const t = useT();
   const directoryQ = useWarehouses(true);
   const pairs = React.useMemo(() => pairsFromDirectory(directoryQ.data ?? []), [directoryQ.data]);
 
@@ -253,7 +268,9 @@ function CreateForm({ onClose, onCreated }: { onClose: () => void; onCreated: (d
   const onSubmit = (values: FormValues) => {
     create.mutate(values, {
       onSuccess: (data) => {
-        toast.success(`${data.transfer_number} created`, { description: "Saved as a draft — dispatch it to move stock into transit." });
+        toast.success(t("transfers.createdToast", { number: data.transfer_number }), {
+          description: t("transfers.createdDesc"),
+        });
         reset({ source_warehouse_id: 0, destination_warehouse_id: 0, items: [{ ...EMPTY_LINE }] });
         setSource(null);
         setDest(null);
@@ -261,9 +278,11 @@ function CreateForm({ onClose, onCreated }: { onClose: () => void; onCreated: (d
         onCreated(data);
       },
       onError: (error) => {
-        const msg = isApiError(error) ? error.userMessage : "Could not create the transfer.";
+        const msg = isApiError(error) ? error.userMessage : t("transfers.couldNotCreate");
         const rid = isApiError(error) ? error.requestId : undefined;
-        toast.error("Create failed", { description: rid ? `${msg} · Request ${rid}` : msg });
+        toast.error(t("transfers.createFailed"), {
+          description: rid ? t("reports.requestSuffix", { message: msg, id: rid }) : msg,
+        });
       },
     });
   };
@@ -274,19 +293,18 @@ function CreateForm({ onClose, onCreated }: { onClose: () => void; onCreated: (d
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
       <p className="rounded-[var(--r-sm)] bg-[var(--surface-sunken)] p-2 text-[11px] text-[var(--muted)]">
-        Source and destination list every active warehouse location, including empty ones. Inactive locations and
-        system transit are never offered for a new transfer.
+        {t("transfers.createNote")}
       </p>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Field label="Source (warehouse · location)" error={errors.source_warehouse_id?.message} htmlFor="tr-source">
+        <Field label={t("transfers.sourceField")} error={errors.source_warehouse_id?.message} htmlFor="tr-source">
           <select
             id="tr-source"
             className={selectCls}
             value={source?.key ?? ""}
             onChange={(e) => applySource(pairs.find((p) => p.key === e.target.value) ?? null)}
           >
-            <option value="">Choose a source…</option>
+            <option value="">{t("transfers.chooseSource")}</option>
             {pairs.map((p) => (
               <option key={p.key} value={p.key}>
                 {p.label}
@@ -294,7 +312,7 @@ function CreateForm({ onClose, onCreated }: { onClose: () => void; onCreated: (d
             ))}
           </select>
         </Field>
-        <Field label="Destination (warehouse · location)" error={errors.destination_warehouse_id?.message} htmlFor="tr-dest">
+        <Field label={t("transfers.destinationField")} error={errors.destination_warehouse_id?.message} htmlFor="tr-dest">
           <select
             id="tr-dest"
             className={selectCls}
@@ -302,7 +320,7 @@ function CreateForm({ onClose, onCreated }: { onClose: () => void; onCreated: (d
             disabled={!source}
             onChange={(e) => applyDest(destOptions.find((p) => p.key === e.target.value) ?? null)}
           >
-            <option value="">{source ? "Choose a destination…" : "Choose a source first"}</option>
+            <option value="">{source ? t("transfers.chooseDestination") : t("transfers.chooseSourceFirst")}</option>
             {destOptions.map((p) => (
               <option key={p.key} value={p.key}>
                 {p.label}
@@ -312,7 +330,7 @@ function CreateForm({ onClose, onCreated }: { onClose: () => void; onCreated: (d
         </Field>
       </div>
 
-      <Field label="Remark (optional)" htmlFor="tr-remark">
+      <Field label={t("transfers.remarkOptional")} htmlFor="tr-remark">
         <input id="tr-remark" className={inputCls} maxLength={500} autoComplete="off" {...register("remark")} />
       </Field>
 
@@ -356,13 +374,13 @@ function CreateForm({ onClose, onCreated }: { onClose: () => void; onCreated: (d
           className="self-start"
         >
           <Plus aria-hidden className="h-4 w-4" />
-          Add line
+          {t("transfers.addLine")}
         </Button>
       </div>
 
       {rootItemsError ? (
         <p role="alert" className="rounded-[var(--r-sm)] bg-[var(--danger-subtle)] p-2 text-[12px] text-[var(--danger)]">
-          {rootItemsError}
+          {transferFormText(t, rootItemsError)}
         </p>
       ) : null}
       {apiErr ? (
@@ -370,7 +388,7 @@ function CreateForm({ onClose, onCreated }: { onClose: () => void; onCreated: (d
           {apiErr.userMessage}
           {apiErr.requestId ? (
             <span className="mt-1 block text-[11px] text-[var(--muted)]">
-              Request ID: <span className="mono select-all">{apiErr.requestId}</span>
+              {t("common.requestId")} <span className="mono select-all">{apiErr.requestId}</span>
             </span>
           ) : null}
         </p>
@@ -378,10 +396,10 @@ function CreateForm({ onClose, onCreated }: { onClose: () => void; onCreated: (d
 
       <div className="sticky bottom-0 -mx-4 flex justify-end gap-2 border-t border-[var(--border)] bg-[var(--surface)] px-4 pt-3">
         <Button variant="ghost" onClick={onClose}>
-          Cancel
+          {t("masterData.cancel")}
         </Button>
         <Button type="submit" variant="primary" disabled={create.isPending}>
-          {create.isPending ? "Creating…" : "Create draft transfer"}
+          {create.isPending ? t("product.creating") : t("transfers.createDraft")}
         </Button>
       </div>
     </form>
@@ -397,9 +415,10 @@ export function CreateTransferDrawer({
   onOpenChange: (v: boolean) => void;
   onCreated: (d: TransferDetail) => void;
 }) {
+  const t = useT();
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent title="New inventory transfer">
+      <DrawerContent title={t("transfers.newInventoryTransfer")}>
         <CreateForm onClose={() => onOpenChange(false)} onCreated={onCreated} />
       </DrawerContent>
     </Drawer>

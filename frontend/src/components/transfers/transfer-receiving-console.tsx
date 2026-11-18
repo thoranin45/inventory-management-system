@@ -26,11 +26,11 @@ import { isExactKeyMismatch, KEY_MISMATCH_MESSAGE } from "@/lib/workflow/submiss
 import { useIdempotentSubmission } from "@/lib/workflow/use-idempotent-submission";
 import {
   RECEIVABLE_TRANSFER_STATUSES,
-  TRANSFER_ERROR_COPY,
   type TransferReceiptResponse,
 } from "@/lib/api/schemas/transfers";
 import { TransferRoute } from "./transfer-route";
 import { TransferReceiveLine, validateTransferReceiveLine } from "./transfer-receive-line";
+import { TRANSFER_ERROR_KEY } from "@/lib/transfer-copy";
 
 export function TransferReceivingConsole({ transferId }: { transferId: number }) {
   const t = useT();
@@ -162,7 +162,11 @@ export function TransferReceivingConsole({ transferId }: { transferId: number })
           }
           const msg = isApiError(error) ? error.message : "";
           const rid = isApiError(error) ? error.requestId : undefined;
-          const copy = TRANSFER_ERROR_COPY[msg] ?? (isApiError(error) ? error.userMessage : t("receive.rejectedFallback"));
+          const copy = TRANSFER_ERROR_KEY[msg]
+            ? t(TRANSFER_ERROR_KEY[msg])
+            : isApiError(error)
+              ? error.userMessage
+              : t("receive.rejectedFallback");
           toast.error(t("receive.rejected"), { description: rid ? `${copy} · ${t("task.requestRef", { id: rid })}` : copy });
         },
       },
@@ -179,7 +183,7 @@ export function TransferReceivingConsole({ transferId }: { transferId: number })
   const receiveError =
     receive.isError && isApiError(receive.error) && receive.error.message !== KEY_MISMATCH_MESSAGE ? receive.error : null;
   const errorBlock = receiveError ? (
-    <Banner tone="danger" title={TRANSFER_ERROR_COPY[receiveError.message] ?? receiveError.userMessage}>
+    <Banner tone="danger" title={TRANSFER_ERROR_KEY[receiveError.message] ? t(TRANSFER_ERROR_KEY[receiveError.message]) : receiveError.userMessage}>
       {receiveError.requestId ? (
         <span className="text-[12px] text-[var(--muted)]">
           {t("common.requestId")} <span className="mono select-all">{receiveError.requestId}</span>
@@ -269,7 +273,7 @@ export function TransferReceivingConsole({ transferId }: { transferId: number })
             {mismatch ? (
               <Banner
                 tone="danger"
-                title={TRANSFER_ERROR_COPY[KEY_MISMATCH_MESSAGE]}
+                title={t(TRANSFER_ERROR_KEY[KEY_MISMATCH_MESSAGE])}
                 className="mb-3"
                 actions={
                   <Button

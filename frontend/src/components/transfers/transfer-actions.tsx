@@ -8,20 +8,17 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent } from "@/components/ui/dialog";
 import { isApiError } from "@/lib/api/errors";
 import { useCancelTransfer, useDispatchTransfer } from "@/lib/query/transfers";
-import {
-  EXPIRED_BATCH_DISPATCH_RE,
-  RECEIVABLE_TRANSFER_STATUSES,
-  TRANSFER_ERROR_COPY,
-  TRANSFER_STATUS_LABEL,
-} from "@/lib/api/schemas/transfers";
+import { RECEIVABLE_TRANSFER_STATUSES, TRANSFER_STATUS_LABEL } from "@/lib/api/schemas/transfers";
+import { useT } from "@/lib/i18n/client";
+import type { MessageKey, MessageVars } from "@/lib/i18n/translate";
+import { statusText } from "@/lib/reports/report-copy";
+import { transferErrorText } from "@/lib/transfer-copy";
 
-function errLine(error: unknown): { message: string; requestId?: string } {
+function errLine(t: (k: MessageKey, v?: MessageVars) => string, error: unknown): { message: string; requestId?: string } {
   if (isApiError(error)) {
-    const raw = error.message;
-    const copy = TRANSFER_ERROR_COPY[raw] ?? (EXPIRED_BATCH_DISPATCH_RE.test(raw) ? `${raw} — pick an in-date batch.` : error.userMessage);
-    return { message: copy, requestId: error.requestId };
+    return { message: transferErrorText(t, error.message, error.userMessage), requestId: error.requestId };
   }
-  return { message: error instanceof Error ? error.message : "Something went wrong." };
+  return { message: error instanceof Error ? error.message : t("common.somethingWrong") };
 }
 
 /**
@@ -43,6 +40,7 @@ export function TransferActions({
   legacyCompleted?: boolean;
   onDone?: () => void;
 }) {
+  const t = useT();
   const upper = status.toUpperCase();
   const dispatch = useDispatchTransfer();
   const cancel = useCancelTransfer();
@@ -62,15 +60,15 @@ export function TransferActions({
     dispatch.mutate(id, {
       onSuccess: (data) => {
         setDispatchOpen(false);
-        toast.success(`${transferNumber} dispatched`, {
-          description: `Status is now ${TRANSFER_STATUS_LABEL[data.status] ?? data.status} — every line moved into transit.`,
+        toast.success(t("transfers.dispatchedToast", { number: transferNumber }), {
+          description: t("transfers.dispatchedDesc", { status: statusText(t, data.status, TRANSFER_STATUS_LABEL) }),
         });
         // keep the drawer open — it re-renders as IN_TRANSIT with the receiving link
       },
       onError: (error) => {
-        const e = errLine(error);
-        toast.error("Could not dispatch this transfer", {
-          description: e.requestId ? `${e.message} · Request ${e.requestId}` : e.message,
+        const e = errLine(t, error);
+        toast.error(t("transfers.dispatchFailed"), {
+          description: e.requestId ? t("reports.requestSuffix", { message: e.message, id: e.requestId }) : e.message,
         });
       },
     });
@@ -79,54 +77,54 @@ export function TransferActions({
     cancel.mutate(id, {
       onSuccess: () => {
         setCancelOpen(false);
-        toast.success(`${transferNumber} cancelled`);
+        toast.success(t("transfers.cancelledToast", { number: transferNumber }));
         onDone?.();
       },
       onError: (error) => {
-        const e = errLine(error);
-        toast.error("Could not cancel this transfer", {
-          description: e.requestId ? `${e.message} · Request ${e.requestId}` : e.message,
+        const e = errLine(t, error);
+        toast.error(t("transfers.cancelFailed"), {
+          description: e.requestId ? t("reports.requestSuffix", { message: e.message, id: e.requestId }) : e.message,
         });
       },
     });
 
-  const dispatchErr = dispatch.isError ? errLine(dispatch.error) : null;
-  const cancelErr = cancel.isError ? errLine(cancel.error) : null;
+  const dispatchErr = dispatch.isError ? errLine(t, dispatch.error) : null;
+  const cancelErr = cancel.isError ? errLine(t, cancel.error) : null;
 
   return (
     <div className="flex flex-wrap items-center gap-2">
       {canReceive ? (
         <Button asChild variant="primary">
-          <Link href={`/transfers/${id}/receive`}>Open receiving console</Link>
+          <Link href={`/transfers/${id}/receive`}>{t("transfers.openReceiving")}</Link>
         </Button>
       ) : null}
 
       {showDispatch ? (
         <>
           <Button variant="primary" onClick={() => setDispatchOpen(true)}>
-            Dispatch
+            {t("transfers.dispatch")}
           </Button>
           <Dialog open={dispatchOpen} onOpenChange={setDispatchOpen}>
             <DialogContent
-              title={`Dispatch ${transferNumber}?`}
-              description="This dispatch moves every transfer line from the source into system transit. Dispatch is all-or-nothing — you can't dispatch part of a transfer."
+              title={t("transfers.dispatchTitle", { number: transferNumber })}
+              description={t("transfers.dispatchBody")}
             >
               {dispatchErr ? (
                 <p role="alert" className="rounded-[var(--r-sm)] bg-[var(--danger-subtle)] p-2 text-[12px] text-[var(--danger)]">
                   {dispatchErr.message}
                   {dispatchErr.requestId ? (
                     <span className="mt-1 block text-[11px] text-[var(--muted)]">
-                      Request ID: <span className="mono select-all">{dispatchErr.requestId}</span>
+                      {t("common.requestId")} <span className="mono select-all">{dispatchErr.requestId}</span>
                     </span>
                   ) : null}
                 </p>
               ) : null}
               <div className="mt-1 flex justify-end gap-2">
                 <DialogClose asChild>
-                  <Button variant="ghost">Keep as draft</Button>
+                  <Button variant="ghost">{t("transfers.keepDraft")}</Button>
                 </DialogClose>
                 <Button variant="primary" onClick={runDispatch} disabled={dispatch.isPending}>
-                  {dispatch.isPending ? "Dispatching…" : "Dispatch all lines"}
+                  {dispatch.isPending ? t("transfers.dispatching") : t("transfers.dispatchAll")}
                 </Button>
               </div>
             </DialogContent>
@@ -137,29 +135,29 @@ export function TransferActions({
       {showCancel ? (
         <>
           <Button variant="danger" onClick={() => setCancelOpen(true)}>
-            Cancel transfer
+            {t("transfers.cancelTransfer")}
           </Button>
           <Dialog open={cancelOpen} onOpenChange={setCancelOpen}>
             <DialogContent
-              title={`Cancel ${transferNumber}?`}
-              description="Only a draft transfer with nothing dispatched can be cancelled. This can't be undone."
+              title={t("transfers.cancelTitle", { number: transferNumber })}
+              description={t("transfers.cancelBody")}
             >
               {cancelErr ? (
                 <p role="alert" className="rounded-[var(--r-sm)] bg-[var(--danger-subtle)] p-2 text-[12px] text-[var(--danger)]">
                   {cancelErr.message}
                   {cancelErr.requestId ? (
                     <span className="mt-1 block text-[11px] text-[var(--muted)]">
-                      Request ID: <span className="mono select-all">{cancelErr.requestId}</span>
+                      {t("common.requestId")} <span className="mono select-all">{cancelErr.requestId}</span>
                     </span>
                   ) : null}
                 </p>
               ) : null}
               <div className="mt-1 flex justify-end gap-2">
                 <DialogClose asChild>
-                  <Button variant="ghost">Keep transfer</Button>
+                  <Button variant="ghost">{t("transfers.keepTransfer")}</Button>
                 </DialogClose>
                 <Button variant="danger" onClick={runCancel} disabled={cancel.isPending}>
-                  {cancel.isPending ? "Cancelling…" : "Cancel transfer"}
+                  {cancel.isPending ? t("transfers.cancelling") : t("transfers.cancelTransfer")}
                 </Button>
               </div>
             </DialogContent>
