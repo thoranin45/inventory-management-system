@@ -47,6 +47,8 @@ python -m pytest -q
 
 ## Production
 
-See [`docs/deployment.md`](docs/deployment.md). In short: pinned image via
-`API_IMAGE`, `ENV=production` (config safety gate), migrations run as an
-explicit one-shot (`--profile migrate`), never on container boot.
+See [`docs/deployment.md`](docs/deployment.md). In short: `compose.prod.yml`
+runs nginx → Next.js BFF → FastAPI → PostgreSQL behind Tailscale Funnel, with
+pinned images via `API_IMAGE` and `FRONTEND_IMAGE`, `ENV=production` (config
+safety gate), and migrations as an explicit one-shot (`--profile migrate`),
+never on container boot.

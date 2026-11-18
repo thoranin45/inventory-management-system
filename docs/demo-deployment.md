@@ -26,8 +26,9 @@ ports.
 
 Everything is additive and separate from the production files:
 `compose.demo.yml`, `nginx/demo.conf`, `.env.demo.example`,
-`frontend/Dockerfile`, `scripts/seed_demo.py`. `compose.prod.yml`,
-`nginx/default.conf` and `Dockerfile` are untouched.
+`frontend/Dockerfile`, `scripts/seed_demo.py`. The production stack
+(`compose.prod.yml`, `nginx/prod.conf`, `docs/deployment.md`) uses the same
+topology on `127.0.0.1:8090` under its own `inventory-prod-*` names.
 
 ## What this is not
 

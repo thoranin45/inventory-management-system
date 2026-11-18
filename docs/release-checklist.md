@@ -12,15 +12,17 @@
       It currently has no `--ignore-vuln` exceptions; any added later must be
       reviewed here.
       `passlib==1.7.4` is unmaintained (migrate off later; no advisory today).
-- [ ] `docker build` OK; image pushed as `…:vX.Y.Z` **and** `…:<sha>`
-      (never `:latest` alone).
+- [ ] CI job **Publish images** green on the `vX.Y.Z` tag: API and
+      frontend images pushed as `…:vX.Y.Z` **and** `…:<sha>` (no `:latest`).
 - [ ] `docker compose -f compose.yml config` and
-      `API_IMAGE=… docker compose -f compose.prod.yml config` both valid.
-- [ ] `compose.prod.yml`: `api` service has no `alembic upgrade`; image is
-      `${API_IMAGE}`; Postgres has no published port.
+      `API_IMAGE=… FRONTEND_IMAGE=… docker compose -f compose.prod.yml config`
+      both valid (CI checks the prod file and `nginx -t` on `nginx/prod.conf`).
+- [ ] `compose.prod.yml`: `api` service has no `alembic upgrade`; images are
+      `${API_IMAGE}` / `${FRONTEND_IMAGE}`; only nginx publishes a port, on
+      `127.0.0.1:8090`; names are `inventory-prod-*`.
 - [ ] `.env.production` present on host, `chmod 600`, `ENV=production`,
-      strong `SECRET_KEY` (≥32, not placeholder), `CORS_ORIGINS` = real
-      `https://` origins.
+      strong `SECRET_KEY` (≥32, not placeholder), `CORS_ORIGINS` = the real
+      `https://<host>.<tailnet>.ts.net` origin.
 - [ ] Frontend CI job **Frontend checks** green on the release commit:
       `npm ci`, `npm run typecheck`, `npm run lint`, `npm test`,
       `npm run build` (locally: `npm run check` in `frontend/`, Node 22).
@@ -70,7 +72,7 @@
 - [ ] **Migrate (one-shot)**:
       `docker compose -f compose.prod.yml --profile migrate run --rm migrate`.
 - [ ] `python scripts/db_revision_check.py` → `OK` (expected head).
-- [ ] **Deploy**: `API_IMAGE=…:vX.Y.Z docker compose -f compose.prod.yml up -d`.
+- [ ] **Deploy**: `API_IMAGE=…:vX.Y.Z FRONTEND_IMAGE=…:vX.Y.Z docker compose -f compose.prod.yml up -d`.
 - [ ] **Readiness**: `GET /ready` → `{"status":"ready", migration == expected}`.
 - [ ] **Smoke**: `python scripts/smoke.py` — all checks pass. No inventory
       mutated.
@@ -89,3 +91,7 @@
 
 - [ ] **Rotate the PostgreSQL password** — the old value was committed to git
       history (`scripts/backup_db.ps1`, since removed).
+- [ ] Create the first administrator with `scripts/create_first_admin.py`
+      (see `docs/deployment.md`, "First deploy").
+- [ ] `tailscale funnel --bg 8090`; log in at
+      `https://<host>.<tailnet>.ts.net/login` from a device off the LAN.

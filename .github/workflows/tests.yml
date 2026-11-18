@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - refactor/production-v2
     tags:
       - "v*"
 
@@ -12,9 +11,9 @@ on:
     branches:
       - main
 
+# Least privilege: only the publish job (v* tags) can write packages.
 permissions:
   contents: read
-  packages: write
 
 jobs:
   test:
@@ -55,10 +54,12 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
           cache: pip
@@ -101,9 +102,15 @@ jobs:
       - name: Validate Docker Compose (prod)
         env:
           API_IMAGE: ghcr.io/thoranin45/inventory-management-system:ci-validate
-          POSTGRES_USER: inventory
-          POSTGRES_DB: inventory_db
-        run: docker compose -f compose.prod.yml config
+          FRONTEND_IMAGE: ghcr.io/thoranin45/inventory-management-system-frontend:ci-validate
+        run: docker compose -f compose.prod.yml config --quiet
+
+      - name: Validate nginx config (prod)
+        # nginx -t resolves upstream hosts; map the compose service name.
+        run: >
+          docker run --rm --add-host frontend:127.0.0.1
+          -v "$PWD/nginx/prod.conf:/etc/nginx/conf.d/default.conf:ro"
+          nginx:1.27-alpine nginx -t
 
       - name: Migration test suites
         run: >
@@ -123,46 +130,59 @@ jobs:
           --cov-fail-under=90
           -v
       
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-report
+          path: coverage.xml
+          if-no-files-found: ignore
+
+  publish:
+    # Runs only for v* tags, after the full test job passed. Publishes the API
+    # and frontend images with the same two immutable tags: :<git-sha> and
+    # :<tag>. There is no :latest; deployments pin one of these.
+    name: Publish images
+    needs: test
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      API_REPO: ghcr.io/thoranin45/inventory-management-system
+      FRONTEND_REPO: ghcr.io/thoranin45/inventory-management-system-frontend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       - name: Log in to GitHub Container Registry
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/refactor/production-v2' || startsWith(github.ref, 'refs/tags/v'))
-        uses: docker/login-action@v4
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/refactor/production-v2' || startsWith(github.ref, 'refs/tags/v'))
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
-      - name: Compute image tags
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/refactor/production-v2' || startsWith(github.ref, 'refs/tags/v'))
-        id: imgtags
-        run: |
-          TAGS="ghcr.io/thoranin45/inventory-management-system:${{ github.sha }}"
-          if [ "${{ startsWith(github.ref, 'refs/tags/v') }}" = "true" ]; then
-            TAGS="$TAGS,ghcr.io/thoranin45/inventory-management-system:${{ github.ref_name }}"
-          else
-            TAGS="$TAGS,ghcr.io/thoranin45/inventory-management-system:latest"
-          fi
-          echo "tags=$TAGS" >> "$GITHUB_OUTPUT"
-
-      - name: Build and push Docker image
-        # Always publishes an immutable :<sha> tag (a pinnable rollback
-        # anchor); :latest is a convenience alias only, never the sole tag.
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/refactor/production-v2' || startsWith(github.ref, 'refs/tags/v'))
-        uses: docker/build-push-action@v7
+      - name: Build and push API image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           push: true
-          tags: ${{ steps.imgtags.outputs.tags }}
-      
-      - name: Upload coverage report
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: coverage-report
-          path: coverage.xml
-          if-no-files-found: ignore
+          tags: |
+            ${{ env.API_REPO }}:${{ github.sha }}
+            ${{ env.API_REPO }}:${{ github.ref_name }}
 
-      
+      - name: Build and push frontend image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: frontend
+          push: true
+          tags: |
+            ${{ env.FRONTEND_REPO }}:${{ github.sha }}
+            ${{ env.FRONTEND_REPO }}:${{ github.ref_name }}

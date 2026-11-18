@@ -1,108 +1,207 @@
 # Deployment (V1)
 
-Single VM, Docker Compose. No Kubernetes.
+Single host, Docker Compose, published through **Tailscale Funnel**. No
+Kubernetes, no inbound database or API ports.
 
 ```
-Internet ──HTTPS──▶ nginx (TLS termination, HSTS, gzip, X-Forwarded-*)
-                      │  proxy_pass http://api:8081
-                      ▼
-                 FastAPI / uvicorn  (--proxy-headers, non-root, no auto-migrate)
-                      │
-                      ▼
-                 PostgreSQL 18  (named volume, no published host port)
-                 + backup cron  (pg_dump -Fc | gpg | off-box copy)
+ browser (anywhere)
+        │  HTTPS  https://<host>.<tailnet>.ts.net
+        ▼
+ Tailscale Funnel        (host process; terminates TLS at the edge)
+        │  http://127.0.0.1:8090
+        ▼
+ nginx  (compose: 127.0.0.1:8090 → :80)   nginx/prod.conf, loopback-only
+        │  http://frontend:3000
+        ▼
+ Next.js 16 + BFF        (HttpOnly Secure wc_session cookie)
+        │  http://api:8081        (private compose network)
+        ▼
+ FastAPI / uvicorn --proxy-headers        (no host port, no auto-migrate)
+        │
+        ▼
+ PostgreSQL 18           (named volume, no host port)
 ```
+
+Files: `compose.prod.yml`, `nginx/prod.conf`, `.env.production.example`,
+`Dockerfile` (API), `frontend/Dockerfile`, `scripts/create_first_admin.py`.
+
+The stack is **isolated by name**: project `inventory-prod`, containers
+`inventory-prod-*`, network `inventory-prod`, volumes `inventory-prod-*`. It
+cannot adopt or replace the dev stack (`compose.yml`, project
+`inventory-system`, container `inventory-postgres`) or the demo stack
+(`compose.demo.yml`). Always pass `-f compose.prod.yml`, and never pass
+`--remove-orphans` with another compose file.
+
+The demo stack (`docs/demo-deployment.md`) uses the same topology on
+`127.0.0.1:8080`. Both can run at once, but one Funnel can serve only one of
+them on port 443.
 
 ## TLS termination
 
-TLS terminates at nginx (or an upstream load balancer). nginx must forward
-`X-Forwarded-For` and `X-Forwarded-Proto` (the bundled `nginx/default.conf`
-already does). The image starts uvicorn with
-`--proxy-headers --forwarded-allow-ips "*"` so `request.client.host` is the
-real client and the request scheme is correct behind TLS. Add a `listen 443
-ssl; http2 on;` server block plus `Strict-Transport-Security` and an
-`80 → 443` redirect when provisioning certificates (certbot / platform LB).
+Funnel terminates TLS at the Tailscale edge and gives a valid certificate for
+`<host>.<tailnet>.ts.net`. nginx and everything behind it speak plain HTTP on
+the private network. The real-client-IP handling is the same as the demo's
+(see "Security posture" in `docs/demo-deployment.md`): nginx trusts only the
+Docker bridge hop, writes the vetted address to `X-Real-IP`, and the BFF
+forwards only that to FastAPI.
+
+A custom domain later: point Funnel at the same `127.0.0.1:8090`, or put a TLS
+proxy (certbot) in front of nginx as described at the end of
+`docs/demo-deployment.md`. Either way set `CORS_ORIGINS` to the new origin.
 
 ## Configuration
 
-`.env.production` (git-ignored, `chmod 600`, owned by the deploy user):
+`.env.production` (git-ignored, `chmod 600` / readable only by your user):
 
 - `ENV=production` — turns on the config safety gate.
 - `SECRET_KEY` — random, ≥ 32 chars, not a placeholder. The app **refuses to
   start** otherwise.
-- `CORS_ORIGINS` — explicit `https://` frontend origin(s). No `*`.
-- `DATABASE_URL`, `DB_*`, `POSTGRES_*`.
-- `DOCS_ENABLED=1` only if you want `/docs` public in production (default: off).
-- Optional: `LOG_LEVEL`, `TRUSTED_PROXY_COUNT`, `MAX_UPLOAD_BYTES`,
-  `ACCESS_TOKEN_EXPIRE_MINUTES`, DB pool knobs (`DB_POOL_SIZE`, …).
+- `CORS_ORIGINS=https://<host>.<tailnet>.ts.net` — explicit `https://`
+  origin. No `*`. (The browser only talks to the Next BFF, same-origin, but the
+  gate still requires one real origin.)
+- `DATABASE_URL`, `DB_*`, `POSTGRES_*` — host `db`, never `localhost`.
+- `DOCS_ENABLED=1` only if you want `/docs` (it is not reachable from the
+  Internet anyway: nginx never proxies FastAPI).
+- Optional: `LOG_LEVEL`, `MAX_UPLOAD_BYTES`, `ACCESS_TOKEN_EXPIRE_MINUTES`,
+  DB pool knobs (`DB_POOL_SIZE`, …). Leave `TRUSTED_PROXY_COUNT` at `0`.
 
-Prefer Docker secrets / a secrets manager for `SECRET_KEY`, `DB_PASSWORD` and
-`BACKUP_KEY`.
+## Images
 
-## Image
-
-`API_IMAGE` must be a **pinned** tag:
+Both images must be **pinned**:
 
 ```
-API_IMAGE=ghcr.io/<owner>/inventory-management-system:v1.0.0   # or :<git-sha>
+API_IMAGE=ghcr.io/<owner>/inventory-management-system:vX.Y.Z            # or :<git-sha>
+FRONTEND_IMAGE=ghcr.io/<owner>/inventory-management-system-frontend:vX.Y.Z
 ```
 
-`compose.prod.yml` fails fast if `API_IMAGE` is unset and never uses `:latest`.
-CI publishes an immutable `:<sha>` for every push and a `:vX.Y.Z` for every
-`v*` git tag — those are your rollback anchors.
+`compose.prod.yml` fails fast if either is unset and never uses `:latest`.
 
-## Deploy procedure
+Pushing a `vX.Y.Z` git tag runs the **Publish images** job in
+`.github/workflows/tests.yml` after the full test job passes. It pushes both
+images with two immutable tags, `:<git-sha>` and `:vX.Y.Z`; those are the
+rollback anchors. Nothing is published from branches or pull requests.
+
+New GHCR packages start **private**. Either log in on the host
+(`docker login ghcr.io` with a token that has `read:packages`) or make the two
+packages public in GitHub → Packages.
+
+To run without GHCR, build the same images locally from the tagged commit:
+
+```bash
+docker build -t inventory-api:vX.Y.Z .
+docker build -t inventory-frontend:vX.Y.Z frontend/
+```
+
+## First deploy (fresh database)
+
+Run from the repository checkout at the release tag, with `API_IMAGE` and
+`FRONTEND_IMAGE` set in your shell (or in a git-ignored `.env` next to the
+compose file).
+
+1. `cp .env.production.example .env.production`, fill every `CHANGE_ME`.
+2. `docker compose -f compose.prod.yml config --quiet` — no output means valid.
+3. Start PostgreSQL:
+   ```bash
+   docker compose -f compose.prod.yml up -d db
+   docker compose -f compose.prod.yml ps        # wait for db "healthy"
+   ```
+4. Migrate (one-shot):
+   ```bash
+   docker compose -f compose.prod.yml --profile migrate run --rm migrate
+   ```
+5. Create the first administrator (one-shot; refuses if any user exists):
+   ```bash
+   read -rs ADMIN_PASSWORD && export ADMIN_PASSWORD     # PowerShell: $env:ADMIN_PASSWORD = Read-Host
+   docker compose -f compose.prod.yml run --rm --no-deps \
+     -e ADMIN_USERNAME=<name> -e ADMIN_PASSWORD api python scripts/create_first_admin.py
+   ```
+   The password needs at least 12 characters. Clear it afterwards
+   (`unset ADMIN_PASSWORD`). Create every other user from the app.
+6. Start everything:
+   ```bash
+   docker compose -f compose.prod.yml up -d
+   docker compose -f compose.prod.yml ps        # all "healthy"
+   ```
+7. Readiness:
+   ```bash
+   docker compose -f compose.prod.yml exec api \
+     python -c "import urllib.request,json; print(json.load(urllib.request.urlopen('http://127.0.0.1:8081/ready')))"
+   ```
+   Expect `{'status': 'ready', ...}`.
+8. Local check: open `http://127.0.0.1:8090/login`, log in as the admin, and
+   click through the main screens. In dev-tools → Network, every request is
+   same-origin (`/api/auth/*`, `/api/bff/*`), never `:8081`.
+9. Publish through Funnel:
+   ```bash
+   tailscale funnel status          # Funnel must be allowed for this node
+   tailscale funnel --bg 8090
+   ```
+   Open `https://<host>.<tailnet>.ts.net/login` from a phone on cellular data
+   and log in. To stop serving: `tailscale funnel --https=443 off`.
+
+## Upgrade procedure
 
 The API container **does not run migrations**. Migrations are a separate,
 gated step.
 
-1. **Freeze & build**
-   - `git` clean; tag `vX.Y.Z`; CI builds & pushes `…:vX.Y.Z` + `…:<sha>`.
-   - Full test suite + migration suites green.
-2. **Backup** — `scripts/backup.sh`; verify with `pg_restore --list`; copy the
-   encrypted dump off-box. Record filename + size + sha256. See
-   `runbook-backup-restore.md`.
-3. **Preflight** — run the relevant read-only preflight against the prod DB
-   with its explicit `*_PREFLIGHT_DATABASE_URL`; abort on any finding.
-   (Phase 9's migration is additive — no dedicated preflight — but keep the
-   habit for future phases.)
-4. **Pause writers** (only needed once tables are large): `docker compose -f
-   compose.prod.yml stop api`.
-5. **Migrate (one-shot)**:
-   ```
+1. **Freeze & build** — `git` clean on `main`; tag `vX.Y.Z`; CI's **Publish
+   images** job pushes both images. Full test suite + migration suites green.
+2. **Backup** — see "Backups" below; verify with `pg_restore --list`; copy the
+   dump off-box. Record filename + size + sha256.
+3. **Preflight** — run the relevant read-only preflight, if the release has
+   one; abort on any finding.
+4. **Pause writers**: `docker compose -f compose.prod.yml stop frontend api`.
+5. **Migrate (one-shot)** with the NEW `API_IMAGE`:
+   ```bash
    docker compose -f compose.prod.yml --profile migrate run --rm migrate
    ```
-   Confirm: `DB_REVISION_CHECK_DATABASE_URL=… python scripts/db_revision_check.py`
-   prints `OK`.
-6. **Deploy** the pinned image:
+6. **Deploy** the pinned images:
+   ```bash
+   docker compose -f compose.prod.yml up -d
    ```
-   API_IMAGE=ghcr.io/<owner>/inventory-management-system:vX.Y.Z \
-     docker compose -f compose.prod.yml up -d
+7. **Readiness** — as in first-deploy step 7; `migration` must equal the
+   expected head.
+8. **Smoke test** (read-only, from inside the API container):
+   ```bash
+   docker compose -f compose.prod.yml exec \
+     -e SMOKE_BASE_URL=http://127.0.0.1:8081 -e SMOKE_USERNAME=<admin> -e SMOKE_PASSWORD \
+     api python scripts/smoke.py
    ```
-7. **Readiness** — poll `GET /ready` until `{"status":"ready"}` with
-   `migration == expected`.
-8. **Smoke test** — `SMOKE_BASE_URL=… SMOKE_USERNAME=… SMOKE_PASSWORD=…
-   python scripts/smoke.py` (read-only).
-9. **Log check** — no `CRITICAL` / `UNHANDLED_EXCEPTION` / `migration_mismatch`
-   in the last few minutes; error rate < 1%.
-10. **Resume traffic** — `docker compose -f compose.prod.yml up -d api` /
-    re-enable the nginx upstream.
-11. Watch `/metrics` (or the JSON logs) for 30–60 min.
+9. **Log check** — `docker compose -f compose.prod.yml logs --since 10m api`:
+   no `CRITICAL` / `UNHANDLED_EXCEPTION` / `migration_mismatch`.
+10. Watch the logs (or `/metrics`) for 30–60 min.
+
+## Backups
+
+PostgreSQL has no host port, so the dump runs inside the `db` container and is
+copied out:
+
+```bash
+docker compose -f compose.prod.yml exec -T db sh -c \
+  'pg_dump -Fc -Z6 --no-owner --no-privileges -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /tmp/inventory.dump'
+docker cp inventory-prod-postgres:/tmp/inventory.dump ./inventory_$(date -u +%Y%m%dT%H%M%SZ).dump
+docker compose -f compose.prod.yml exec -T db rm /tmp/inventory.dump
+```
+
+Keep the dump on an encrypted disk (BitLocker / FileVault) and copy it
+off-box. Product images live in the `inventory-prod-uploads` volume; back that
+up too (see `docs/runbook-backup-restore.md`). Validate a dump by restoring it
+into a scratch database with `scripts/restore.sh`.
 
 ## Rollback decision
 
 See `runbook-incident.md`. Short version:
 
 - App-only regression, no migration this release → redeploy the previous
-  `:vX.Y-1` image.
+  `:vX.Y-1` images.
 - Migration this release with a safe guarded downgrade and no real data
-  written → previous image + `alembic downgrade <prev head>`.
+  written → previous images + `alembic downgrade <prev head>`.
 - Otherwise (guarded downgrade refuses, or data integrity in doubt) →
   **restore from the pre-deploy backup**.
 
 ## ⚠️ Credential rotation (required before first production deploy)
 
 A database password was committed to git history in the original
-`scripts/backup_db.ps1` (since removed). **Rotate the PostgreSQL password**
-(and any environment that reused it) before this system holds real data. Git
-history is intentionally not rewritten here.
+`scripts/backup_db.ps1` (since removed). Use a **new** password in
+`.env.production` (and in any environment that reused the old one). Git history
+is intentionally not rewritten here.
