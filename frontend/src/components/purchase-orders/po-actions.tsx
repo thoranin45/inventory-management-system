@@ -6,24 +6,26 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent } from "@/components/ui/dialog";
+import { ActionError, StockEffect } from "@/components/orders/order-dialog-parts";
+import { useStatusLabel } from "@/components/orders/lifecycle-steps";
 import { isApiError } from "@/lib/api/errors";
 import { isAdmin, isWarehouse, type Role } from "@/lib/auth/permissions";
+import { useT } from "@/lib/i18n/client";
 import { useCancelPurchaseOrder, useConfirmPurchaseOrder } from "@/lib/query/purchase-orders";
-import { PO_STATUS_LABEL } from "@/lib/api/schemas/purchase-orders";
 
 const RECEIVABLE = new Set(["CONFIRMED", "PARTIALLY_RECEIVED"]);
 const CANCELLABLE = new Set(["DRAFT", "CONFIRMED"]);
 const TERMINAL = new Set(["RECEIVED", "CANCELLED"]);
 
-function errLine(error: unknown): { message: string; requestId?: string } {
+function errLine(error: unknown, fallback: string): { message: string; requestId?: string } {
   if (isApiError(error)) return { message: error.userMessage, requestId: error.requestId };
-  return { message: error instanceof Error ? error.message : "Something went wrong." };
+  return { message: error instanceof Error ? error.message : fallback };
 }
 
 /**
  * Confirm / Cancel affordances for one Purchase Order, plus a link into the
  * receiving console. Confirm and Cancel are admin-only on the backend
- * (`require_admin`); receiving is warehouse+admin.
+ * (`require_admin`); receiving is warehouse+admin. Neither changes stock.
  */
 export function PurchaseOrderActions({
   id,
@@ -38,6 +40,8 @@ export function PurchaseOrderActions({
   role: Role;
   onDone?: () => void;
 }) {
+  const t = useT();
+  const statusLabel = useStatusLabel();
   const upper = status.toUpperCase();
   const confirm = useConfirmPurchaseOrder();
   const cancel = useCancelPurchaseOrder();
@@ -51,20 +55,22 @@ export function PurchaseOrderActions({
   const showCancel = admin && upper !== "CANCELLED" && !TERMINAL.has(upper) && !(upper === "PARTIALLY_RECEIVED");
   const cancelDisabled = !CANCELLABLE.has(upper);
 
+  const fallback = t("sales.somethingWrong");
+  const order = (n: string | null | undefined) => n ?? poNumber ?? t("po.po");
+  const withRid = (e: { message: string; requestId?: string }) =>
+    e.requestId ? `${e.message} · ${t("task.requestRef", { id: e.requestId })}` : e.message;
+
   const runConfirm = () =>
     confirm.mutate(id, {
       onSuccess: (data) => {
         setConfirmOpen(false);
-        toast.success(`${data.po_number ?? poNumber ?? "PO"} confirmed`, {
-          description: `Status is now ${PO_STATUS_LABEL[data.status] ?? data.status}.`,
+        toast.success(t("po.confirmedToast", { order: order(data.po_number) }), {
+          description: t("sales.statusNow", { status: statusLabel(data.status) }),
         });
         // keep the drawer open — it re-renders as CONFIRMED with the receiving link
       },
       onError: (error) => {
-        const e = errLine(error);
-        toast.error("Could not confirm this purchase order", {
-          description: e.requestId ? `${e.message} · Request ${e.requestId}` : e.message,
-        });
+        toast.error(t("po.confirmFailed"), { description: withRid(errLine(error, fallback)) });
       },
     });
 
@@ -72,19 +78,17 @@ export function PurchaseOrderActions({
     cancel.mutate(id, {
       onSuccess: (data) => {
         setCancelOpen(false);
-        toast.success(`${data.po_number ?? poNumber ?? "PO"} cancelled`);
+        toast.success(t("po.cancelledToast", { order: order(data.po_number) }));
         onDone?.();
       },
       onError: (error) => {
-        const e = errLine(error);
-        toast.error("Could not cancel this purchase order", {
-          description: e.requestId ? `${e.message} · Request ${e.requestId}` : e.message,
-        });
+        toast.error(t("po.cancelFailed"), { description: withRid(errLine(error, fallback)) });
       },
     });
 
-  const confirmErr = confirm.isError ? errLine(confirm.error) : null;
-  const cancelErr = cancel.isError ? errLine(cancel.error) : null;
+  const confirmErr = confirm.isError ? errLine(confirm.error, fallback) : null;
+  const cancelErr = cancel.isError ? errLine(cancel.error, fallback) : null;
+  const target = poNumber ?? t("po.purchaseOrderLower");
 
   if (!showConfirm && !showCancel && !canReceive) return null;
 
@@ -92,36 +96,25 @@ export function PurchaseOrderActions({
     <div className="flex flex-wrap items-center gap-2">
       {canReceive ? (
         <Button asChild variant="primary">
-          <Link href={`/purchase-orders/${id}/receive`}>Open receiving console</Link>
+          <Link href={`/purchase-orders/${id}/receive`}>{t("po.openReceiving")}</Link>
         </Button>
       ) : null}
 
       {showConfirm ? (
         <>
           <Button variant={canReceive ? "secondary" : "primary"} onClick={() => setConfirmOpen(true)}>
-            Confirm order
+            {t("sales.confirmOrder")}
           </Button>
           <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-            <DialogContent
-              title={`Confirm ${poNumber ?? "purchase order"}?`}
-              description="Confirming makes the order receivable. Line quantities and prices are locked in."
-            >
-              {confirmErr ? (
-                <p role="alert" className="rounded-[var(--r-sm)] bg-[var(--danger-subtle)] p-2 text-[12px] text-[var(--danger)]">
-                  {confirmErr.message}
-                  {confirmErr.requestId ? (
-                    <span className="mt-1 block text-[11px] text-[var(--muted)]">
-                      Request ID: <span className="mono select-all">{confirmErr.requestId}</span>
-                    </span>
-                  ) : null}
-                </p>
-              ) : null}
-              <div className="mt-1 flex justify-end gap-2">
+            <DialogContent title={t("sales.confirmTitle", { order: target })} description={t("po.confirmDescription")}>
+              <StockEffect kind="none" />
+              {confirmErr ? <ActionError message={confirmErr.message} requestId={confirmErr.requestId} className="mt-2" /> : null}
+              <div className="mt-2 flex flex-wrap justify-end gap-2">
                 <DialogClose asChild>
-                  <Button variant="ghost">Keep as draft</Button>
+                  <Button variant="ghost">{t("sales.keepDraft")}</Button>
                 </DialogClose>
                 <Button variant="primary" onClick={runConfirm} disabled={confirm.isPending}>
-                  {confirm.isPending ? "Confirming…" : "Confirm order"}
+                  {confirm.isPending ? t("sales.confirming") : t("sales.confirmOrder")}
                 </Button>
               </div>
             </DialogContent>
@@ -135,31 +128,20 @@ export function PurchaseOrderActions({
             variant="danger"
             onClick={() => setCancelOpen(true)}
             disabled={cancelDisabled}
-            title={cancelDisabled ? "This order can't be cancelled from its current state." : undefined}
+            title={cancelDisabled ? t("sales.cannotCancelState") : undefined}
           >
-            Cancel order
+            {t("sales.cancelOrder")}
           </Button>
           <Dialog open={cancelOpen} onOpenChange={setCancelOpen}>
-            <DialogContent
-              title={`Cancel ${poNumber ?? "purchase order"}?`}
-              description="Only draft or confirmed orders with nothing received can be cancelled. This can't be undone."
-            >
-              {cancelErr ? (
-                <p role="alert" className="rounded-[var(--r-sm)] bg-[var(--danger-subtle)] p-2 text-[12px] text-[var(--danger)]">
-                  {cancelErr.message}
-                  {cancelErr.requestId ? (
-                    <span className="mt-1 block text-[11px] text-[var(--muted)]">
-                      Request ID: <span className="mono select-all">{cancelErr.requestId}</span>
-                    </span>
-                  ) : null}
-                </p>
-              ) : null}
-              <div className="mt-1 flex justify-end gap-2">
+            <DialogContent title={t("sales.cancelTitle", { order: target })} description={t("po.cancelDescription")}>
+              <StockEffect kind="none" />
+              {cancelErr ? <ActionError message={cancelErr.message} requestId={cancelErr.requestId} className="mt-2" /> : null}
+              <div className="mt-2 flex flex-wrap justify-end gap-2">
                 <DialogClose asChild>
-                  <Button variant="ghost">Keep order</Button>
+                  <Button variant="ghost">{t("sales.keepOrder")}</Button>
                 </DialogClose>
                 <Button variant="danger" onClick={runCancel} disabled={cancel.isPending}>
-                  {cancel.isPending ? "Cancelling…" : "Cancel order"}
+                  {cancel.isPending ? t("sales.cancelling") : t("sales.cancelOrder")}
                 </Button>
               </div>
             </DialogContent>

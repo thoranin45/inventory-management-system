@@ -73,6 +73,43 @@ const R4_SCOPE = [
   "components/stock-adjustments/request-list.tsx",
 ];
 
+// R5 (orders, purchasing, fulfilment, shipping and their shared order parts) must have none either.
+const R5_SCOPE = [
+  "app/(app)/packing/page.tsx",
+  "app/(app)/picking/page.tsx",
+  "app/(app)/purchase-orders/page.tsx",
+  "app/(app)/sales/page.tsx",
+  "app/(app)/shipping/page.tsx",
+  "components/orders/lifecycle-steps.tsx",
+  "components/orders/order-dialog-parts.tsx",
+  "components/orders/order-summary.tsx",
+  "components/purchase-orders/create-purchase-order.tsx",
+  "components/purchase-orders/po-actions.tsx",
+  "components/purchase-orders/po-detail.tsx",
+  "components/purchase-orders/po-lifecycle.tsx",
+  "components/purchase-orders/purchase-orders-view.tsx",
+  "components/sales/complete-action.tsx",
+  "components/sales/create-sales-order.tsx",
+  "components/sales/return-form.tsx",
+  "components/sales/sales-actions.tsx",
+  "components/sales/sales-detail.tsx",
+  "components/sales/sales-documents.tsx",
+  "components/sales/sales-lifecycle.tsx",
+  "components/sales/sales-view.tsx",
+  "components/sales/ship-action.tsx",
+  "components/shipping/shipping-view.tsx",
+  "components/work/allocation-picker.tsx",
+  "components/work/camera-barcode-scanner.tsx",
+  "components/work/fulfillment-console.tsx",
+  "components/work/print-preview.tsx",
+  "components/work/progress-ring.tsx",
+  "components/work/scan-panel.tsx",
+  "components/work/scan-status.tsx",
+  "components/work/work-console-layout.tsx",
+  "components/work/work-line.tsx",
+  "components/work/work-queue.tsx",
+];
+
 const JSX_TEXT = />\s*([A-Z][a-z]+(?:[ '’&,.:/-]+[A-Za-z]+)*[.…!?]?)\s*</g;
 const PROP_TEXT = /\b(?:aria-label|placeholder|title|label|heading|emptyText|ariaLabel)=["{]["`]?([A-Z][a-z]+[^"`}]*)["`]/g;
 const ALLOW = /^(?:AKKRATHARA|Ctrl K|Ctrl|Esc|EN|SKU|FEFO|FIFO|ID|OK)$/;
@@ -127,6 +164,10 @@ describe("untranslated string tracking (D4)", () => {
 
   it("R4-scope screens and primitives contain no hard-coded English", () => {
     for (const file of R4_SCOPE) expect(counts[file] ?? 0, `${file}: ${englishLiterals(readFileSync(join(SRC, file), "utf8"))}`).toBe(0);
+  });
+
+  it("R5-scope screens and order parts contain no hard-coded English", () => {
+    for (const file of R5_SCOPE) expect(counts[file] ?? 0, `${file}: ${englishLiterals(readFileSync(join(SRC, file), "utf8"))}`).toBe(0);
   });
 
   it("no file gains untranslated strings beyond the recorded baseline", () => {

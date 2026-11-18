@@ -101,3 +101,76 @@ export function buildAmbiguityCandidates(
     };
   });
 }
+
+/* ------------------------------------------- R5 (D-R5-5): uncertain outcomes */
+
+/**
+ * Scan / undo rejections VERIFIED to mean "nothing was counted"
+ * (scan_fulfillment_service / undo_fulfillment_service at 7a2d9db): each is
+ * raised before the counter is written, inside the order's transaction.
+ */
+const DEFINITIVE_FULFILLMENT_CODES = new Set([
+  "BARCODE_NOT_FOUND",
+  "PRODUCT_NOT_IN_ORDER",
+  "ALLOCATION_IDENTIFICATION_REQUIRED",
+  "ALLOCATION_SCAN_EXCEEDS_REMAINING",
+  "ALLOCATION_NOT_IN_ORDER",
+  "SCANNED_PRODUCT_MISMATCHES_LINE",
+  "ALLOCATION_NOT_FULFILLABLE",
+  "UNDO_BELOW_ZERO",
+  "UNDO_BELOW_PACKED",
+  "Validation error",
+]);
+
+/** The error shape this needs (an ApiError, without importing the class here). */
+export interface FailureLike {
+  kind?: string;
+  status?: number;
+  message?: string;
+}
+
+/**
+ * Did a failed scan / undo certainly change nothing? Only a verified backend
+ * rejection says so. A transport failure, timeout, 5xx, an unparseable body or
+ * an unrecognised answer leaves the outcome UNKNOWN — the counter may or may
+ * not have moved — and is never reported as "nothing counted".
+ */
+export function fulfillmentFailureIsDefinitive(error: FailureLike | null | undefined): boolean {
+  if (!error || typeof error.status !== "number") return false;
+  if (error.kind === "network" || error.kind === "parse") return false;
+  if (error.status < 400 || error.status >= 500 || error.status === 408 || error.status === 429) return false;
+  const message = error.message ?? "";
+  return DEFINITIVE_FULFILLMENT_CODES.has(message) || /^Sales Order state conflict: /.test(message);
+}
+
+/** When each local overlay entry was recorded, by allocation (a monotonic sequence). */
+export type LocalSeq = Record<number, number>;
+
+/**
+ * After a successful resync GET that started at `startSeq`, drop every local
+ * overlay entry recorded at or before it, so the refreshed server detail wins
+ * for those allocations. Entries recorded AFTER the GET started came from a
+ * response newer than the snapshot and are kept — a stale refresh can never
+ * overwrite newer authoritative progress.
+ */
+export function reconcileAfterResync(
+  local: LocalProgress,
+  seq: LocalSeq,
+  startSeq: number,
+): { local: LocalProgress; seq: LocalSeq } {
+  const nextLocal: LocalProgress = {};
+  const nextSeq: LocalSeq = {};
+  for (const [id, patch] of Object.entries(local)) {
+    const s = seq[Number(id)] ?? 0;
+    if (s > startSeq) {
+      nextLocal[Number(id)] = patch;
+      nextSeq[Number(id)] = s;
+    }
+  }
+  return { local: nextLocal, seq: nextSeq };
+}
+
+/** The sequence entries that survive a resync that started at `startSeq` (recorded after it). */
+export function seqAfter(seq: LocalSeq, startSeq: number): LocalSeq {
+  return Object.fromEntries(Object.entries(seq).filter(([, s]) => s > startSeq)) as LocalSeq;
+}

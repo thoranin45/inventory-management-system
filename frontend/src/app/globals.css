@@ -664,6 +664,10 @@
     overscroll-behavior: contain;
     transition: transform var(--dur-2) var(--ease);
   }
+  /* R5: the dock scrolls (max-height above) rather than squashing its controls below a usable target */
+  .wc-work-side > * {
+    flex-shrink: 0;
+  }
   /* trim the verbose desktop panel to essentials inside the dock */
   .wc-work-side .wc-scan-panel {
     border: 0;
