@@ -7,18 +7,21 @@ import { useSession } from "@/components/session-provider";
 import { Button } from "@/components/ui/button";
 import { Drawer, DrawerContent } from "@/components/ui/drawer";
 import { QuantityDisplay } from "@/components/ui/quantity-display";
+import { ActionError } from "@/components/orders/order-dialog-parts";
+import { useOrderCopy } from "@/components/orders/use-order-copy";
 import { Banner } from "@/components/ui/states";
 import { errorResponseSchema, isApiError } from "@/lib/api/errors";
 import { compareDecimals, subtractDecimals, sumDecimals } from "@/lib/decimal";
 import { newId, useIdempotentDraft } from "@/lib/idempotent-draft";
 import { useReturnSalesOrder, useSalesOrder } from "@/lib/query/sales";
 import { useProductLookup } from "@/lib/query/sales";
+import { useT } from "@/lib/i18n/client";
+import { formMessage, shipErrorMessage } from "@/lib/order-copy";
 import {
   classifyReturnRefusal,
   confirmsReturnIntent,
   salesReturnLineInput,
   salesReturnResultSchema,
-  shipErrorCopy,
   type ReturnRefusal,
   type SalesReturnItemResult,
   type SalesReturnLineInput,
@@ -330,43 +333,12 @@ function createInFlight(): InFlight {
 
 type ReturnMutation = Pick<ReturnType<typeof useReturnSalesOrder>, "mutate" | "isPending">;
 
-const ledgerCheck = (so: string) => `Check SALES_RETURN movements for ${so} in Inventory › Ledger before recording anything else.`;
-const conflictCheck = (so: string) =>
-  `Check the stock ledger (SALES_RETURN movements for ${so} in Inventory › Ledger) and the sales order to see whether the return was recorded.`;
-
-const COPY = {
-  sending: "Submitting this return…",
-  stillOut: "A request for this return is still in progress. Retry unlocks when it settles.",
-  retryExplains:
-    "Retry sends exactly the same return with the same request key: if it was already recorded, it won't add stock twice. Editing and new returns stay blocked until the backend confirms or refuses it.",
-  unknownTitle: "Outcome unknown — this return may or may not be recorded",
-  restoredTitle: "Outcome unknown — a return from this tab hasn't been confirmed",
-  mismatchTitle: "Outcome unknown — the server's reply didn't match this return",
-  mismatchBody: "It isn't marked as recorded.",
-  conflictTitle: "Failed — request key conflict (outcome unknown)",
-  // A key conflict is the server's settled answer for this key and payload: Retry (D4) stays
-  // available but does not change it, so the copy must not promise that it resolves anything.
-  conflictWhy: "This request key was already used for a return with different quantities, so a return may already be recorded.",
-  conflictRetry: "Retry resends exactly this return with the same request key. It can't add stock twice, but it won't change the server's answer.",
-  conflictReset:
-    "Closing this browser tab is the only way to reset: until then the request key is kept and new returns for this order stay blocked here.",
-  noResponse: "No response was received: the connection failed or the request was interrupted.",
-  foreignTitle: "Outcome unknown — submitted by another user",
-  foreignBody:
-    "A return for this order was submitted in this browser tab by a different signed-in user and hasn't been confirmed. Only that user can retry it, and it isn't cleared here. New returns for this order are blocked.",
-  corruptTitle: "Outcome unknown — an earlier return couldn't be restored",
-  corruptBody:
-    "A return submitted earlier in this tab couldn't be restored safely, so it may or may not have been recorded. New returns for this order are blocked here.",
-  storageTitle: "Returns blocked — this browser can't keep a recovery copy",
-  storageBody:
-    "Session storage is off, full or blocked, so a return whose outcome became unknown couldn't be recovered safely. Nothing was sent. Use a normal window with site storage allowed, then reload.",
-  storageUnreadableBody:
-    "Session storage can't be read, so this tab can't tell whether an earlier return is unconfirmed. Nothing was sent. Use a normal window with site storage allowed, then reload.",
-  cleanupTitle: "New returns paused — this browser couldn't update its recovery copy",
-  cleanupRecorded: "The return was recorded. Reload to clear the recovery copy: the return is checked again without adding stock twice.",
-  cleanupRefused: "The backend refused this return, so nothing was recorded. Reload to clear the recovery copy.",
-  freshKey: "This return needed a fresh request key. Nothing was sent — press Record return again.",
-};
+// Every message here is localized under `salesReturn.*` (en / th dictionaries).
+type ReturnCopyKey =
+  | "sending" | "stillOut" | "retryExplains" | "unknownTitle" | "restoredTitle" | "mismatchTitle" | "mismatchBody"
+  | "conflictTitle" | "conflictWhy" | "conflictRetry" | "conflictReset" | "noResponse" | "foreignTitle"
+  | "foreignBody" | "corruptTitle" | "corruptBody" | "storageTitle" | "storageBody" | "storageUnreadableBody"
+  | "cleanupTitle" | "cleanupRecorded" | "cleanupRefused" | "freshKey";
 
 function ReturnBody({
   id,
@@ -379,6 +351,11 @@ function ReturnBody({
   inFlight: InFlight;
   onClose: () => void;
 }) {
+  const t = useT();
+  const copy = useOrderCopy();
+  const COPY = (key: ReturnCopyKey) => t(`salesReturn.${key}`);
+  const ledgerCheck = (order: string) => t("salesReturn.ledgerCheck", { order });
+  const conflictCheck = (order: string) => t("salesReturn.conflictCheck", { order });
   const detailQ = useSalesOrder(id);
   const detail = detailQ.data;
   const actor = useActorId();
@@ -407,9 +384,9 @@ function ReturnBody({
 
   const productIds = React.useMemo(() => (detail?.items ?? []).map((it) => it.product_id), [detail]);
   const lookup = useProductLookup(productIds);
-  const name = (pid: number) => lookup.data?.[pid]?.product_name ?? `Product #${pid}`;
+  const name = (pid: number) => lookup.data?.[pid]?.product_name ?? t("receive.productFallback", { id: pid });
   const sku = (pid: number) => lookup.data?.[pid]?.sku ?? "";
-  const soLabel = detail?.so_number ?? "this order";
+  const soLabel = detail?.so_number ?? t("salesReturn.thisOrder");
 
   // session-local: how much the backend has told us is already returned per product
   const [alreadyReturned, setAlreadyReturned] = React.useState<Record<number, string>>({});
@@ -460,7 +437,7 @@ function ReturnBody({
     setAlreadyReturned((s) => mergeReturnedTotals(s, data.returned_items));
     // clear the quantities we just submitted, keep the rows for further returns
     setLines((s) => clearReturnedLines(s, data.returned_items));
-    toast.success("Return recorded", { description: `${data.returned_items.length} line${data.returned_items.length === 1 ? "" : "s"} returned to stock` });
+    toast.success(t("sales.returnRecorded"), { description: t(data.returned_items.length === 1 ? "sales.returnLineToStock" : "sales.returnLinesToStock", { n: data.returned_items.length }) });
   };
 
   /** Release the intent with a verified write (pending → null); only then rotate the key and allow a new return. */
@@ -510,7 +487,8 @@ function ReturnBody({
       return;
     }
     const { error } = outcome;
-    const message = isApiError(error) ? (shipErrorCopy(error.message) ?? error.userMessage) : COPY.noResponse;
+    const mapped = isApiError(error) ? shipErrorMessage(error.message) : undefined;
+    const message = isApiError(error) ? (mapped ? copy(mapped) : error.userMessage) : COPY("noResponse");
     const requestId = isApiError(error) ? error.requestId : undefined;
     if (provenRefusal(error, pending)) {
       finish({ kind: "refused", pending, message, requestId });
@@ -551,7 +529,7 @@ function ReturnBody({
     setFormError(null);
     setNotice(null);
     if (activeLines.length === 0) {
-      setFormError({ message: "Enter a quantity on at least one line." });
+      setFormError({ message: t("sales.returnEnterQty") });
       return;
     }
     const checked = validateReturnLines(activeLines, (l) => remainingReturnable(l.product_id, l.ordered));
@@ -560,8 +538,8 @@ function ReturnBody({
         setLine(Number(pid), {
           error:
             problem.kind === "invalid"
-              ? problem.message
-              : `Can't exceed ${problem.ceiling} (ordered minus already returned)`,
+              ? copy(formMessage(problem.message))
+              : t("sales.returnCeiling", { ceiling: problem.ceiling }),
         });
       }
       return;
@@ -593,7 +571,7 @@ function ReturnBody({
     const key = draft.idempotencyKey;
     if (!KEY_RE.test(key) || usedKeys.includes(key)) {
       startNewDraft(); // a key that may already have been sent is never reused
-      setNotice(COPY.freshKey);
+      setNotice(COPY("freshKey"));
       return;
     }
     const written = writeIntent(id, {
@@ -632,17 +610,14 @@ function ReturnBody({
     send(pending);
   };
 
-  if (detailQ.isLoading) return <p className="py-6 text-[13px] text-[var(--muted)]">Loading order lines…</p>;
-  if (detailQ.isError || !detail) return <p className="py-6 text-[13px] text-[var(--danger)]">Could not load the order.</p>;
+  if (detailQ.isLoading) return <p className="py-6 text-[13px] text-[var(--muted)]">{t("sales.loadingLines")}</p>;
+  if (detailQ.isError || !detail) return <p className="py-6 text-[13px] text-[var(--danger)]">{t("sales.loadOrderFailed")}</p>;
 
   const sending = view.kind === "sending" || busy || ret.isPending;
 
   return (
     <div className="flex flex-col gap-4">
-      <p className="text-[12px] text-[var(--muted)]">
-        Returns restore stock to the original allocation — the backend picks the batch, you don&apos;t. A return is a
-        stock and audit event; it does <strong>not</strong> change the order status or process a refund.
-      </p>
+      <p className="text-[13px] text-[var(--muted)]">{t("sales.returnIntro")}</p>
 
       <div className="flex flex-col gap-3">
         {detail.items.map((it) => {
@@ -661,23 +636,23 @@ function ReturnBody({
                 <div className="mono text-[11px] text-[var(--faint)]">{sku(it.product_id)}</div>
               </div>
               <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11.5px] text-[var(--muted)]">
-                <span>Ordered <QuantityDisplay value={l.ordered} className="font-medium text-[var(--foreground)]" /></span>
-                <span>Shipped <QuantityDisplay value={l.ordered} className="font-medium text-[var(--foreground)]" /></span>
+                <span>{t("receive.ordered")} <QuantityDisplay value={l.ordered} className="font-medium text-[var(--foreground)]" /></span>
+                <span>{t("status.SHIPPED")} <QuantityDisplay value={l.ordered} className="font-medium text-[var(--foreground)]" /></span>
                 <span>
-                  Already returned{" "}
+                  {t("sales.alreadyReturned")}{" "}
                   {already !== undefined ? (
                     <QuantityDisplay value={already} className="font-medium text-[var(--foreground)]" />
                   ) : (
-                    <span className="text-[var(--faint)]" title="Not exposed by GET /sales-orders/{id}; the backend enforces the true total">unknown until you submit</span>
+                    <span className="text-[var(--faint)]" title={t("sales.alreadyReturnedTitle")}>{t("sales.unknownUntilSubmit")}</span>
                   )}
                 </span>
-                <span>Remaining returnable <QuantityDisplay value={afterThis} className="font-medium text-[var(--foreground)]" /></span>
+                <span>{t("sales.remainingReturnable")} <QuantityDisplay value={afterThis} className="font-medium text-[var(--foreground)]" /></span>
               </div>
               <div className="mt-2 flex flex-wrap items-end gap-3">
                 <label className="flex flex-col gap-1">
-                  <span className="text-[11px] font-semibold text-[var(--muted)]">Return now</span>
+                  <span className="text-[11px] font-semibold text-[var(--muted)]">{t("sales.returnNow")}</span>
                   <input
-                    aria-label={`Return quantity for ${name(it.product_id)}`}
+                    aria-label={t("sales.returnQtyFor", { name: name(it.product_id) })}
                     inputMode="decimal"
                     className={inputCls}
                     placeholder="0.000"
@@ -689,9 +664,9 @@ function ReturnBody({
                   />
                 </label>
                 <label className="flex flex-1 flex-col gap-1">
-                  <span className="text-[11px] font-semibold text-[var(--muted)]">Reason (optional)</span>
+                  <span className="text-[11px] font-semibold text-[var(--muted)]">{t("sales.reasonOptional")}</span>
                   <input
-                    aria-label={`Return reason for ${name(it.product_id)}`}
+                    aria-label={t("sales.returnReasonFor", { name: name(it.product_id) })}
                     className={`${inputCls} w-full`}
                     maxLength={255}
                     readOnly={locked}
@@ -708,57 +683,57 @@ function ReturnBody({
         })}
       </div>
 
-      {view.kind === "sending" ? <Banner tone="info" title={COPY.sending} /> : null}
+      {view.kind === "sending" ? <Banner tone="info" title={COPY("sending")} /> : null}
 
       {view.kind === "unknown" ? (
         <Banner
           tone={view.reason === "conflict" ? "danger" : "warning"}
           title={
             view.reason === "restored"
-              ? COPY.restoredTitle
+              ? COPY("restoredTitle")
               : view.reason === "mismatch"
-                ? COPY.mismatchTitle
+                ? COPY("mismatchTitle")
                 : view.reason === "conflict"
-                  ? COPY.conflictTitle
-                  : COPY.unknownTitle
+                  ? COPY("conflictTitle")
+                  : COPY("unknownTitle")
           }
         >
           <div className="flex flex-col gap-1 text-[12px]">
-            {view.reason === "mismatch" ? <p>{COPY.mismatchBody}</p> : null}
+            {view.reason === "mismatch" ? <p>{COPY("mismatchBody")}</p> : null}
             {/* a conflict's message is always the mapped key-conflict copy: its dedicated copy replaces it */}
-            {view.reason === "conflict" ? <p>{COPY.conflictWhy}</p> : view.message ? <p>{view.message}</p> : null}
+            {view.reason === "conflict" ? <p>{COPY("conflictWhy")}</p> : view.message ? <p>{view.message}</p> : null}
             {view.requestId ? (
               <span className="block text-[11px] text-[var(--muted)]">
-                Request ID: <span className="mono select-all">{view.requestId}</span>
+                {t("common.requestId")} <span className="mono select-all">{view.requestId}</span>
               </span>
             ) : null}
             {view.reason === "conflict" ? (
               <>
-                <p>{COPY.conflictRetry}</p>
+                <p>{COPY("conflictRetry")}</p>
                 <p>{conflictCheck(soLabel)}</p>
-                <p>{COPY.conflictReset}</p>
+                <p>{COPY("conflictReset")}</p>
               </>
             ) : (
-              <p>{COPY.retryExplains}</p>
+              <p>{COPY("retryExplains")}</p>
             )}
-            {busy || ret.isPending ? <p className="text-[var(--muted)]">{COPY.stillOut}</p> : null}
+            {busy || ret.isPending ? <p className="text-[var(--muted)]">{COPY("stillOut")}</p> : null}
             {view.reason !== "conflict" ? <p className="text-[var(--muted)]">{ledgerCheck(soLabel)}</p> : null}
           </div>
         </Banner>
       ) : null}
 
       {view.kind === "foreign" ? (
-        <Banner tone="danger" title={COPY.foreignTitle}>
+        <Banner tone="danger" title={COPY("foreignTitle")}>
           <p className="text-[12px]">
-            {COPY.foreignBody} {ledgerCheck(soLabel)}
+            {COPY("foreignBody")} {ledgerCheck(soLabel)}
           </p>
         </Banner>
       ) : null}
 
       {view.kind === "corrupt" ? (
-        <Banner tone="danger" title={COPY.corruptTitle}>
+        <Banner tone="danger" title={COPY("corruptTitle")}>
           <p className="text-[12px]">
-            {COPY.corruptBody} {ledgerCheck(soLabel)}
+            {COPY("corruptBody")} {ledgerCheck(soLabel)}
           </p>
         </Banner>
       ) : null}
@@ -766,27 +741,27 @@ function ReturnBody({
       {view.kind === "blocked" ? (
         <Banner
           tone="danger"
-          title={view.reason === "cleanup_failed_recorded" || view.reason === "cleanup_failed_refused" ? COPY.cleanupTitle : COPY.storageTitle}
+          title={view.reason === "cleanup_failed_recorded" || view.reason === "cleanup_failed_refused" ? COPY("cleanupTitle") : COPY("storageTitle")}
         >
           <p className="text-[12px]">
             {view.reason === "cleanup_failed_recorded"
-              ? COPY.cleanupRecorded
+              ? COPY("cleanupRecorded")
               : view.reason === "cleanup_failed_refused"
-                ? COPY.cleanupRefused
+                ? COPY("cleanupRefused")
                 : view.reason === "storage_unreadable"
-                  ? COPY.storageUnreadableBody
-                  : COPY.storageBody}
+                  ? COPY("storageUnreadableBody")
+                  : COPY("storageBody")}
           </p>
         </Banner>
       ) : null}
 
       {results ? (
         <div className="rounded-[var(--r-sm)] border border-[color-mix(in_srgb,var(--success)_30%,transparent)] bg-[var(--success-subtle)] p-2 text-[11.5px] text-[var(--foreground)]">
-          <div className="mb-1 font-semibold text-[var(--success)]">Recorded by the backend</div>
+          <div className="mb-1 font-semibold text-[var(--success)]">{t("sales.recordedByBackend")}</div>
           {results.map((r) => (
             <div key={r.product_id} className="mono">
-              {name(r.product_id)}: returned <QuantityDisplay value={r.returned_quantity} /> · total returned{" "}
-              <QuantityDisplay value={r.total_returned} /> · remaining <QuantityDisplay value={r.remaining_returnable} />
+              {name(r.product_id)}: {t("sales.returnedWord")} <QuantityDisplay value={r.returned_quantity} /> · {t("sales.totalReturnedWord")}{" "}
+              <QuantityDisplay value={r.total_returned} /> · {t("sales.remainingWord")} <QuantityDisplay value={r.remaining_returnable} />
             </div>
           ))}
         </div>
@@ -798,29 +773,20 @@ function ReturnBody({
         </p>
       ) : null}
 
-      {formError ? (
-        <p role="alert" className="rounded-[var(--r-sm)] bg-[var(--danger-subtle)] p-2 text-[12px] text-[var(--danger)]">
-          {formError.message}
-          {formError.requestId ? (
-            <span className="mt-1 block text-[11px] text-[var(--muted)]">
-              Request ID: <span className="mono select-all">{formError.requestId}</span>
-            </span>
-          ) : null}
-        </p>
-      ) : null}
+      {formError ? <ActionError message={formError.message} requestId={formError.requestId} /> : null}
 
       <div className="sticky bottom-0 -mx-4 flex items-center justify-between gap-2 border-t border-[var(--border)] bg-[var(--surface)] px-4 pt-3">
         <span className="text-[12px] text-[var(--muted)]">
-          Returning <ReturningTotal total={total} />
+          {t("sales.returningWord")} <ReturningTotal total={total} />
         </span>
         <span className="flex gap-2">
           <Button variant="ghost" onClick={onClose}>
-            Close
+            {t("common.close")}
           </Button>
           {/* distinct keys: a double click can't land on a reused button that now means "retry" */}
           {view.kind === "unknown" ? (
             <Button key="retry" variant="primary" onClick={retry} disabled={busy || ret.isPending}>
-              {busy || ret.isPending ? "Submitting…" : "Retry: Record return"}
+              {busy || ret.isPending ? t("receive.submitting") : t("salesReturn.retryRecord")}
             </Button>
           ) : (
             <Button
@@ -829,7 +795,7 @@ function ReturnBody({
               onClick={submit}
               disabled={view.kind !== "editing" || sending || !draft.ready || activeLines.length === 0}
             >
-              {sending ? "Submitting…" : "Record return"}
+              {sending ? t("receive.submitting") : t("sales.recordReturn")}
             </Button>
           )}
         </span>
@@ -852,11 +818,12 @@ export function ReturnDrawer({
   // The mutation observer and the in-flight guard live here, outside the drawer
   // body: closing and reopening the drawer remounts the body, but a request
   // still out keeps its callbacks and keeps blocking a second send.
+  const t = useT();
   const ret = useReturnSalesOrder();
   const [inFlight] = React.useState(createInFlight);
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent title={`Return items — ${soNumber ?? "sales order"}`}>
+      <DrawerContent title={t("sales.returnTitle", { order: soNumber ?? t("sales.salesOrderLower") })}>
         {/* keyed by order: the draft hook and the stored intent are read once per mount */}
         {open && id != null ? (
           <ReturnBody key={id} id={id} ret={ret} inFlight={inFlight} onClose={() => onOpenChange(false)} />

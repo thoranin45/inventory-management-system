@@ -16,8 +16,13 @@ import { Button } from "@/components/ui/button";
 import { Combobox, type ComboboxItem } from "@/components/ui/combobox";
 import { Drawer, DrawerContent } from "@/components/ui/drawer";
 import { MoneyDisplay } from "@/components/ui/quantity-display";
+import { ActionError } from "@/components/orders/order-dialog-parts";
+import { OrderSummary } from "@/components/orders/order-summary";
+import { useOrderCopy } from "@/components/orders/use-order-copy";
 import { isApiError } from "@/lib/api/errors";
 import { multiplyDecimals, sumDecimals } from "@/lib/decimal";
+import { useT } from "@/lib/i18n/client";
+import { formMessage } from "@/lib/order-copy";
 import { useGlobalSearch } from "@/lib/query/hooks";
 import { useCreateSalesOrder, useCustomerSearch } from "@/lib/query/sales";
 import {
@@ -31,17 +36,18 @@ type FormValues = CreateSalesOrderInput;
 const EMPTY_LINE = { product_id: 0, quantity: "", unit_price: "" };
 
 function Field({ label, error, children, htmlFor }: { label: string; error?: string; children: React.ReactNode; htmlFor?: string }) {
+  const copy = useOrderCopy();
   return (
     <label className="flex flex-col gap-1" htmlFor={htmlFor}>
       <span className="text-[12px] font-semibold text-[var(--muted)]">{label}</span>
       {children}
-      {error ? <span className="text-[11px] text-[var(--danger)]">{error}</span> : null}
+      {error ? <span className="text-[12px] text-[var(--danger)]">{copy(formMessage(error))}</span> : null}
     </label>
   );
 }
 
 const inputCls =
-  "min-h-11 rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-[13px] tabular-nums outline-hidden focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-[var(--focus)]";
+  "min-h-11 rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-[16px] tabular-nums outline-hidden focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-[var(--focus)] min-[768px]:text-[13px]";
 
 /* ---------------- customer selector ---------------- */
 function CustomerField({
@@ -53,6 +59,7 @@ function CustomerField({
   onPick: (item: ComboboxItem | null) => void;
   error?: string;
 }) {
+  const t = useT();
   const [term, setTerm] = React.useState("");
   const debounced = useDebounced(term, 250);
   const { data, isFetching } = useCustomerSearch(debounced);
@@ -62,17 +69,17 @@ function CustomerField({
     sublabel: [c.phone, c.email].filter(Boolean).join(" · ") || undefined,
   }));
   return (
-    <Field label="Customer" error={error} htmlFor="so-customer">
+    <Field label={t("sales.customer")} error={error} htmlFor="so-customer">
       <Combobox
         id="so-customer"
-        ariaLabel="Search customers"
+        ariaLabel={t("sales.searchCustomers")}
         value={value}
         onChange={onPick}
         onSearch={setTerm}
         items={items}
         loading={isFetching}
-        placeholder="Search customers by name…"
-        emptyText="No customers match"
+        placeholder={t("sales.searchCustomersPlaceholder")}
+        emptyText={t("sales.noCustomers")}
       />
     </Field>
   );
@@ -95,13 +102,10 @@ function ProductLine({
   onProduct: (index: number, item: ComboboxItem | null) => void;
   onRemove: () => void;
   canRemove: boolean;
-  errors: {
-    product_id?: string;
-    quantity?: string;
-    unit_price?: string;
-  };
+  errors: { product_id?: string; quantity?: string; unit_price?: string };
   selectedLabel: ComboboxItem | null;
 }) {
+  const t = useT();
   const [term, setTerm] = React.useState("");
   const debounced = useDebounced(term, 250);
   const search = useGlobalSearch(debounced, debounced.trim().length >= 2);
@@ -111,37 +115,36 @@ function ProductLine({
 
   const line = useWatch({ control, name: `items.${index}` });
   const lineTotal = multiplyDecimals(String(line?.quantity || "0"), String(line?.unit_price || "0"));
+  const n = index + 1;
 
   return (
     <div className="rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--surface)] p-3">
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--faint)]">
-          Line {index + 1}
-        </span>
+        <span className="text-[12px] font-semibold text-[var(--muted)]">{t("orders.lineN", { n })}</span>
         {canRemove ? (
-          <Button size="icon" variant="ghost" aria-label={`Remove line ${index + 1}`} onClick={onRemove}>
+          <Button size="icon" variant="ghost" aria-label={t("orders.removeLine", { n })} onClick={onRemove}>
             <Trash2 aria-hidden className="h-4 w-4" />
           </Button>
         ) : null}
       </div>
 
       <div className="flex flex-col gap-3">
-        <Field label="Product" error={errors.product_id} htmlFor={`so-line-${index}-product`}>
+        <Field label={t("orders.product")} error={errors.product_id} htmlFor={`so-line-${index}-product`}>
           <Combobox
             id={`so-line-${index}-product`}
-            ariaLabel={`Search products for line ${index + 1}`}
+            ariaLabel={t("orders.searchProductsForLine", { n })}
             value={selectedLabel}
             onChange={(item) => onProduct(index, item)}
             onSearch={setTerm}
             items={items}
             loading={search.isFetching}
-            placeholder="Search products by SKU or name…"
-            emptyText={debounced.trim().length < 2 ? "Type at least 2 characters" : "No products match"}
+            placeholder={t("orders.searchProductsPlaceholder")}
+            emptyText={debounced.trim().length < 2 ? t("task.typeTwo") : t("task.noProducts")}
           />
         </Field>
 
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Quantity" error={errors.quantity} htmlFor={`so-line-${index}-qty`}>
+          <Field label={t("orders.fieldQuantity")} error={errors.quantity} htmlFor={`so-line-${index}-qty`}>
             <input
               id={`so-line-${index}-qty`}
               inputMode="decimal"
@@ -151,7 +154,7 @@ function ProductLine({
               {...register(`items.${index}.quantity`)}
             />
           </Field>
-          <Field label="Unit price" error={errors.unit_price} htmlFor={`so-line-${index}-price`}>
+          <Field label={t("orders.fieldUnitPrice")} error={errors.unit_price} htmlFor={`so-line-${index}-price`}>
             <input
               id={`so-line-${index}-price`}
               inputMode="decimal"
@@ -164,7 +167,7 @@ function ProductLine({
         </div>
 
         <div className="flex items-baseline justify-between text-[12px]">
-          <span className="text-[var(--muted)]">Line total</span>
+          <span className="text-[var(--muted)]">{t("orders.lineTotal")}</span>
           <MoneyDisplay value={lineTotal} className="font-semibold" />
         </div>
       </div>
@@ -174,6 +177,8 @@ function ProductLine({
 
 /* ---------------- form ---------------- */
 function CreateForm({ onClose, onCreated }: { onClose: () => void; onCreated: (r: SalesMutationResult) => void }) {
+  const t = useT();
+  const copy = useOrderCopy();
   const {
     control,
     register,
@@ -209,19 +214,20 @@ function CreateForm({ onClose, onCreated }: { onClose: () => void; onCreated: (r
 
   const rootError = errors.items?.root?.message ?? errors.items?.message;
 
+  // the request is unchanged: one submit → one un-keyed POST /sales-orders, never retried
   const onSubmit = (values: FormValues) => {
     create.mutate(values, {
       onSuccess: (data) => {
-        toast.success(`${data.so_number ?? "Draft"} created`, { description: "Saved as a draft — confirm it to allocate stock." });
+        toast.success(t("sales.createdToast", { order: data.so_number ?? t("sales.draft") }), { description: t("sales.createdHint") });
         reset({ customer_id: 0, items: [{ ...EMPTY_LINE }] });
         setCustomer(null);
         setProductLabels({});
         onCreated(data);
       },
       onError: (error) => {
-        const msg = isApiError(error) ? error.userMessage : "Could not create the order.";
+        const msg = isApiError(error) ? error.userMessage : t("sales.createFailedFallback");
         const rid = isApiError(error) ? error.requestId : undefined;
-        toast.error("Create failed", { description: rid ? `${msg} · Request ${rid}` : msg });
+        toast.error(t("orders.createFailed"), { description: rid ? `${msg} · ${t("task.requestRef", { id: rid })}` : msg });
       },
     });
   };
@@ -263,47 +269,28 @@ function CreateForm({ onClose, onCreated }: { onClose: () => void; onCreated: (r
         ))}
         <Button variant="secondary" onClick={() => append({ ...EMPTY_LINE })} className="self-start">
           <Plus aria-hidden className="h-4 w-4" />
-          Add product line
+          {t("orders.addLine")}
         </Button>
       </div>
 
-      <div className="flex items-baseline justify-between border-t border-[var(--border)] pt-3 text-[13px]">
-        <span className="font-semibold">Grand total</span>
-        <MoneyDisplay value={grandTotal} className="text-[15px] font-semibold" />
-      </div>
+      {/* D-R5-1: an inline summary, not a review step */}
+      <OrderSummary partyLabel={t("sales.customer")} partyName={customer?.label ?? null} lines={items ?? []} grandTotal={grandTotal} note={t("sales.draftNote")} />
 
-      {rootError ? (
-        <p role="alert" className="rounded-[var(--r-sm)] bg-[var(--danger-subtle)] p-2 text-[12px] text-[var(--danger)]">
-          {rootError}
-        </p>
-      ) : null}
+      {rootError ? <ActionError message={copy(formMessage(rootError))} /> : null}
       {apiErr ? (
-        <p role="alert" className="rounded-[var(--r-sm)] bg-[var(--danger-subtle)] p-2 text-[12px] text-[var(--danger)]">
-          {apiErr.userMessage}
-          {apiErr.details.length > 0 ? (
-            <span className="mt-1 block">
-              {apiErr.details.map((d, i) => (
-                <span key={i} className="block">
-                  {d.field ? `${d.field}: ` : ""}
-                  {d.message}
-                </span>
-              ))}
-            </span>
-          ) : null}
-          {apiErr.requestId ? (
-            <span className="mt-1 block text-[11px] text-[var(--muted)]">
-              Request ID: <span className="mono select-all">{apiErr.requestId}</span>
-            </span>
-          ) : null}
-        </p>
+        <ActionError
+          message={[apiErr.userMessage, ...apiErr.details.map((d) => `${d.field ? `${d.field}: ` : ""}${d.message}`)].join("\n")}
+          requestId={apiErr.requestId}
+          className="whitespace-pre-line"
+        />
       ) : null}
 
-      <div className="sticky bottom-0 -mx-4 flex justify-end gap-2 border-t border-[var(--border)] bg-[var(--surface)] px-4 pt-3">
+      <div className="sticky bottom-0 -mx-4 flex justify-end gap-2 border-t border-[var(--border)] bg-[var(--surface)] px-4 pb-[env(safe-area-inset-bottom)] pt-3">
         <Button variant="ghost" onClick={onClose}>
-          Cancel
+          {t("orders.cancel")}
         </Button>
         <Button type="submit" variant="primary" disabled={create.isPending}>
-          {create.isPending ? "Creating…" : "Create draft order"}
+          {create.isPending ? t("orders.creating") : t("sales.createDraft")}
         </Button>
       </div>
     </form>
@@ -319,9 +306,10 @@ export function CreateSalesOrderDrawer({
   onOpenChange: (v: boolean) => void;
   onCreated: (r: SalesMutationResult) => void;
 }) {
+  const t = useT();
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent title="New sales order">
+      <DrawerContent title={t("sales.newOrderTitle")}>
         <CreateForm onClose={() => onOpenChange(false)} onCreated={onCreated} />
       </DrawerContent>
     </Drawer>

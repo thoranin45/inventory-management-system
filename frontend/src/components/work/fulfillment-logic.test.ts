@@ -7,7 +7,10 @@ import {
   buildCompletePayload,
   everyAllocationDone,
   findItemByAllocation,
+  fulfillmentFailureIsDefinitive,
   mergeScanResult,
+  reconcileAfterResync,
+  seqAfter,
 } from "./fulfillment-logic";
 
 const alloc = (id: number, batch_id: number | null, quantity: string, picked = "0.000", packed = "0.000") => ({
@@ -109,5 +112,61 @@ describe("buildAmbiguityCandidates", () => {
       allocation_id: 7, batch_id: 1, quantity: "3.000", done: "0.000",
       lot_no: null, expiry_date: null, days_to_expiry: null, is_expired: undefined, is_near_expiry: undefined,
     });
+  });
+});
+
+/* ------------------------------------------- R5 (D-R5-5): uncertain outcomes */
+
+describe("fulfillmentFailureIsDefinitive — conservative", () => {
+  it("verified pre-write rejections are definitive", () => {
+    for (const message of [
+      "BARCODE_NOT_FOUND",
+      "PRODUCT_NOT_IN_ORDER",
+      "ALLOCATION_SCAN_EXCEEDS_REMAINING",
+      "UNDO_BELOW_ZERO",
+      "UNDO_BELOW_PACKED",
+      "ALLOCATION_NOT_FULFILLABLE",
+      "Sales Order state conflict: PACKING; requires PICKING",
+    ]) {
+      expect(fulfillmentFailureIsDefinitive({ kind: "conflict", status: 409, message }), message).toBe(true);
+    }
+    expect(fulfillmentFailureIsDefinitive({ kind: "not_found", status: 404, message: "BARCODE_NOT_FOUND" })).toBe(true);
+  });
+
+  it("transport failures, timeouts, 5xx, unparseable and unrecognised answers are uncertain", () => {
+    expect(fulfillmentFailureIsDefinitive({ kind: "network" })).toBe(false);
+    expect(fulfillmentFailureIsDefinitive({ kind: "parse", status: 200, message: "x" })).toBe(false);
+    expect(fulfillmentFailureIsDefinitive({ kind: "server", status: 502, message: "Upstream request failed." })).toBe(false);
+    expect(fulfillmentFailureIsDefinitive({ kind: "server", status: 500, message: "BARCODE_NOT_FOUND" })).toBe(false);
+    expect(fulfillmentFailureIsDefinitive({ status: 408, message: "BARCODE_NOT_FOUND" })).toBe(false);
+    expect(fulfillmentFailureIsDefinitive({ status: 429, message: "BARCODE_NOT_FOUND" })).toBe(false);
+    expect(fulfillmentFailureIsDefinitive({ kind: "conflict", status: 409, message: "Something else" })).toBe(false);
+    expect(fulfillmentFailureIsDefinitive({ kind: "forbidden", status: 403, message: "Warehouse permission required" })).toBe(false);
+    expect(fulfillmentFailureIsDefinitive(null)).toBe(false);
+    expect(fulfillmentFailureIsDefinitive({})).toBe(false);
+  });
+});
+
+describe("reconcileAfterResync — a stale refresh never overwrites newer progress", () => {
+  const p = (picked: string) => ({ picked_quantity: picked, packed_quantity: "0" });
+
+  it("drops entries recorded before the GET started, keeps newer ones", () => {
+    const { local, seq } = reconcileAfterResync({ 8: p("1"), 9: p("2") }, { 8: 3, 9: 7 }, 5);
+    expect(local).toEqual({ 9: p("2") });
+    expect(seq).toEqual({ 9: 7 });
+  });
+
+  it("an entry recorded exactly at the start is older than the snapshot and is dropped", () => {
+    expect(reconcileAfterResync({ 8: p("1") }, { 8: 5 }, 5).local).toEqual({});
+  });
+
+  it("an entry without a sequence counts as old", () => {
+    expect(reconcileAfterResync({ 8: p("1") }, {}, 0).local).toEqual({});
+  });
+});
+
+describe("seqAfter", () => {
+  it("keeps only entries recorded after the resync started", () => {
+    expect(seqAfter({ 8: 3, 9: 7, 10: 5 }, 5)).toEqual({ 9: 7 });
   });
 });

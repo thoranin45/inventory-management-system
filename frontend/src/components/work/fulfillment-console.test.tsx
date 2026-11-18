@@ -134,9 +134,9 @@ afterEach(() => {
 });
 
 /** A deliberate new scan: step the clock well past the dedupe window first. */
-async function scan(user: ReturnType<typeof userEvent.setup>, code: string) {
+async function scan(user: ReturnType<typeof userEvent.setup>, code: string, label: string = "Barcode scan input") {
   clock += DEFAULT_SCANNER_TIMING.dedupeMs + 1_000;
-  const input = screen.getByLabelText("Barcode scan input");
+  const input = screen.getByLabelText(label);
   await user.click(input);
   await user.type(input, `${code}{Enter}`);
 }
@@ -517,11 +517,14 @@ describe("FulfillmentConsole — characterization (R3.0)", () => {
           <FulfillmentConsole orderId={7} mode="pick" />
         </LanguageProvider>,
       );
-      await scan(user, "885000000009");
-      expect(await screen.findByText("✓ Picked +2.000 / 2.000")).toBeInTheDocument();
+      // R5: the console is localized — the scan field and activity follow the UI language
+      await scan(user, "885000000009", "ช่องสแกนบาร์โค้ด");
+      expect(await screen.findByText("✓ หยิบแล้ว +2.000 / 2.000")).toBeInTheDocument();
       await user.click(screen.getByRole("button", { name: "EN" }));
-      await user.click(screen.getByRole("button", { name: "ไทย" }));
       expect(screen.getByText("✓ Picked +2.000 / 2.000")).toBeInTheDocument();
+      expect(screen.getByLabelText("Barcode scan input")).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "ไทย" }));
+      expect(screen.getByText("✓ หยิบแล้ว +2.000 / 2.000")).toBeInTheDocument();
       expect(scanMutate).toHaveBeenCalledTimes(1);
       expect(fetchMock.mock.calls.every((c) => (c as unknown[])[0] === "/api/prefs/language")).toBe(true);
     } finally {

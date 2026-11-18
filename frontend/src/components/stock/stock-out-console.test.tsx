@@ -780,7 +780,13 @@ describe("StockOutConsole — R4-TQ typed quantity and the attempt lock", () => 
     await startScanning(user);
     await user.click(modeRadio(/enter quantity/i));
     await user.click(qtyField());
-    await user.type(qtyField(), `${PRODUCT.barcode}{Enter}`);
+    // The burst detector reads performance.now(), not the pinned Date.now(): give it the test clock.
+    const perfSpy = vi.spyOn(performance, "now").mockImplementation(() => clock);
+    try {
+      await user.type(qtyField(), `${PRODUCT.barcode}{Enter}`);
+    } finally {
+      perfSpy.mockRestore();
+    }
     expect(qtyField()).toHaveValue("");
     expect(screen.getByText(/looked like barcode scanner input/i)).toBeInTheDocument();
     expect(reviewButton()).toBeDisabled();

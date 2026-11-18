@@ -3,6 +3,7 @@
 import * as React from "react";
 import { CameraOff, Flashlight, RefreshCw } from "lucide-react";
 
+import { useT } from "@/lib/i18n/client";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent } from "@/components/ui/dialog";
 import {
@@ -34,7 +35,7 @@ export function CameraBarcodeScanner({
   onDecode,
   formats = DEFAULT_FORMATS,
   continuous = false,
-  title = "Scan a barcode",
+  title,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -44,6 +45,7 @@ export function CameraBarcodeScanner({
   continuous?: boolean;
   title?: string;
 }) {
+  const t = useT();
   const videoRef = React.useRef<HTMLVideoElement | null>(null);
   const streamRef = React.useRef<MediaStream | null>(null);
   const decoderRef = React.useRef<BarcodeDecoder | null>(null);
@@ -235,19 +237,18 @@ export function CameraBarcodeScanner({
   };
 
   const errorCopy: Record<Exclude<Phase, "idle" | "starting" | "scanning">, string> = {
-    denied:
-      "Camera access is blocked. Allow it in your browser settings for this site, or type / hardware-scan the barcode instead.",
-    "no-device": "No usable camera was found. Use the hardware scanner or type the barcode.",
-    busy: "The camera is in use by another app. Close it and try again.",
-    error: "The camera could not be started. Type or hardware-scan the barcode instead.",
+    denied: t("camera.denied"),
+    "no-device": t("camera.noDevice"),
+    busy: t("camera.busy"),
+    error: t("camera.error"),
   };
   const isError = phase === "denied" || phase === "no-device" || phase === "busy" || phase === "error";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        title={title}
-        description="Point the rear camera at the barcode. Frames stay on this device — only the decoded number is used."
+        title={title ?? t("receive.scanABarcode")}
+        description={t("camera.description")}
         className="w-[min(520px,94vw)]"
       >
         <div className="relative aspect-[3/4] w-full overflow-hidden rounded-[var(--r-md)] bg-black">
@@ -266,7 +267,7 @@ export function CameraBarcodeScanner({
           ) : null}
           {phase === "starting" ? (
             <div className="absolute inset-0 grid place-items-center text-[12px] text-white/80">
-              Starting camera…
+              {t("camera.starting")}
             </div>
           ) : null}
           {isError ? (
@@ -276,7 +277,7 @@ export function CameraBarcodeScanner({
                 <p className="max-w-[36ch]">{errorCopy[phase as keyof typeof errorCopy]}</p>
                 {phase !== "no-device" ? (
                   <Button variant="secondary" size="sm" onClick={() => void start()}>
-                    <RefreshCw aria-hidden className="h-3.5 w-3.5" /> Try again
+                    <RefreshCw aria-hidden className="h-3.5 w-3.5" /> {t("camera.tryAgain")}
                   </Button>
                 ) : null}
               </div>
@@ -285,23 +286,19 @@ export function CameraBarcodeScanner({
         </div>
 
         <div className="flex items-center justify-between gap-2">
-          <p className="text-[11px] text-[var(--muted)]">
-            {phase === "scanning"
-              ? engine === "native"
-                ? "Scanning (device decoder)"
-                : "Scanning"
-              : " "}
+          <p className="text-[12px] text-[var(--muted)]">
+            {phase === "scanning" ? (engine === "native" ? t("camera.scanningNative") : t("fulfil.stateScanning")) : " "}
           </p>
           <div className="flex gap-2">
             {torchAvail ? (
               <Button variant="secondary" size="sm" onClick={() => void toggleTorch()} aria-pressed={torchOn}>
                 <Flashlight aria-hidden className="h-3.5 w-3.5" />
-                {torchOn ? "Torch off" : "Torch"}
+                {torchOn ? t("camera.torchOff") : t("camera.torch")}
               </Button>
             ) : null}
             <DialogClose asChild>
               <Button variant="ghost" size="sm">
-                Close
+                {t("common.close")}
               </Button>
             </DialogClose>
           </div>

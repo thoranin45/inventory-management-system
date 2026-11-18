@@ -6,35 +6,25 @@ import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/ui/page-header";
 import { SearchInput } from "@/components/ui/search-input";
 import { DataTable, type Column } from "@/components/ui/data-table";
+import { LocalDate } from "@/components/ui/local-date";
 import { QuantityDisplay } from "@/components/ui/quantity-display";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { formatProgressPercent, soPackingComplete, soPickingComplete } from "@/lib/format-percent";
+import { useT } from "@/lib/i18n/client";
+import type { MessageKey } from "@/lib/i18n/translate";
 import { useListParams } from "@/lib/list-params";
 import { useSalesOrders } from "@/lib/query/sales";
-import { formatIsoDate } from "@/lib/format";
 import { PICKING_QUEUE_STATUSES, PACKING_QUEUE_STATUSES, type SalesOrderRow } from "@/lib/api/schemas/sales";
 
-function pct(n: number): string {
-  if (!Number.isFinite(n)) return "0%";
-  return `${Math.round(n <= 1 ? n * 100 : n)}%`;
-}
-
 const CFG = {
-  pick: {
-    title: "Picking queue",
-    statuses: PICKING_QUEUE_STATUSES,
-    href: (id: number) => `/picking/${id}`,
-    blurb: "orders to pick",
-  },
-  pack: {
-    title: "Packing queue",
-    statuses: PACKING_QUEUE_STATUSES,
-    href: (id: number) => `/packing/${id}`,
-    blurb: "orders to verify and pack",
-  },
+  pick: { k: "Pick", statuses: PICKING_QUEUE_STATUSES, href: (id: number) => `/picking/${id}` },
+  pack: { k: "Pack", statuses: PACKING_QUEUE_STATUSES, href: (id: number) => `/packing/${id}` },
 } as const;
 
 export function WorkQueue({ mode }: { mode: "pick" | "pack" }) {
+  const t = useT();
   const cfg = CFG[mode];
+  const mk = (base: string) => `${base}${cfg.k}` as MessageKey;
   const router = useRouter();
   const { state, setSearch, setPage, cycleSort } = useListParams({ sortOrder: "desc" });
 
@@ -54,86 +44,64 @@ export function WorkQueue({ mode }: { mode: "pick" | "pack" }) {
   const rows = data?.items ?? [];
 
   const open = (r: SalesOrderRow) => router.push(cfg.href(r.id));
+  const picked = (r: SalesOrderRow) => formatProgressPercent(r.picked_pct, soPickingComplete(r.status));
+  const packed = (r: SalesOrderRow) => formatProgressPercent(r.packed_pct, soPackingComplete(r.status));
 
   const columns: Column<SalesOrderRow>[] = [
     {
       key: "so_number",
-      header: "SO number",
+      header: t("sales.colSoNumber"),
       sortField: "so_number",
       cell: (r) => <span className="mono font-medium">{r.so_number ?? `#${r.id}`}</span>,
     },
     {
       key: "customer",
-      header: "Customer",
-      cell: (r) => <span>{r.customer_name ?? (r.customer_id != null ? `Customer #${r.customer_id}` : "—")}</span>,
+      header: t("sales.customer"),
+      cell: (r) => <span>{r.customer_name ?? (r.customer_id != null ? t("sales.customerRef", { id: r.customer_id }) : "—")}</span>,
     },
-    {
-      key: "lines",
-      header: "Lines",
-      align: "right",
-      cell: (r) => <span className="tnum text-[var(--muted)]">{r.item_count}</span>,
-    },
+    { key: "lines", header: t("orders.lines"), align: "right", cell: (r) => <span className="tnum text-[var(--muted)]">{r.item_count}</span> },
     {
       key: "qty",
-      header: "Total qty",
+      header: t("sales.colTotalQty"),
       align: "right",
       secondary: true,
       cell: (r) => <QuantityDisplay value={r.total_quantity} className="text-[var(--muted)]" />,
     },
-    {
-      key: "picked",
-      header: "Picked",
-      align: "right",
-      cell: (r) => <span className="tnum">{pct(r.picked_pct)}</span>,
-    },
-    {
-      key: "packed",
-      header: "Packed",
-      align: "right",
-      cell: (r) => <span className="tnum">{pct(r.packed_pct)}</span>,
-    },
-    {
-      key: "status",
-      header: "Status",
-      sortField: "status",
-      cell: (r) => <StatusBadge status={r.status.toUpperCase()} />,
-    },
+    { key: "picked", header: t("fulfil.colPicked"), align: "right", cell: (r) => <span className="tnum">{picked(r)}</span> },
+    { key: "packed", header: t("fulfil.colPacked"), align: "right", cell: (r) => <span className="tnum">{packed(r)}</span> },
+    { key: "status", header: t("sales.colStatus"), sortField: "status", cell: (r) => <StatusBadge status={r.status.toUpperCase()} /> },
     {
       key: "attention",
-      header: "Attention",
+      header: t("orders.tabAttention"),
       cell: (r) =>
-        r.attention_reason ? (
-          <StatusBadge tone="warning" label="Attention" />
-        ) : (
-          <span className="text-[var(--faint)]">—</span>
-        ),
+        r.attention_reason ? <StatusBadge tone="warning" label={t("orders.tabAttention")} /> : <span className="text-[var(--faint)]">—</span>,
     },
     {
       key: "activity",
-      header: "Last activity",
+      header: t("sales.lastActivity"),
       sortField: "created_at",
       secondary: true,
-      cell: (r) => <span className="mono text-[var(--muted)]">{formatIsoDate(r.last_activity_at ?? r.created_at)}</span>,
+      cell: (r) => (
+        <span className="mono text-[var(--muted)]">
+          <LocalDate iso={r.last_activity_at ?? r.created_at} isoInEnglish />
+        </span>
+      ),
     },
   ];
 
   return (
     <div className="flex flex-col gap-5">
       <PageHeader
-        title={cfg.title}
-        subtitle={
-          data
-            ? `${data.pagination.total_items} ${cfg.blurb} · tap an order to open the console`
-            : `Loading ${cfg.title.toLowerCase()}…`
-        }
+        title={t(mk("fulfil.queueTitle"))}
+        subtitle={data ? t(mk("fulfil.queueSubtitle"), { n: data.pagination.total_items }) : t(mk("fulfil.loadingQueueInline"))}
       />
 
       <div className="flex flex-wrap items-center gap-3">
         <SearchInput
           value={state.search}
           onCommit={setSearch}
-          placeholder="SO number, customer…"
-          ariaLabel={`Search ${cfg.title.toLowerCase()}`}
+          placeholder={t("sales.searchPlaceholder")}
+          ariaLabel={t(mk("fulfil.queueSearchLabel"))}
           className="max-w-[320px]"
         />
       </div>
@@ -147,9 +115,10 @@ export function WorkQueue({ mode }: { mode: "pick" | "pack" }) {
         isFetching={isFetching}
         error={isError ? error : undefined}
         onRetry={() => void refetch()}
-        emptyMessage={`Nothing in the ${cfg.title.toLowerCase()} right now.`}
+        emptyMessage={t(mk("fulfil.queueEmpty"))}
         sort={state.sortBy ? { field: state.sortBy, order: state.sortOrder } : null}
         onSort={cycleSort}
+        tabletLayout="table"
         pagination={
           data
             ? {
@@ -167,11 +136,9 @@ export function WorkQueue({ mode }: { mode: "pick" | "pack" }) {
           meta: (
             <>
               <span>{r.customer_name ?? "—"}</span>
-              <span>{r.item_count} lines</span>
-              <span>
-                pick {pct(r.picked_pct)} · pack {pct(r.packed_pct)}
-              </span>
-              {r.attention_reason ? <span className="text-[var(--warning)]">Needs attention</span> : null}
+              <span>{t("fulfil.linesCount", { n: r.item_count })}</span>
+              <span>{t("fulfil.cardProgress", { picked: picked(r), packed: packed(r) })}</span>
+              {r.attention_reason ? <span className="text-[var(--warning)]">{t("sales.needsAttention")}</span> : null}
             </>
           ),
         })}

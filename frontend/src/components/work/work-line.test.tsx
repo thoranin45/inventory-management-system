@@ -71,3 +71,10 @@ describe("WorkLine", () => {
     expect(renderSpy).toHaveBeenCalledTimes(2); // wrapper re-runs, WorkLine short-circuits
   });
 });
+
+describe("WorkLine — lot label (R5)", () => {
+  it("prefixes the lot once", () => {
+    render(<WorkLine anchorId="a" name="Coffee" sku="C-1" lotLabel="#7" done="0.000" required="1.000" verb="Picked" />);
+    expect(screen.getByText("lot #7")).toBeInTheDocument();
+  });
+});
