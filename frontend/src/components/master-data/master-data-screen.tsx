@@ -11,9 +11,10 @@ import { DataTable, type Column } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
 import { Drawer, DrawerContent } from "@/components/ui/drawer";
 import { useSession } from "@/components/session-provider";
+import { useT } from "@/lib/i18n/client";
+import { formMessageText, masterDataErrorText } from "@/lib/master-data-copy";
 import { canShowAction } from "@/lib/auth/permissions";
 import { isApiError } from "@/lib/api/errors";
-import { masterDataErrorCopy } from "@/lib/api/schemas/master-data";
 import { useListParams } from "@/lib/list-params";
 import { DeleteConfirmDialog, toastMutationError } from "./delete-confirm";
 
@@ -44,8 +45,12 @@ interface Mutation<TArgs> {
 }
 
 export interface MasterDataConfig<Row, Input> {
-  /** singular lower-case noun, e.g. "category" */
+  /** stable English id used in element ids, e.g. "category" */
   resource: string;
+  /** singular noun in the current language, e.g. "category" */
+  noun: string;
+  /** plural noun in the current language, used inside sentences, e.g. "categories" */
+  items: string;
   title: string;
   /** subtitle given the current total */
   subtitle: (total: number | undefined) => string;
@@ -97,6 +102,7 @@ function MasterForm<Row, Input>({
   onSaved: (mode: "create" | "edit") => void;
   onRequestDelete?: (row: Row) => void;
 }) {
+  const t = useT();
   const mode: "create" | "edit" = row ? "edit" : "create";
   const create = cfg.useCreate();
   const update = cfg.useUpdate();
@@ -123,7 +129,7 @@ function MasterForm<Row, Input>({
     try {
       if (mode === "create") await create.mutateAsync(payload);
       else await update.mutateAsync({ id: cfg.rowId(row as Row), patch: payload });
-      toast.success(mode === "create" ? `${cfg.resource} created` : `${cfg.resource} updated`);
+      toast.success(t(mode === "create" ? "masterData.created" : "masterData.updated", { noun: cfg.noun }));
       onSaved(mode);
       onClose();
     } catch (error) {
@@ -138,12 +144,12 @@ function MasterForm<Row, Input>({
       }
       if (isApiError(error)) {
         setFormError({
-          message: masterDataErrorCopy(error.message) ?? error.userMessage,
+          message: masterDataErrorText(t, error.message, error.userMessage),
           requestId: error.requestId,
         });
         return;
       }
-      setFormError({ message: "Something went wrong." });
+      setFormError({ message: t("common.somethingWrong") });
     }
   };
 
@@ -180,7 +186,9 @@ function MasterForm<Row, Input>({
               />
             )}
             {f.hint && !errors[f.name] ? <span className="text-[11px] text-[var(--faint)]">{f.hint}</span> : null}
-            {errors[f.name] ? <span className="text-[11px] text-[var(--danger)]">{errors[f.name]}</span> : null}
+            {errors[f.name] ? (
+              <span className="text-[11px] text-[var(--danger)]">{formMessageText(t, errors[f.name])}</span>
+            ) : null}
           </label>
         );
       })}
@@ -190,7 +198,7 @@ function MasterForm<Row, Input>({
           {formError.message}
           {formError.requestId ? (
             <span className="mt-1 block text-[11px] text-[var(--muted)]">
-              Request ID: <span className="mono select-all">{formError.requestId}</span>
+              {t("common.requestId")} <span className="mono select-all">{formError.requestId}</span>
             </span>
           ) : null}
         </p>
@@ -199,14 +207,18 @@ function MasterForm<Row, Input>({
       <div className="sticky bottom-0 -mx-4 flex flex-wrap items-center justify-end gap-2 border-t border-[var(--border)] bg-[var(--surface)] px-4 pt-3">
         {mode === "edit" && onRequestDelete && row ? (
           <Button variant="danger" className="mr-auto" onClick={() => onRequestDelete(row)}>
-            Delete {cfg.resource}
+            {t("masterData.deleteResource", { noun: cfg.noun })}
           </Button>
         ) : null}
         <Button variant="ghost" onClick={onClose}>
-          Cancel
+          {t("masterData.cancel")}
         </Button>
         <Button type="submit" variant="primary" disabled={pending}>
-          {pending ? "Saving…" : mode === "create" ? `Create ${cfg.resource}` : "Save changes"}
+          {pending
+            ? t("masterData.saving")
+            : mode === "create"
+              ? t("masterData.createResource", { noun: cfg.noun })
+              : t("masterData.saveChanges")}
         </Button>
       </div>
     </form>
@@ -216,6 +228,7 @@ function MasterForm<Row, Input>({
 /* ----------------------------------------------------------------- screen === */
 
 export function MasterDataScreen<Row, Input>({ cfg }: { cfg: MasterDataConfig<Row, Input> }) {
+  const t = useT();
   const { user } = useSession();
   const canWrite = canShowAction(user.role, "master:write");
   const { state, setSearch, setPage, cycleSort } = useListParams({ sortOrder: "asc" });
@@ -260,7 +273,7 @@ export function MasterDataScreen<Row, Input>({ cfg }: { cfg: MasterDataConfig<Ro
                 <Button
                   size="icon"
                   variant="ghost"
-                  aria-label={`Edit ${cfg.rowName(row)}`}
+                  aria-label={t("masterData.editRow", { name: cfg.rowName(row) })}
                   onClick={(e) => {
                     e.stopPropagation();
                     openEdit(row);
@@ -271,7 +284,7 @@ export function MasterDataScreen<Row, Input>({ cfg }: { cfg: MasterDataConfig<Ro
                 <Button
                   size="icon"
                   variant="ghost"
-                  aria-label={`Delete ${cfg.rowName(row)}`}
+                  aria-label={t("masterData.deleteRow", { name: cfg.rowName(row) })}
                   onClick={(e) => {
                     e.stopPropagation();
                     setDeleting(row);
@@ -295,7 +308,7 @@ export function MasterDataScreen<Row, Input>({ cfg }: { cfg: MasterDataConfig<Ro
           canWrite ? (
             <Button variant="primary" onClick={openCreate}>
               <Plus aria-hidden className="h-4 w-4" />
-              New {cfg.resource}
+              {t("masterData.newResource", { noun: cfg.noun })}
             </Button>
           ) : null
         }
@@ -305,7 +318,7 @@ export function MasterDataScreen<Row, Input>({ cfg }: { cfg: MasterDataConfig<Ro
         value={state.search}
         onCommit={setSearch}
         placeholder={cfg.searchPlaceholder}
-        ariaLabel={`Search ${cfg.title.toLowerCase()}`}
+        ariaLabel={t("masterData.searchAria", { items: cfg.items })}
         className="max-w-[320px]"
       />
 
@@ -318,7 +331,7 @@ export function MasterDataScreen<Row, Input>({ cfg }: { cfg: MasterDataConfig<Ro
         isFetching={isFetching}
         error={isError ? error : undefined}
         onRetry={() => void refetch()}
-        emptyMessage={`No ${cfg.title.toLowerCase()} yet.`}
+        emptyMessage={t("masterData.empty", { items: cfg.items })}
         sort={state.sortBy ? { field: state.sortBy, order: state.sortOrder } : null}
         onSort={(field) => {
           if (!cfg.sortFields.includes(field)) return;
@@ -345,7 +358,7 @@ export function MasterDataScreen<Row, Input>({ cfg }: { cfg: MasterDataConfig<Ro
             meta: (
               <>
                 {c.meta}
-                {canWrite ? <span className="mt-1 w-full text-[11px] text-[var(--accent)]">Tap to edit</span> : null}
+                {canWrite ? <span className="mt-1 w-full text-[11px] text-[var(--accent)]">{t("masterData.tapToEdit")}</span> : null}
               </>
             ),
           };
@@ -354,7 +367,7 @@ export function MasterDataScreen<Row, Input>({ cfg }: { cfg: MasterDataConfig<Ro
 
       {canWrite ? (
         <Drawer open={formOpen} onOpenChange={setFormOpen}>
-          <DrawerContent title={editing ? `Edit ${cfg.resource}` : `New ${cfg.resource}`}>
+          <DrawerContent title={t(editing ? "masterData.editResource" : "masterData.newResource", { noun: cfg.noun })}>
             {formOpen ? (
               <MasterForm
                 cfg={cfg}
@@ -375,13 +388,13 @@ export function MasterDataScreen<Row, Input>({ cfg }: { cfg: MasterDataConfig<Ro
         <DeleteConfirmDialog
           open={!!deleting}
           onOpenChange={(v) => !v && setDeleting(null)}
-          title={`Delete ${cfg.rowName(deleting)}?`}
+          title={t("masterData.deleteTitle", { name: cfg.rowName(deleting) })}
           body={cfg.deleteBody(deleting)}
-          confirmLabel={cfg.deleteConfirmLabel ?? `Delete ${cfg.resource}`}
+          confirmLabel={cfg.deleteConfirmLabel ?? t("masterData.deleteResource", { noun: cfg.noun })}
           pending={del.isPending}
           onConfirm={async () => {
             await del.mutateAsync(cfg.rowId(deleting));
-            toast.success(`${cfg.rowName(deleting)} deleted`);
+            toast.success(t("masterData.deleted", { name: cfg.rowName(deleting) }));
             setDeleting(null);
             void refetch();
           }}

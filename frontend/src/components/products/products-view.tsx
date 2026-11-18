@@ -20,6 +20,8 @@ import { compareDecimals, isZero } from "@/lib/decimal";
 import { PRODUCT_FILTERS, type ProductRow } from "@/lib/api/schemas/products";
 import { canShowAction } from "@/lib/auth/permissions";
 import { cn } from "@/lib/utils";
+import { useT } from "@/lib/i18n/client";
+import type { MessageKey } from "@/lib/i18n/translate";
 
 /** low stock = operational available < max(safety_stock, minimum_stock) */
 function isLowStock(p: ProductRow): boolean {
@@ -30,18 +32,29 @@ function isLowStock(p: ProductRow): boolean {
   return compareDecimals(p.operational_available_quantity, threshold) < 0;
 }
 
-function healthLabel(p: ProductRow): { tone: "success" | "warning" | "danger" | "neutral"; label: string } {
-  if (!p.is_active) return { tone: "neutral", label: "Inactive" };
-  if (!isZero(p.expired_quantity)) return { tone: "danger", label: "Expired stock" };
-  if (isLowStock(p)) return { tone: "warning", label: "Low stock" };
-  if (!isZero(p.near_expiry_quantity)) return { tone: "warning", label: "Near expiry" };
-  return { tone: "success", label: "Healthy" };
+function healthLabel(p: ProductRow): { tone: "success" | "warning" | "danger" | "neutral"; label: MessageKey } {
+  if (!p.is_active) return { tone: "neutral", label: "product.inactive" };
+  if (!isZero(p.expired_quantity)) return { tone: "danger", label: "product.healthExpired" };
+  if (isLowStock(p)) return { tone: "warning", label: "product.healthLow" };
+  if (!isZero(p.near_expiry_quantity)) return { tone: "warning", label: "product.healthNear" };
+  return { tone: "success", label: "product.healthy" };
 }
+
+/** PRODUCT_FILTERS key → label key (the English labels there stay for tests and URLs). */
+const FILTER_LABEL: Record<string, MessageKey> = {
+  all: "product.filterAll",
+  low: "product.filterLow",
+  expired: "product.filterExpired",
+  near: "product.filterNear",
+  transit: "product.filterTransit",
+  inactive: "product.filterInactive",
+};
 
 /** Client-computed (page-local) filters — the backend has no such query. */
 const DERIVED = new Set(["low", "expired", "near"]);
 
 export function ProductsView() {
+  const t = useT();
   const { user } = useSession();
   const canCreate = canShowAction(user.role, "product:create");
   const { state, setSearch, setPage, setFilter, cycleSort } = useListParams({ sortOrder: "desc", filter: "all" });
@@ -53,9 +66,9 @@ export function ProductsView() {
   const categoryName = React.useCallback(
     (id: number | null) => {
       if (id == null) return "—";
-      return categoriesQ.data?.find((c) => c.id === id)?.category_name ?? `Cat #${id}`;
+      return categoriesQ.data?.find((c) => c.id === id)?.category_name ?? t("product.categoryShort", { id });
     },
-    [categoriesQ.data],
+    [categoriesQ.data, t],
   );
 
   const query = React.useMemo(
@@ -91,84 +104,84 @@ export function ProductsView() {
   };
 
   const columns: Column<ProductRow>[] = [
-    { key: "sku", header: "SKU", sortField: "sku", cell: (p) => <span className="mono text-[var(--muted)]">{p.sku}</span> },
+    { key: "sku", header: t("product.sku"), sortField: "sku", cell: (p) => <span className="mono text-[var(--muted)]">{p.sku}</span> },
     {
       key: "name",
-      header: "Product",
+      header: t("product.colProduct"),
       sortField: "product_name",
       cell: (p) => (
         <div>
           <div className="font-medium">{p.product_name}</div>
           <div className="text-[11px] text-[var(--faint)]">
-            {p.track_batch ? "batch" : "non-batch"}
-            {p.track_expiry ? " · expiry" : ""}
+            {p.track_batch ? t("product.batch") : t("product.nonBatch")}
+            {p.track_expiry ? ` · ${t("product.expiryTag")}` : ""}
           </div>
         </div>
       ),
     },
     {
       key: "category",
-      header: "Category",
+      header: t("product.category"),
       secondary: true,
       cell: (p) => <span className="text-[var(--muted)]">{categoryName(p.category_id)}</span>,
     },
-    { key: "available", header: "Op. available", align: "right", cell: (p) => <QuantityDisplay value={p.operational_available_quantity} /> },
-    { key: "owned", header: "Owned", align: "right", sortField: "stock_qty", cell: (p) => <QuantityDisplay value={p.owned_quantity} className="text-[var(--muted)]" /> },
-    { key: "reserved", header: "Reserved", align: "right", secondary: true, cell: (p) => <QuantityDisplay value={p.reserved_quantity} className="text-[var(--muted)]" /> },
+    { key: "available", header: t("product.colOpAvailable"), align: "right", cell: (p) => <QuantityDisplay value={p.operational_available_quantity} /> },
+    { key: "owned", header: t("product.colOwned"), align: "right", sortField: "stock_qty", cell: (p) => <QuantityDisplay value={p.owned_quantity} className="text-[var(--muted)]" /> },
+    { key: "reserved", header: t("product.colReserved"), align: "right", secondary: true, cell: (p) => <QuantityDisplay value={p.reserved_quantity} className="text-[var(--muted)]" /> },
     {
       key: "expired",
-      header: "Expired",
+      header: t("product.colExpired"),
       align: "right",
       secondary: true,
       cell: (p) => <QuantityDisplay value={p.expired_quantity} className={cn(!isZero(p.expired_quantity) && "text-[var(--danger)]")} />,
     },
     {
       key: "near",
-      header: "Near expiry",
+      header: t("product.colNearExpiry"),
       align: "right",
       secondary: true,
       cell: (p) => <QuantityDisplay value={p.near_expiry_quantity} className={cn(!isZero(p.near_expiry_quantity) && "text-[var(--warning)]")} />,
     },
-    { key: "transit", header: "In transit", align: "right", secondary: true, cell: (p) => <QuantityDisplay value={p.transit_quantity} className="text-[var(--muted)]" /> },
-    { key: "price", header: "Price", align: "right", cell: (p) => (p.price ? <MoneyDisplay value={p.price} /> : "—") },
+    { key: "transit", header: t("product.colInTransit"), align: "right", secondary: true, cell: (p) => <QuantityDisplay value={p.transit_quantity} className="text-[var(--muted)]" /> },
+    { key: "price", header: t("product.colPrice"), align: "right", cell: (p) => (p.price ? <MoneyDisplay value={p.price} /> : "—") },
     {
       key: "status",
-      header: "Status",
-      cell: (p) => <StatusBadge tone={p.is_active ? "success" : "neutral"} label={p.is_active ? "Active" : "Inactive"} />,
+      header: t("product.colStatus"),
+      cell: (p) => <StatusBadge tone={p.is_active ? "success" : "neutral"} label={p.is_active ? t("product.active") : t("product.inactive")} />,
     },
   ];
 
   return (
     <div className="flex flex-col gap-5">
       <PageHeader
-        title="Products &amp; Stock"
+        title={t("product.listTitle")}
         subtitle={
-          data ? `${data.pagination.total_items} products · quantities at 2-decimal precision` : "Loading products…"
+          data ? t("product.listSubtitle", { n: data.pagination.total_items }) : t("product.loadingProducts")
         }
         actions={<ProductActions role={user.role} onNew={() => setCreateOpen(true)} />}
       />
 
       <div className="flex flex-wrap items-center gap-3">
         <FilterStrip
-          ariaLabel="Product inventory filter"
-          options={PRODUCT_FILTERS.map((f) => ({ key: f.key, label: f.label }))}
+          ariaLabel={t("product.filterAria")}
+          options={PRODUCT_FILTERS.map((f) => ({ key: f.key, label: t(FILTER_LABEL[f.key]) }))}
           value={filter}
           onChange={setFilter}
         />
         <SearchInput
           value={state.search}
           onCommit={setSearch}
-          placeholder="SKU, name, barcode…"
-          ariaLabel="Search products"
+          placeholder={t("product.searchPlaceholder")}
+          ariaLabel={t("product.searchAria")}
           className="max-w-[320px]"
         />
       </div>
 
       {filter === "transit" ? (
         <div className="rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--surface)] p-4 text-[12.5px] text-[var(--muted)]">
-          In-transit stock is tracked per balance, not per product.{" "}
+          {t("product.transitNote")}{" "}
           <Link href="/stock?tab=in-transit" className="font-medium text-[var(--accent)] underline">
-            Open the Stock → In transit view
+            {t("product.transitLink")}
           </Link>
           .
         </div>
@@ -176,17 +189,19 @@ export function ProductsView() {
         <>
           {derived ? (
             <p className="text-[11.5px] text-[var(--faint)]">
-              {rows.length} of the first {data?.items.length ?? 0} products match “
-              {PRODUCT_FILTERS.find((f) => f.key === filter)?.label}”. This view is computed on this page
-              from backend-derived per-product quantities — no server-side filter exists. Use the{" "}
+              {t("product.derivedNote", {
+                shown: rows.length,
+                total: data?.items.length ?? 0,
+                filter: t(FILTER_LABEL[filter] ?? "product.filterAll"),
+              })}{" "}
               <Link href="/dashboard" className="underline">
-                attention queues
+                {t("product.derivedLink")}
               </Link>{" "}
-              for the authoritative list.
+              {t("product.derivedNoteEnd")}
             </p>
           ) : null}
           {filter === "inactive" ? (
-            <p className="text-[11.5px] text-[var(--faint)]">Deactivated products. Open one to restore it.</p>
+            <p className="text-[11.5px] text-[var(--faint)]">{t("product.inactiveNote")}</p>
           ) : null}
           <DataTable<ProductRow>
             columns={columns}
@@ -197,7 +212,7 @@ export function ProductsView() {
             isFetching={isFetching}
             error={isError ? error : undefined}
             onRetry={() => void refetch()}
-            emptyMessage="No products match the current filter."
+            emptyMessage={t("product.emptyFilter")}
             sort={state.sortBy ? { field: state.sortBy, order: state.sortOrder } : null}
             onSort={cycleSort}
             pagination={
@@ -215,23 +230,23 @@ export function ProductsView() {
               const h = healthLabel(p);
               return {
                 title: p.product_name,
-                badge: <StatusBadge tone={h.tone} label={h.label} />,
+                badge: <StatusBadge tone={h.tone} label={t(h.label)} />,
                 meta: (
                   <>
                     <span className="mono">{p.sku}</span>
                     <span>{categoryName(p.category_id)}</span>
                     <span>
-                      Avail <QuantityDisplay value={p.operational_available_quantity} className="font-medium" />
+                      {t("product.avail")} <QuantityDisplay value={p.operational_available_quantity} className="font-medium" />
                     </span>
                     <span>
-                      Owned <QuantityDisplay value={p.owned_quantity} className="font-medium" />
+                      {t("product.colOwned")} <QuantityDisplay value={p.owned_quantity} className="font-medium" />
                     </span>
                     {p.price ? (
                       <span>
                         <MoneyDisplay value={p.price} className="font-medium" />
                       </span>
                     ) : null}
-                    <span className={cn(!p.is_active && "text-[var(--faint)]")}>{p.is_active ? "Active" : "Inactive"}</span>
+                    <span className={cn(!p.is_active && "text-[var(--faint)]")}>{p.is_active ? t("product.active") : t("product.inactive")}</span>
                   </>
                 ),
               };

@@ -12,21 +12,28 @@ import {
   useDeleteCustomer,
   useUpdateCustomer,
 } from "@/lib/query/master-data";
+import * as React from "react";
+
+import { useT, type I18nValue } from "@/lib/i18n/client";
 import { MasterDataScreen, type MasterDataConfig } from "./master-data-screen";
 
-const cfg: MasterDataConfig<CustomerRow, CustomerInput> = {
+const makeCfg = (t: I18nValue["t"]): MasterDataConfig<CustomerRow, CustomerInput> => ({
   resource: "customer",
-  title: "Customers",
+  noun: t("masterData.customerNoun"),
+  items: t("masterData.customerItems"),
+  title: t("masterData.customersTitle"),
   subtitle: (total) =>
-    total === undefined ? "Sales-order customers" : `${total} customer${total === 1 ? "" : "s"}`,
-  searchPlaceholder: "Customer name…",
+    total === undefined
+      ? t("masterData.customersSubtitle")
+      : t(total === 1 ? "masterData.customerCountOne" : "masterData.customerCountMany", { n: total }),
+  searchPlaceholder: t("masterData.customerSearch"),
   sortFields: CUSTOMER_SORT_FIELDS,
   schema: customerInput,
   fields: [
-    { name: "customer_name", label: "Customer name", required: true, autoComplete: "off" },
-    { name: "phone", label: "Phone", kind: "tel", autoComplete: "off" },
-    { name: "email", label: "Email", kind: "email", autoComplete: "off" },
-    { name: "address", label: "Address", kind: "textarea", autoComplete: "off" },
+    { name: "customer_name", label: t("masterData.customerName"), required: true, autoComplete: "off" },
+    { name: "phone", label: t("masterData.phone"), kind: "tel", autoComplete: "off" },
+    { name: "email", label: t("masterData.email"), kind: "email", autoComplete: "off" },
+    { name: "address", label: t("masterData.address"), kind: "textarea", autoComplete: "off" },
   ],
   emptyForm: { customer_name: "", phone: "", email: "", address: "" },
   toForm: (r) => ({
@@ -37,30 +44,28 @@ const cfg: MasterDataConfig<CustomerRow, CustomerInput> = {
   }),
   rowId: (r) => r.id,
   rowName: (r) => r.customer_name,
-  deleteBody: () =>
-    "Customers are removed permanently. If the customer is referenced by existing sales orders the backend rejects the delete — you'll see the conflict and a Request ID.",
-  deleteConfirmLabel: "Delete customer",
+  deleteBody: () => t("masterData.customerDeleteBody"),
   columns: [
     {
       key: "name",
-      header: "Customer",
+      header: t("masterData.colCustomer"),
       sortField: "customer_name",
       cell: (r) => <span className="font-medium">{r.customer_name}</span>,
     },
     {
       key: "phone",
-      header: "Phone",
+      header: t("masterData.phone"),
       cell: (r) => <span className="mono text-[var(--muted)]">{r.phone || "—"}</span>,
     },
     {
       key: "email",
-      header: "Email",
+      header: t("masterData.email"),
       secondary: true,
       cell: (r) => <span className="text-[var(--muted)] break-all">{r.email || "—"}</span>,
     },
     {
       key: "address",
-      header: "Address",
+      header: t("masterData.address"),
       secondary: true,
       cell: (r) => <span className="text-[var(--muted)] line-clamp-2">{r.address || "—"}</span>,
     },
@@ -69,8 +74,8 @@ const cfg: MasterDataConfig<CustomerRow, CustomerInput> = {
     title: r.customer_name,
     meta: (
       <>
-        <span className="mono">{r.phone || "no phone"}</span>
-        <span className="break-all">{r.email || "no email"}</span>
+        <span className="mono">{r.phone || t("masterData.noPhone")}</span>
+        <span className="break-all">{r.email || t("masterData.noEmail")}</span>
       </>
     ),
   }),
@@ -78,8 +83,10 @@ const cfg: MasterDataConfig<CustomerRow, CustomerInput> = {
   useCreate: useCreateCustomer,
   useUpdate: useUpdateCustomer,
   useDelete: useDeleteCustomer,
-};
+});
 
 export function CustomersView() {
+  const t = useT();
+  const cfg = React.useMemo(() => makeCfg(t), [t]);
   return <MasterDataScreen cfg={cfg} />;
 }

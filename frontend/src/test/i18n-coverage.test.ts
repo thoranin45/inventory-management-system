@@ -122,6 +122,21 @@ const R6_SCOPE = [
   "components/dashboard/operational-queues.tsx",
   "components/dashboard/recent-activity.tsx",
   "components/dashboard/today-summary.tsx",
+  // P6 batch 2. master-data-screen.tsx and delete-confirm.tsx are localized
+  // too, but the heuristic counts their TypeScript generics (`=> Promise<…>`)
+  // as text, so the baseline ratchet covers them instead.
+  "components/master-data/categories-view.tsx",
+  "components/master-data/customers-view.tsx",
+  "components/master-data/suppliers-view.tsx",
+  "components/products/create-product.tsx",
+  "components/products/edit-product.tsx",
+  "components/products/product-actions.tsx",
+  "components/products/product-balances.tsx",
+  "components/products/product-codes.tsx",
+  "components/products/product-detail.tsx",
+  "components/products/product-form-fields.tsx",
+  "components/products/product-image.tsx",
+  "components/products/products-view.tsx",
 ];
 
 const JSX_TEXT = />\s*([A-Z][a-z]+(?:[ '’&,.:/-]+[A-Za-z]+)*[.…!?]?)\s*</g;

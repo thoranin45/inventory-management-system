@@ -3,6 +3,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { ApiError } from "@/lib/api/errors";
+import { LanguageProvider } from "@/lib/i18n/client";
 
 let role = "admin";
 vi.mock("@/components/session-provider", () => ({ useSession: () => ({ user: { role } }) }));
@@ -111,5 +112,30 @@ describe("MasterDataScreen via CategoriesView", () => {
     await userEvent.type(within(dialog).getByLabelText(/category name/i), "Chilli");
     await userEvent.click(within(dialog).getByRole("button", { name: /create category/i }));
     expect(await within(dialog).findByText(/too spicy/i)).toBeInTheDocument();
+  });
+
+  it("renders in Thai, including validation and backend error copy", async () => {
+    deleteMut.mutateAsync.mockRejectedValueOnce(
+      new ApiError({ status: 409, message: "Cannot delete category with active products", requestId: "req-th-1" }),
+    );
+    render(
+      <LanguageProvider initialLocale="th">
+        <CategoriesView />
+      </LanguageProvider>,
+    );
+    expect(screen.getByRole("heading", { name: "หมวดหมู่" })).toBeInTheDocument();
+    expect(screen.getByText("2 หมวดหมู่ · ใช้กับข้อมูลสินค้า")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "เพิ่มหมวดหมู่" }));
+    let dialog = await screen.findByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: "สร้างหมวดหมู่" }));
+    expect(await within(dialog).findByText("ต้องระบุชื่อหมวดหมู่")).toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+
+    await userEvent.click(screen.getByRole("button", { name: "ลบ Beverages" }));
+    dialog = await screen.findByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: "ลบหมวดหมู่" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(/^หมวดหมู่นี้ยังมีสินค้าที่ใช้งานอยู่/);
+    expect(within(dialog).getByText("req-th-1")).toBeInTheDocument();
   });
 });

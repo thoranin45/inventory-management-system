@@ -11,11 +11,12 @@ import { ErrorState, LoadingState } from "@/components/ui/states";
 import { isApiError } from "@/lib/api/errors";
 import {
   productUpdateInput,
-  productErrorCopy,
   type ProductDetail,
   type ProductUpdateInput,
 } from "@/lib/api/schemas/products";
 import { useProduct, useUpdateProduct } from "@/lib/query/products";
+import { useT } from "@/lib/i18n/client";
+import { formMessageText, masterDataErrorText } from "@/lib/master-data-copy";
 import { CategoryPicker, ProductField, TrackingFields, productInputCls } from "./product-form-fields";
 
 type FormValues = {
@@ -54,6 +55,8 @@ function diff(before: FormValues, after: FormValues): Record<string, unknown> {
 }
 
 export function ProductEditForm({ product, onClose, onSaved }: { product: ProductDetail; onClose: () => void; onSaved: () => void }) {
+  const t = useT();
+  const fm = (m: string | undefined) => formMessageText(t, m);
   const initial = React.useMemo(() => toForm(product), [product]);
   const {
     control,
@@ -76,7 +79,7 @@ export function ProductEditForm({ product, onClose, onSaved }: { product: Produc
     setFormError(null);
     const patch = diff(initial, values);
     if (Object.keys(patch).length === 0) {
-      toast.message("No changes to save");
+      toast.message(t("product.noChanges"));
       onClose();
       return;
     }
@@ -92,7 +95,7 @@ export function ProductEditForm({ product, onClose, onSaved }: { product: Produc
       { id: product.id, patch: parsed.data as ProductUpdateInput },
       {
         onSuccess: (data) => {
-          toast.success(`${data.sku} updated`);
+          toast.success(t("product.updated", { sku: data.sku }));
           onSaved();
           onClose();
         },
@@ -104,9 +107,9 @@ export function ProductEditForm({ product, onClose, onSaved }: { product: Produc
             return;
           }
           if (isApiError(error)) {
-            setFormError({ message: productErrorCopy(error.message) ?? error.userMessage, requestId: error.requestId });
+            setFormError({ message: masterDataErrorText(t, error.message, error.userMessage), requestId: error.requestId });
           } else {
-            setFormError({ message: "Could not update the product." });
+            setFormError({ message: t("product.couldNotUpdate") });
           }
         },
       },
@@ -115,38 +118,43 @@ export function ProductEditForm({ product, onClose, onSaved }: { product: Produc
 
   return (
     <form onSubmit={handleSubmit(submit)} className="flex flex-col gap-4" noValidate>
-      <ProductField label="SKU" htmlFor="pe-sku" required error={errors.sku?.message}>
+      <ProductField label={t("product.sku")} htmlFor="pe-sku" required error={fm(errors.sku?.message)}>
         <input id="pe-sku" className={productInputCls} autoComplete="off" {...register("sku")} />
       </ProductField>
 
-      <ProductField label="Product name" htmlFor="pe-name" required error={errors.product_name?.message}>
+      <ProductField label={t("product.productName")} htmlFor="pe-name" required error={fm(errors.product_name?.message)}>
         <input id="pe-name" className={productInputCls} autoComplete="off" {...register("product_name")} />
       </ProductField>
 
-      <ProductField label="Barcode" htmlFor="pe-barcode" hint="Clear to remove the barcode." error={errors.barcode?.message}>
+      <ProductField
+        label={t("product.barcode")}
+        htmlFor="pe-barcode"
+        hint={t("product.barcodeHintEdit")}
+        error={fm(errors.barcode?.message)}
+      >
         <input id="pe-barcode" className={productInputCls} autoComplete="off" {...register("barcode")} />
       </ProductField>
 
-      <ProductField label="Unit price" htmlFor="pe-price" required error={errors.price?.message}>
+      <ProductField label={t("product.unitPrice")} htmlFor="pe-price" required error={fm(errors.price?.message)}>
         <input id="pe-price" inputMode="decimal" className={productInputCls} placeholder="0.00" {...register("price")} />
       </ProductField>
 
       <CategoryPicker
         value={categoryId}
         onChange={(id) => setValue("category_id", id, { shouldValidate: true })}
-        error={errors.category_id?.message}
+        error={fm(errors.category_id?.message)}
       />
 
       <TrackingFields
         trackBatch={trackBatch}
         trackExpiry={trackExpiry}
         disabled={hadInventoryHistory}
-        disabledReason="Batch tracking is locked because this product already has stock or movement history (backend rule)."
+        disabledReason={t("product.trackingLocked")}
         onChange={(next) => {
           setValue("track_batch", next.track_batch);
           setValue("track_expiry", next.track_expiry);
         }}
-        error={errors.track_expiry?.message}
+        error={fm(errors.track_expiry?.message)}
       />
 
       {formError ? (
@@ -154,7 +162,7 @@ export function ProductEditForm({ product, onClose, onSaved }: { product: Produc
           {formError.message}
           {formError.requestId ? (
             <span className="mt-1 block text-[11px] text-[var(--muted)]">
-              Request ID: <span className="mono select-all">{formError.requestId}</span>
+              {t("common.requestId")} <span className="mono select-all">{formError.requestId}</span>
             </span>
           ) : null}
         </p>
@@ -162,10 +170,10 @@ export function ProductEditForm({ product, onClose, onSaved }: { product: Produc
 
       <div className="sticky bottom-0 -mx-4 flex justify-end gap-2 border-t border-[var(--border)] bg-[var(--surface)] px-4 pt-3">
         <Button variant="ghost" onClick={onClose}>
-          Cancel
+          {t("product.cancel")}
         </Button>
         <Button type="submit" variant="primary" disabled={update.isPending}>
-          {update.isPending ? "Saving…" : "Save changes"}
+          {update.isPending ? t("product.saving") : t("product.saveChanges")}
         </Button>
       </div>
     </form>
@@ -183,12 +191,13 @@ export function EditProductDrawer({
   onOpenChange: (v: boolean) => void;
   onSaved: () => void;
 }) {
+  const t = useT();
   const { data, isLoading, isError, error, refetch } = useProduct(open ? productId : null);
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent title="Edit product">
+      <DrawerContent title={t("product.editProduct")}>
         {isLoading ? (
-          <LoadingState label="Loading product…" />
+          <LoadingState label={t("product.loadingProduct")} />
         ) : isError ? (
           <ErrorState error={error} onRetry={() => void refetch()} />
         ) : data ? (
