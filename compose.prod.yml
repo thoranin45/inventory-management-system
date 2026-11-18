@@ -1,112 +1,149 @@
-name: inventory-system
+name: inventory-prod
 
-# Production compose.
+# Production compose (V1, self-hosted behind Tailscale Funnel).
 #
-# - The API image is PINNED via ${API_IMAGE}; ":latest" is not used.
-#   Set API_IMAGE=ghcr.io/OWNER/inventory-management-system:vX.Y.Z (or :<sha>).
+#   client --HTTPS--> Tailscale Funnel (host-level, terminates TLS)
+#          --HTTP--> nginx (127.0.0.1:8090) --> frontend:3000 (Next + BFF)
+#          --> api:8081 --> db:5432
+#
+# - Isolation: the project name, container names, network and volume names
+#   are all "inventory-prod-*", so this stack can never adopt or replace the
+#   dev stack (compose.yml, project "inventory-system", container
+#   "inventory-postgres") or the demo stack (compose.demo.yml).
+# - Only nginx publishes a host port, and only on loopback. api and db are
+#   internal. FastAPI is never proxied by nginx; the browser only talks to
+#   the Next BFF.
+# - Images are PINNED: API_IMAGE and FRONTEND_IMAGE must be set to an
+#   immutable tag (:vX.Y.Z or :<git-sha>). ":latest" is never used.
 # - The API container starts the application only. Database migrations are an
-#   explicit, gated step:
+#   explicit, gated step, run AFTER a verified backup:
 #       docker compose -f compose.prod.yml --profile migrate run --rm migrate
-#   Run it AFTER a verified backup and preflight. See docs/deployment.md.
-# - PostgreSQL has no published host port.
-# - Container healthcheck uses /health (liveness). Readiness (/ready) is
-#   verified out-of-band during a deploy.
+#   See docs/deployment.md.
+# - Configuration and secrets come from .env.production (git-ignored; the
+#   template is .env.production.example).
+
+networks:
+  inventory-prod:
+    name: inventory-prod
+    driver: bridge
+
+volumes:
+  inventory_prod_postgres_data:
+    name: inventory-prod-postgres-data
+  inventory_prod_uploads:
+    name: inventory-prod-uploads
+  inventory_prod_exports:
+    name: inventory-prod-exports
+  inventory_prod_logs:
+    name: inventory-prod-logs
+  inventory_prod_invoices:
+    name: inventory-prod-invoices
 
 services:
   db:
     image: postgres:18
-    container_name: inventory-postgres
+    container_name: inventory-prod-postgres
     restart: unless-stopped
-
-    env_file:
-      - .env.production
-
+    networks: [inventory-prod]
+    env_file: [.env.production]
     environment:
       PGDATA: /var/lib/postgresql/data/pgdata
-
+    # No host port. Internal only.
     expose:
       - "5432"
-
     volumes:
-      - inventory_postgres_data:/var/lib/postgresql/data
-
+      - inventory_prod_postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"
-        ]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10
       start_period: 15s
 
-  api:
+  # One-shot migration runner. Never starts with `up`.
+  migrate:
     image: ${API_IMAGE:?set API_IMAGE to a pinned tag, e.g. ghcr.io/OWNER/inventory-management-system:v1.0.0}
-    container_name: inventory-api
-    restart: unless-stopped
-
-    env_file:
-      - .env.production
-
-    expose:
-      - "8081"
-
+    profiles: ["migrate"]
+    networks: [inventory-prod]
+    env_file: [.env.production]
     depends_on:
       db:
         condition: service_healthy
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
 
-    # No command override: the image's CMD starts uvicorn with --proxy-headers
-    # and does NOT run migrations.
-
+  api:
+    image: ${API_IMAGE:?set API_IMAGE to a pinned tag, e.g. ghcr.io/OWNER/inventory-management-system:v1.0.0}
+    container_name: inventory-prod-api
+    restart: unless-stopped
+    networks: [inventory-prod]
+    env_file: [.env.production]
+    # No host port. Internal only. No command override: the image's CMD starts
+    # uvicorn with --proxy-headers and does NOT run migrations.
+    expose:
+      - "8081"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - inventory_prod_uploads:/app/uploads
+      - inventory_prod_exports:/app/exports
+      - inventory_prod_logs:/app/logs
+      - inventory_prod_invoices:/app/app/static/invoices
     healthcheck:
       test:
         [
           "CMD",
           "python",
           "-c",
-          "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8081/health', timeout=3).status==200 else 1)"
+          "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8081/health', timeout=3).status==200 else 1)",
         ]
       interval: 15s
       timeout: 5s
       retries: 5
       start_period: 20s
 
-    volumes:
-      - inventory_uploads:/app/uploads
-      - inventory_exports:/app/exports
-      - inventory_logs:/app/logs
-      - inventory_invoices:/app/app/static/invoices
-
-  # One-shot migration runner. Never starts automatically.
-  migrate:
-    image: ${API_IMAGE:?set API_IMAGE to a pinned tag}
-    profiles: ["migrate"]
-    env_file:
-      - .env.production
-    depends_on:
-      db:
-        condition: service_healthy
-    command: ["alembic", "upgrade", "head"]
-
-  nginx:
-    image: nginx:1.27-alpine
-    container_name: inventory-nginx
+  frontend:
+    image: ${FRONTEND_IMAGE:?set FRONTEND_IMAGE to a pinned tag, e.g. ghcr.io/OWNER/inventory-management-system-frontend:v1.0.0}
+    container_name: inventory-prod-frontend
     restart: unless-stopped
-
-    ports:
-      - "80:80"
-
-    volumes:
-      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
-
+    networks: [inventory-prod]
+    # No host port. Internal only. API_BASE_URL is server-side runtime config
+    # (never in the browser bundle).
+    expose:
+      - "3000"
+    environment:
+      NODE_ENV: production
+      API_BASE_URL: http://api:8081
+      SESSION_COOKIE_NAME: wc_session
+      COOKIE_SECURE: "1"
+      NEXT_TELEMETRY_DISABLED: "1"
     depends_on:
       api:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/login"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
 
-volumes:
-  inventory_postgres_data:
-  inventory_uploads:
-  inventory_exports:
-  inventory_logs:
-  inventory_invoices:
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: inventory-prod-nginx
+    restart: unless-stopped
+    networks: [inventory-prod]
+    # Loopback only. Tailscale Funnel (host-level) targets http://127.0.0.1:8090.
+    ports:
+      - "127.0.0.1:8090:80"
+    volumes:
+      - ./nginx/prod.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      frontend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/login"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s

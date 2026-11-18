@@ -61,8 +61,13 @@ monthly game-day restore fails, treat it as a Sev-2 incident.
 ## Generated files
 
 `uploads/` holds irreplaceable product images — include the volume in the
-backup job (`docker run --rm -v inventory-uploads:/data -v /var/backups:/b
+backup job (`docker run --rm -v inventory-prod-uploads:/data -v /var/backups:/b
 alpine tar czf /b/uploads_$(date -u +%Y%m%dT%H%M%SZ).tgz -C /data .`).
+The production stack's volumes are named `inventory-prod-*`
+(`compose.prod.yml`); the dev stack's are `inventory-*`.
+
+The production database has no host port. `docs/deployment.md` ("Backups")
+shows how to dump it from inside the `db` container.
 `exports/`, `app/static/{labels,barcodes,qrcodes,invoices}` are regenerable and
 do not need backing up.
 
