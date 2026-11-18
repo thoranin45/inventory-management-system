@@ -1,11 +1,11 @@
 import { Suspense } from "react";
-import type { Metadata } from "next";
 
 import { StockInConsole } from "@/components/stock/stock-in-console";
 import { LoadingState } from "@/components/ui/states";
 import { Msg } from "@/components/ui/msg";
+import { pageMetadata } from "@/lib/i18n/server";
 
-export const metadata: Metadata = { title: "Stock In" };
+export const generateMetadata = () => pageMetadata("pageTitle.stockIn");
 
 export default function StockInPage() {
   return (

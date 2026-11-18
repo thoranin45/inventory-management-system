@@ -1,11 +1,11 @@
 import { Suspense } from "react";
-import type { Metadata } from "next";
 
 import { StockAdjustmentRequestForm } from "@/components/stock-adjustments/request-form";
 import { LoadingState } from "@/components/ui/states";
 import { Msg } from "@/components/ui/msg";
+import { pageMetadata } from "@/lib/i18n/server";
 
-export const metadata: Metadata = { title: "New Stock Adjustment Request" };
+export const generateMetadata = () => pageMetadata("pageTitle.adjustNew");
 
 export default function NewStockAdjustmentRequestPage() {
   return (

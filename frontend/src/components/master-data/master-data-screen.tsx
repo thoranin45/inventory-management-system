@@ -16,7 +16,7 @@ import { formMessageText, masterDataErrorText } from "@/lib/master-data-copy";
 import { canShowAction } from "@/lib/auth/permissions";
 import { isApiError } from "@/lib/api/errors";
 import { useListParams } from "@/lib/list-params";
-import { DeleteConfirmDialog, toastMutationError } from "./delete-confirm";
+import { DeleteConfirmDialog } from "./delete-confirm";
 
 /* ------------------------------------------------------------------ types === */
 
@@ -403,5 +403,3 @@ export function MasterDataScreen<Row, Input>({ cfg }: { cfg: MasterDataConfig<Ro
     </div>
   );
 }
-
-export { toastMutationError };

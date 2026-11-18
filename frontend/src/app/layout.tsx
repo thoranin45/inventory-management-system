@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Mono, IBM_Plex_Sans, IBM_Plex_Sans_Thai } from "next/font/google";
 
-import { getLocale } from "@/lib/i18n/server";
+import { getLocale, getServerT } from "@/lib/i18n/server";
 import { Providers } from "./providers";
 import "./globals.css";
 
@@ -27,10 +27,13 @@ const plexMono = IBM_Plex_Mono({
   display: "swap",
 });
 
-export const metadata: Metadata = {
-  title: { default: "AKKRATHARA", template: "%s | AKKRATHARA" },
-  description: "AKKRATHARA — operational inventory console.",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getServerT();
+  return {
+    title: { default: "AKKRATHARA", template: "%s | AKKRATHARA" },
+    description: t("pageTitle.appDescription"),
+  };
+}
 
 export const viewport: Viewport = {
   width: "device-width",

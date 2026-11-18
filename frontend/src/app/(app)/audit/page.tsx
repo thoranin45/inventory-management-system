@@ -1,11 +1,11 @@
 import { Suspense } from "react";
-import type { Metadata } from "next";
 
 import { AuditView } from "@/components/audit/audit-view";
 import { LoadingState } from "@/components/ui/states";
 import { Msg } from "@/components/ui/msg";
+import { pageMetadata } from "@/lib/i18n/server";
 
-export const metadata: Metadata = { title: "Audit log" };
+export const generateMetadata = () => pageMetadata("pageTitle.audit");
 
 export default function AuditPage() {
   return (

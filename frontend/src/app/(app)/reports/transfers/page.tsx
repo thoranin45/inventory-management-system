@@ -1,11 +1,11 @@
 import { Suspense } from "react";
-import type { Metadata } from "next";
 
 import { TransfersReport } from "@/components/reports/transfers-report";
 import { LoadingState } from "@/components/ui/states";
 import { Msg } from "@/components/ui/msg";
+import { pageMetadata } from "@/lib/i18n/server";
 
-export const metadata: Metadata = { title: "Transfer report · Reports" };
+export const generateMetadata = () => pageMetadata("pageTitle.reportTransfers");
 
 export default function Page() {
   return (

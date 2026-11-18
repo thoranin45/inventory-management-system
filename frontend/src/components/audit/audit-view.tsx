@@ -11,7 +11,8 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { useSession } from "@/components/session-provider";
 import { isAdmin } from "@/lib/auth/permissions";
 import { useAuditLogs } from "@/lib/query/audit";
-import { auditActionLabel, auditEntityLabel, type AuditLog } from "@/lib/api/schemas/audit";
+import type { AuditLog } from "@/lib/api/schemas/audit";
+import { auditActionText, auditEntityText } from "@/lib/audit-copy";
 import { formatIsoDate } from "@/lib/format";
 import { useT } from "@/lib/i18n/client";
 
@@ -41,7 +42,15 @@ export function AuditView() {
   const term = search.trim().toLowerCase();
   const filtered = term
     ? all.filter((r) =>
-        [r.username, r.action, r.table_name, r.description, String(r.record_id ?? "")]
+        [
+          r.username,
+          r.action,
+          r.table_name,
+          auditActionText(t, r.action),
+          auditEntityText(t, r.table_name),
+          r.description,
+          String(r.record_id ?? ""),
+        ]
           .some((v) => (v ?? "").toLowerCase().includes(term)),
       )
     : all;
@@ -50,13 +59,13 @@ export function AuditView() {
   const columns: Column<AuditLog>[] = [
     { key: "when", header: t("audit.colWhen"), cell: (r) => <span className="mono text-[var(--muted)]">{formatIsoDate(r.created_at)}</span> },
     { key: "actor", header: t("audit.colActor"), cell: (r) => <span className="font-medium">{r.username ?? "—"}</span> },
-    { key: "action", header: t("audit.colAction"), cell: (r) => <StatusBadge tone="neutral" label={auditActionLabel(r.action)} /> },
+    { key: "action", header: t("audit.colAction"), cell: (r) => <StatusBadge tone="neutral" label={auditActionText(t, r.action)} /> },
     {
       key: "entity",
       header: t("audit.colEntity"),
       cell: (r) => (
         <span className="text-[var(--muted)]">
-          {auditEntityLabel(r.table_name)}
+          {auditEntityText(t, r.table_name)}
           {r.record_id != null ? <span className="mono"> #{r.record_id}</span> : null}
         </span>
       ),
@@ -97,13 +106,13 @@ export function AuditView() {
             getRowKey={(r) => String(r.id)}
             isFetching={q.isFetching}
             renderCard={(r) => ({
-              title: auditActionLabel(r.action),
+              title: auditActionText(t, r.action),
               badge: <StatusBadge tone="neutral" label={r.username ?? "—"} />,
               meta: (
                 <>
                   <span className="mono">{formatIsoDate(r.created_at)}</span>
                   <span>
-                    {auditEntityLabel(r.table_name)}
+                    {auditEntityText(t, r.table_name)}
                     {r.record_id != null ? ` #${r.record_id}` : ""}
                   </span>
                   {r.description ? <span className="w-full text-[11px] text-[var(--faint)]">{r.description}</span> : null}

@@ -1,11 +1,11 @@
 import { Suspense } from "react";
-import type { Metadata } from "next";
 
 import { NearExpiryReport } from "@/components/reports/near-expiry-report";
 import { LoadingState } from "@/components/ui/states";
 import { Msg } from "@/components/ui/msg";
+import { pageMetadata } from "@/lib/i18n/server";
 
-export const metadata: Metadata = { title: "Near expiry · Reports" };
+export const generateMetadata = () => pageMetadata("pageTitle.reportNearExpiry");
 
 export default function Page() {
   return (
