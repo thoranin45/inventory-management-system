@@ -1006,6 +1006,10 @@ NULL-expiry / non-expiry-tracked lots keep their existing FIFO behavior; a dated
 expired lot is skipped by both FIFO and FEFO. FIFO/FEFO is unchanged for products
 with no dated lots.
 
+FIFO orders lots by **receipt time** (`created_at ASC, id ASC`). Why
+`created_at` is the receipt time, and the guard for future features, are in
+`docs/fifo.md` (P9).
+
 ### Sales
 
 Confirmation excludes expired batches from allocation candidates (deterministic

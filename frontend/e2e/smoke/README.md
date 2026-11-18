@@ -9,7 +9,7 @@ simulation harness (`playwright.fulfillment.config.ts`, `e2e/fulfillment-*`).
 | `auth.setup.ts` | Creates the WAREHOUSE user if missing; signs in both roles through the login page and saves their sessions. |
 | `login.spec.ts` | Signed-out redirect, wrong password refused (no cookie), admin login via BFF with an HttpOnly cookie, browser never calls FastAPI directly, sign-out. |
 | `stock-in.spec.ts` | Warehouse receives a new lot with a 3-decimal quantity; server balance matches. |
-| `stock-out-fefo.spec.ts` | FEFO issues the earliest-expiring lot first (the later-expiring lot is received first, so "oldest received" would fail); the server refuses an over-issue and deducts nothing. |
+| `stock-out.spec.ts` | FEFO issues the earliest-expiring lot first (the later-expiring lot is received first, so "oldest received" would fail). FIFO issues the earliest-**received** lot first and the preview lists lots in that order (P9). The server refuses an over-issue and deducts nothing. |
 | `adjustment-approve.spec.ts` | Warehouse submits an adjustment, stock does not move; admin approves and stock changes once. |
 | `sales-return-retry.spec.ts` | The first return request reaches the server but its response is dropped; Retry resends the same `Idempotency-Key` and stock goes up exactly once. |
 | `responsive.spec.ts` | 390 / 768 / 1280 px × light / dark × Thai / English on Dashboard, Stock, Stock In and Sales: right language and theme, no sideways scroll, bottom tab bar on phones and side navigation from 768 px. |

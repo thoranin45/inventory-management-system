@@ -646,6 +646,37 @@ describe("StockOutConsole — R4 review and lot preview", () => {
     expect(screen.getByText("Preview only — the server selects the final lots.")).toBeInTheDocument();
   });
 
+  it("P9: with receipt times, FIFO lists lots earliest-received first (not by lot number or expiry)", async () => {
+    stockRows = [
+      lot(2, "LOT-A", "2027-01-01", { batch_received_at: "2026-11-10T08:00:00.500000" }),
+      lot(3, "LOT-B", "2027-12-01", { batch_received_at: "2026-11-01T08:00:00" }),
+      lot(4, "LOT-C", "2027-06-01", { batch_received_at: "2026-11-10T08:00:00.500000" }),
+      lot(5, "LOT-EXPIRED", "2026-01-01", { is_expired: true, batch_received_at: "2026-10-01T08:00:00" }),
+    ];
+    const user = userEvent.setup();
+    render(<StockOutConsole />);
+    await pick(user, /Coffee 1kg/);
+    await user.click(screen.getByRole("button", { name: /^FIFO/i }));
+    const list = screen.getByText("Eligible lots, earliest received first").nextElementSibling as HTMLElement;
+    // LOT-B was received first; LOT-A and LOT-C share a receipt time, so batch id breaks the tie (as on the server).
+    expect(within(list).getAllByText(/^LOT-/).map((e) => e.textContent)).toEqual(["LOT-B", "LOT-A", "LOT-C"]);
+    expect(screen.queryByText(/FIFO order is not shown/)).toBeNull();
+    expect(screen.getByText("Preview only — the server selects the final lots.")).toBeInTheDocument();
+  });
+
+  it("P9: if any lot lacks a receipt time, FIFO falls back to claiming no order", async () => {
+    stockRows = [
+      lot(2, "LOT-A", "2027-01-01", { batch_received_at: "2026-11-10T08:00:00" }),
+      lot(3, "LOT-B", "2027-12-01", { batch_received_at: null }),
+    ];
+    const user = userEvent.setup();
+    render(<StockOutConsole />);
+    await pick(user, /Coffee 1kg/);
+    await user.click(screen.getByRole("button", { name: /^FIFO/i }));
+    expect(screen.getByText("Eligible lots")).toBeInTheDocument();
+    expect(screen.getByText(/FIFO order is not shown/)).toBeInTheDocument();
+  });
+
   it("the review shows the removal, the strategy and the labelled estimate, and sends nothing until Confirm", async () => {
     const user = userEvent.setup();
     await scanningWith(user, 2);

@@ -67,3 +67,37 @@ test("the server refuses a stock-out larger than the stock and nothing is deduct
   await expect(page.getByRole("status").filter({ hasText: "Stock issued" })).toHaveCount(0);
   expect((await onHand(admin, product.id)).total).toBe(2);
 });
+
+test("FIFO stock-out issues the earliest-RECEIVED lot first, and the preview shows that order (P9)", async ({ page }) => {
+  const admin = await token(env.admin.username, env.admin.password);
+  const warehouse = await token(env.warehouse.username, env.warehouse.password);
+  const product = await createProduct(admin, { prefix: "FIFO", batch: true });
+  const tag = uniq();
+  // Received first, but sorts last by lot number AND expires last: only a
+  // receipt-ordered selection takes it first.
+  const first = `LOT-Z-${tag}`;
+  const second = `LOT-A-${tag}`;
+  await receiveBatch(warehouse, product.id, first, "3.000", isoDate(-10), isoDate(300));
+  await receiveBatch(warehouse, product.id, second, "3.000", isoDate(-10), isoDate(30));
+
+  await page.goto("/stock-out");
+  await page.getByRole("combobox", { name: "Search products" }).fill(product.sku);
+  await page.getByRole("option", { name: new RegExp(product.sku) }).click();
+  await page.getByRole("button", { name: /^FIFO/ }).click();
+
+  await expect(page.getByText("Eligible lots, earliest received first")).toBeVisible();
+  const preview = page.getByRole("listitem").filter({ hasText: tag });
+  await expect(preview.first()).toContainText(first);
+  await expect(preview.nth(1)).toContainText(second);
+
+  await page.getByRole("button", { name: "Start scanning" }).click();
+  await page.getByRole("radio", { name: "Enter Quantity" }).click();
+  await page.getByRole("textbox", { name: "Quantity to issue" }).fill("4");
+  await page.getByRole("button", { name: /Review stock out/ }).click();
+  await page.getByRole("dialog").getByRole("button", { name: /^Confirm/ }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Stock issued" })).toContainText("On hand 2.000.");
+
+  const balance = await onHand(admin, product.id);
+  expect(balance.byLot[first]).toBe(0);
+  expect(balance.byLot[second]).toBe(2);
+});

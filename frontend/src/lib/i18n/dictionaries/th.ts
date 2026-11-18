@@ -1100,6 +1100,7 @@ export const th: Dictionary = {
     lotsFefo: "ล็อตที่เบิกได้ เรียงตามวันหมดอายุ",
     lotsFifo: "ล็อตที่เบิกได้",
     noEligibleLots: "ไม่มีล็อตที่เบิกได้ที่ MAIN / DEFAULT",
+    lotsFifoOrdered: "ล็อตที่เบิกได้ เรียงตามลำดับการรับเข้า",
     fifoOrderNote: "ไม่แสดงลำดับ FIFO เพราะไม่มีข้อมูลวันที่รับเข้าในหน้านี้",
     thisSession: "รอบนี้",
     trailHit: "บาร์โค้ด {code} +1",

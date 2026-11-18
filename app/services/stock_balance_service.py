@@ -42,14 +42,16 @@ def _enrich_balances(db: Session, rows, today, *, is_transit: bool) -> list[dict
     batch_ids = {r.batch_id for r in rows if r.batch_id is not None}
     expiry = {}
     lots = {}
+    received = {}
     if batch_ids:
-        for bid, exp, lot in (
-            db.query(ProductBatch.id, ProductBatch.expiry_date, ProductBatch.lot_no)
+        for bid, exp, lot, created in (
+            db.query(ProductBatch.id, ProductBatch.expiry_date, ProductBatch.lot_no, ProductBatch.created_at)
             .filter(ProductBatch.id.in_(batch_ids))
             .all()
         ):
             expiry[bid] = exp
             lots[bid] = lot
+            received[bid] = created
     out = []
     for r in rows:
         exp = expiry.get(r.batch_id)
@@ -68,6 +70,10 @@ def _enrich_balances(db: Session, rows, today, *, is_transit: bool) -> list[dict
             "batch_expiry_date": exp,
             # Phase 14D (additive): lets an exact-balance picker name the lot.
             "batch_lot_no": lots.get(r.batch_id),
+            # P9 (additive): the lot's receipt time, which is the FIFO key
+            # (ProductBatch.created_at; see docs/fifo.md). Lets the client
+            # show FIFO order instead of guessing it.
+            "batch_received_at": received.get(r.batch_id),
             "days_to_expiry": batch_eligibility.days_to_expiry(exp, today) if exp is not None else None,
             "is_expired": batch_eligibility.is_expired(exp, today) if exp is not None else False,
             "as_of_date": today,
