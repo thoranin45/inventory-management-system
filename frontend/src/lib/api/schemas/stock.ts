@@ -25,6 +25,8 @@ export const stockBalanceRowSchema = z.object({
   batch_expiry_date: z.string().nullable(),
   /** Phase 14D (additive) — lot number for exact-balance pickers. */
   batch_lot_no: z.string().nullish(),
+  /** P9 (additive) — the lot's receipt time, the server's FIFO key. */
+  batch_received_at: z.string().nullish(),
   days_to_expiry: z.number().nullable(),
   is_expired: z.boolean(),
   as_of_date: z.string(),

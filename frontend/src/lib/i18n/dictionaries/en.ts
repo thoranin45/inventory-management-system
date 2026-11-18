@@ -1098,6 +1098,7 @@ export const en = {
     lotsFefo: "Eligible lots, earliest expiry first",
     lotsFifo: "Eligible lots",
     noEligibleLots: "No eligible lots at MAIN / DEFAULT.",
+    lotsFifoOrdered: "Eligible lots, earliest received first",
     fifoOrderNote: "FIFO order is not shown: receipt dates are not available here.",
     thisSession: "This session",
     trailHit: "barcode {code} +1",

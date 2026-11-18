@@ -70,13 +70,27 @@ export function StorageRow({ direction }: { direction: "in" | "out" }) {
   );
 }
 
+/** Server FIFO key: receipt time (ProductBatch.created_at), then batch id. */
+function receivedAt(r: StockBalanceRow): number {
+  return r.batch_received_at ? Date.parse(r.batch_received_at) : Number.NaN;
+}
+
+/**
+ * Lots in the server's FIFO order, or null when any lot lacks a receipt time
+ * (an older backend): then no order is claimed.
+ */
+export function fifoOrder(rows: StockBalanceRow[]): StockBalanceRow[] | null {
+  if (rows.some((r) => Number.isNaN(receivedAt(r)))) return null;
+  return [...rows].sort((a, b) => receivedAt(a) - receivedAt(b) || (a.batch_id ?? 0) - (b.batch_id ?? 0));
+}
+
 /**
  * Stock Out "expected lots" (D-R4-3), advisory only. Lots at MAIN / DEFAULT
  * that the server may issue from: batch-linked, not expired, something
  * available. FEFO lists them by expiry date (the server's FEFO key). FIFO
- * cannot be ordered honestly (receipt dates are not available to the client),
- * so FIFO lists the same lots without claiming an order. No per-lot split is
- * ever promised.
+ * lists them by receipt time (the server's FIFO key, P9); if receipt times are
+ * missing it lists them without claiming an order. No per-lot split is ever
+ * promised.
  */
 export function LotPreview({ storage, strategy }: { storage: DefaultStorage; strategy: StockOutStrategy }) {
   const t = useT();
@@ -84,6 +98,7 @@ export function LotPreview({ storage, strategy }: { storage: DefaultStorage; str
   if (storage.status === "error") return <p className="text-[12px] text-[var(--danger)]">{t("task.lotsUnavailable")}</p>;
   if (storage.status !== "ready") return null;
   const eligible = storage.rows.filter((r) => r.batch_id != null && !r.is_expired && compareDecimals(r.available_qty, "0") > 0);
+  const fifoLots = strategy === "fifo" ? fifoOrder(eligible) : null;
   const lots =
     strategy === "fefo"
       ? [...eligible].sort((a, b) => {
@@ -92,11 +107,11 @@ export function LotPreview({ storage, strategy }: { storage: DefaultStorage; str
           if (!b.batch_expiry_date) return -1;
           return a.batch_expiry_date < b.batch_expiry_date ? -1 : 1;
         })
-      : [...eligible].sort((a, b) => (a.batch_lot_no ?? "").localeCompare(b.batch_lot_no ?? ""));
+      : fifoLots ?? [...eligible].sort((a, b) => (a.batch_lot_no ?? "").localeCompare(b.batch_lot_no ?? ""));
   return (
     <div className="flex flex-col gap-2">
       <span className="text-[12px] font-semibold text-[var(--muted)]">
-        {t(strategy === "fefo" ? "task.lotsFefo" : "task.lotsFifo")}
+        {t(strategy === "fefo" ? "task.lotsFefo" : fifoLots ? "task.lotsFifoOrdered" : "task.lotsFifo")}
       </span>
       {lots.length === 0 ? (
         <p className="text-[12px] text-[var(--muted)]">{t("task.noEligibleLots")}</p>
@@ -112,7 +127,7 @@ export function LotPreview({ storage, strategy }: { storage: DefaultStorage; str
           ))}
         </ul>
       )}
-      {strategy === "fifo" ? <p className="text-[12px] text-[var(--muted)]">{t("task.fifoOrderNote")}</p> : null}
+      {strategy === "fifo" && !fifoLots ? <p className="text-[12px] text-[var(--muted)]">{t("task.fifoOrderNote")}</p> : null}
       <p className="flex items-start gap-2 text-[12px] text-[var(--muted)]">
         <Info aria-hidden className="mt-[2px] h-3.5 w-3.5 flex-none" />
         {t("review.serverPicksLots")}
