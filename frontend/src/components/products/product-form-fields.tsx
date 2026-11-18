@@ -4,6 +4,7 @@ import * as React from "react";
 
 import { Combobox, type ComboboxItem } from "@/components/ui/combobox";
 import { useAllCategories } from "@/lib/query/master-data";
+import { useT } from "@/lib/i18n/client";
 
 export const productInputCls =
   "min-h-11 w-full rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-[13px] tabular-nums outline-hidden focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-[var(--focus)]";
@@ -46,6 +47,7 @@ export function CategoryPicker({
   onChange: (id: number | null) => void;
   error?: string;
 }) {
+  const tr = useT();
   const { data: categories = [], isLoading } = useAllCategories();
   const [term, setTerm] = React.useState("");
 
@@ -60,21 +62,21 @@ export function CategoryPicker({
 
   return (
     <ProductField
-      label="Category"
+      label={tr("product.category")}
       htmlFor="pf-category"
       error={error}
-      hint={categories.length === 0 && !isLoading ? "No categories yet — create one under Categories first (optional)." : "Optional"}
+      hint={categories.length === 0 && !isLoading ? tr("product.noCategoriesHint") : tr("product.optional")}
     >
       <Combobox
         id="pf-category"
-        ariaLabel="Search categories"
+        ariaLabel={tr("product.searchCategories")}
         value={selected ? { id: selected.id, label: selected.category_name } : null}
         onChange={(item) => onChange(item?.id ?? null)}
         onSearch={setTerm}
         items={items}
         loading={isLoading}
-        placeholder="Search categories…"
-        emptyText={categories.length === 0 ? "No categories exist yet" : "No categories match"}
+        placeholder={tr("product.searchCategoriesPlaceholder")}
+        emptyText={categories.length === 0 ? tr("product.noCategoriesExist") : tr("product.noCategoriesMatch")}
       />
     </ProductField>
   );
@@ -100,9 +102,10 @@ export function TrackingFields({
   disabledReason?: string;
   error?: string;
 }) {
+  const t = useT();
   return (
     <fieldset className="flex flex-col gap-2 rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--surface)] p-3">
-      <legend className="px-1 text-[12px] font-semibold text-[var(--muted)]">Tracking configuration</legend>
+      <legend className="px-1 text-[12px] font-semibold text-[var(--muted)]">{t("product.trackingConfig")}</legend>
 
       <label className="flex items-start gap-2 text-[12.5px]">
         <input
@@ -117,10 +120,8 @@ export function TrackingFields({
           }}
         />
         <span>
-          <span className="font-medium">Track batches</span>
-          <span className="block text-[11.5px] text-[var(--faint)]">
-            Stock is split into lot-numbered batches. Required for FEFO picking and expiry.
-          </span>
+          <span className="font-medium">{t("product.trackBatches")}</span>
+          <span className="block text-[11.5px] text-[var(--faint)]">{t("product.trackBatchesHint")}</span>
         </span>
       </label>
 
@@ -134,18 +135,12 @@ export function TrackingFields({
           onChange={(e) => onChange({ track_batch: trackBatch, track_expiry: e.currentTarget.checked })}
         />
         <span>
-          <span className="font-medium">Track expiry dates</span>
-          <span className="block text-[11.5px] text-[var(--faint)]">
-            Each batch carries an expiry date. Expired stock stays owned but is flagged and
-            excluded from operational availability. Needs batch tracking on.
-          </span>
+          <span className="font-medium">{t("product.trackExpiryDates")}</span>
+          <span className="block text-[11.5px] text-[var(--faint)]">{t("product.trackExpiryHint")}</span>
         </span>
       </label>
 
-      <p className="px-1 text-[11px] text-[var(--faint)]">
-        Non-batch → one pooled quantity. Batch only → lot-numbered, no dates. Batch + expiry →
-        expiry-aware batches.
-      </p>
+      <p className="px-1 text-[11px] text-[var(--faint)]">{t("product.trackingSummary")}</p>
       {disabled && disabledReason ? (
         <p className="px-1 text-[11px] text-[var(--warning)]">{disabledReason}</p>
       ) : null}

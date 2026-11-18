@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { bffBinary } from "@/lib/api/binary";
 import { isApiError } from "@/lib/api/errors";
+import { useT } from "@/lib/i18n/client";
 
 type CodeKind = "barcode" | "qrcode" | "label";
 
@@ -22,6 +23,7 @@ const ENDPOINT: Record<CodeKind, (id: number) => string> = {
  * label PDF in a new tab for printing.
  */
 export function ProductCodes({ productId, hasBarcode }: { productId: number; hasBarcode: boolean }) {
+  const t = useT();
   const [busy, setBusy] = React.useState<CodeKind | null>(null);
   const [previews, setPreviews] = React.useState<Partial<Record<"barcode" | "qrcode", string>>>({});
 
@@ -50,11 +52,13 @@ export function ProductCodes({ productId, hasBarcode }: { productId: number; has
     } catch (error) {
       const msg = isApiError(error)
         ? error.status === 404 && kind !== "label"
-          ? "This product has no barcode yet — add one first."
+          ? t("product.noBarcodeYet")
           : error.userMessage
-        : "Could not generate that.";
+        : t("product.couldNotGenerate");
       const rid = isApiError(error) ? error.requestId : undefined;
-      toast.error("Code generation failed", { description: rid ? `${msg} · Request ${rid}` : msg });
+      toast.error(t("product.codeFailed"), {
+        description: rid ? t("masterData.requestSuffix", { message: msg, id: rid }) : msg,
+      });
     } finally {
       setBusy(null);
     }
@@ -65,20 +69,20 @@ export function ProductCodes({ productId, hasBarcode }: { productId: number; has
       <div className="flex flex-wrap gap-2">
         <Button variant="secondary" onClick={() => run("barcode")} disabled={busy !== null || !hasBarcode}>
           {busy === "barcode" ? <Loader2 aria-hidden className="h-4 w-4 animate-spin" /> : <Barcode aria-hidden className="h-4 w-4" />}
-          View barcode
+          {t("product.viewBarcode")}
         </Button>
         <Button variant="secondary" onClick={() => run("qrcode")} disabled={busy !== null}>
           {busy === "qrcode" ? <Loader2 aria-hidden className="h-4 w-4 animate-spin" /> : <QrCode aria-hidden className="h-4 w-4" />}
-          View QR
+          {t("product.viewQr")}
         </Button>
         <Button variant="secondary" onClick={() => run("label")} disabled={busy !== null}>
           {busy === "label" ? <Loader2 aria-hidden className="h-4 w-4 animate-spin" /> : <FileText aria-hidden className="h-4 w-4" />}
-          Open label (PDF)
+          {t("product.openLabel")}
         </Button>
       </div>
 
       {!hasBarcode ? (
-        <p className="text-[11px] text-[var(--faint)]">Add a barcode to this product to enable barcode output.</p>
+        <p className="text-[11px] text-[var(--faint)]">{t("product.addBarcodeHint")}</p>
       ) : null}
 
       {(previews.barcode || previews.qrcode) && (
@@ -86,15 +90,15 @@ export function ProductCodes({ productId, hasBarcode }: { productId: number; has
           {previews.barcode ? (
             <figure className="flex flex-col items-center gap-1">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={previews.barcode} alt="Product barcode" className="max-h-24 rounded border border-[var(--border)] bg-white p-1" />
-              <figcaption className="text-[10px] text-[var(--faint)]">Barcode (PNG)</figcaption>
+              <img src={previews.barcode} alt={t("product.barcodeAlt")} className="max-h-24 rounded border border-[var(--border)] bg-white p-1" />
+              <figcaption className="text-[10px] text-[var(--faint)]">{t("product.barcodePng")}</figcaption>
             </figure>
           ) : null}
           {previews.qrcode ? (
             <figure className="flex flex-col items-center gap-1">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={previews.qrcode} alt="Product QR code" className="max-h-24 rounded border border-[var(--border)] bg-white p-1" />
-              <figcaption className="text-[10px] text-[var(--faint)]">QR (PNG)</figcaption>
+              <img src={previews.qrcode} alt={t("product.qrAlt")} className="max-h-24 rounded border border-[var(--border)] bg-white p-1" />
+              <figcaption className="text-[10px] text-[var(--faint)]">{t("product.qrPng")}</figcaption>
             </figure>
           ) : null}
         </div>

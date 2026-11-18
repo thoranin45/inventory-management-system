@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent } from "@/components/ui/dialog";
 import { isApiError } from "@/lib/api/errors";
 import { masterDataErrorCopy } from "@/lib/api/schemas/master-data";
+import { useT } from "@/lib/i18n/client";
+import { masterDataErrorText } from "@/lib/master-data-copy";
 
 /**
  * Shared destructive-confirm dialog for master data. A backend refusal (409
@@ -18,7 +20,7 @@ export function DeleteConfirmDialog({
   onOpenChange,
   title,
   body,
-  confirmLabel = "Delete",
+  confirmLabel,
   pending,
   onConfirm,
 }: {
@@ -30,6 +32,7 @@ export function DeleteConfirmDialog({
   pending: boolean;
   onConfirm: () => Promise<unknown>;
 }) {
+  const t = useT();
   const [err, setErr] = React.useState<{ message: string; requestId?: string } | null>(null);
 
   // Reset the inline error when the dialog is (re)opened — adjust-during-render,
@@ -47,10 +50,10 @@ export function DeleteConfirmDialog({
       onOpenChange(false);
     } catch (error) {
       if (isApiError(error)) {
-        const copy = masterDataErrorCopy(error.message) ?? error.userMessage;
+        const copy = masterDataErrorText(t, error.message, error.userMessage);
         setErr({ message: copy, requestId: error.requestId });
       } else {
-        setErr({ message: "Something went wrong." });
+        setErr({ message: t("common.somethingWrong") });
       }
     }
   };
@@ -65,7 +68,7 @@ export function DeleteConfirmDialog({
             {err.message}
             {err.requestId ? (
               <span className="mt-1 block text-[11px] text-[var(--muted)]">
-                Request ID: <span className="mono select-all">{err.requestId}</span>
+                {t("common.requestId")} <span className="mono select-all">{err.requestId}</span>
               </span>
             ) : null}
           </p>
@@ -73,10 +76,10 @@ export function DeleteConfirmDialog({
 
         <div className="mt-1 flex justify-end gap-2">
           <DialogClose asChild>
-            <Button variant="ghost">Keep it</Button>
+            <Button variant="ghost">{t("masterData.keepIt")}</Button>
           </DialogClose>
           <Button variant="danger" onClick={run} disabled={pending}>
-            {pending ? "Working…" : confirmLabel}
+            {pending ? t("masterData.working") : (confirmLabel ?? t("masterData.delete"))}
           </Button>
         </div>
       </DialogContent>

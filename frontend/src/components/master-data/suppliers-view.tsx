@@ -12,22 +12,29 @@ import {
   useSuppliers,
   useUpdateSupplier,
 } from "@/lib/query/master-data";
+import * as React from "react";
+
+import { useT, type I18nValue } from "@/lib/i18n/client";
 import { MasterDataScreen, type MasterDataConfig } from "./master-data-screen";
 
-const cfg: MasterDataConfig<SupplierRow, SupplierInput> = {
+const makeCfg = (t: I18nValue["t"]): MasterDataConfig<SupplierRow, SupplierInput> => ({
   resource: "supplier",
-  title: "Suppliers",
+  noun: t("masterData.supplierNoun"),
+  items: t("masterData.supplierItems"),
+  title: t("masterData.suppliersTitle"),
   subtitle: (total) =>
-    total === undefined ? "Purchase-order suppliers" : `${total} supplier${total === 1 ? "" : "s"}`,
-  searchPlaceholder: "Supplier name…",
+    total === undefined
+      ? t("masterData.suppliersSubtitle")
+      : t(total === 1 ? "masterData.supplierCountOne" : "masterData.supplierCountMany", { n: total }),
+  searchPlaceholder: t("masterData.supplierSearch"),
   sortFields: SUPPLIER_SORT_FIELDS,
   schema: supplierInput,
   fields: [
-    { name: "supplier_name", label: "Supplier name", required: true, autoComplete: "off" },
-    { name: "contact_name", label: "Contact name", autoComplete: "off" },
-    { name: "phone", label: "Phone", kind: "tel", autoComplete: "off" },
-    { name: "email", label: "Email", kind: "email", autoComplete: "off" },
-    { name: "address", label: "Address", kind: "textarea", autoComplete: "off" },
+    { name: "supplier_name", label: t("masterData.supplierName"), required: true, autoComplete: "off" },
+    { name: "contact_name", label: t("masterData.contactName"), autoComplete: "off" },
+    { name: "phone", label: t("masterData.phone"), kind: "tel", autoComplete: "off" },
+    { name: "email", label: t("masterData.email"), kind: "email", autoComplete: "off" },
+    { name: "address", label: t("masterData.address"), kind: "textarea", autoComplete: "off" },
   ],
   emptyForm: { supplier_name: "", contact_name: "", phone: "", email: "", address: "" },
   toForm: (r) => ({
@@ -39,35 +46,33 @@ const cfg: MasterDataConfig<SupplierRow, SupplierInput> = {
   }),
   rowId: (r) => r.id,
   rowName: (r) => r.supplier_name,
-  deleteBody: () =>
-    "Suppliers are removed permanently. If the supplier is referenced by existing purchase orders the backend rejects the delete — you'll see the conflict and a Request ID.",
-  deleteConfirmLabel: "Delete supplier",
+  deleteBody: () => t("masterData.supplierDeleteBody"),
   columns: [
     {
       key: "name",
-      header: "Supplier",
+      header: t("masterData.colSupplier"),
       sortField: "supplier_name",
       cell: (r) => <span className="font-medium">{r.supplier_name}</span>,
     },
     {
       key: "contact",
-      header: "Contact",
+      header: t("masterData.colContact"),
       cell: (r) => <span className="text-[var(--muted)]">{r.contact_name || "—"}</span>,
     },
     {
       key: "phone",
-      header: "Phone",
+      header: t("masterData.phone"),
       cell: (r) => <span className="mono text-[var(--muted)]">{r.phone || "—"}</span>,
     },
     {
       key: "email",
-      header: "Email",
+      header: t("masterData.email"),
       secondary: true,
       cell: (r) => <span className="text-[var(--muted)] break-all">{r.email || "—"}</span>,
     },
     {
       key: "address",
-      header: "Address",
+      header: t("masterData.address"),
       secondary: true,
       cell: (r) => <span className="text-[var(--muted)] line-clamp-2">{r.address || "—"}</span>,
     },
@@ -76,9 +81,9 @@ const cfg: MasterDataConfig<SupplierRow, SupplierInput> = {
     title: r.supplier_name,
     meta: (
       <>
-        <span>{r.contact_name || "no contact"}</span>
-        <span className="mono">{r.phone || "no phone"}</span>
-        <span className="break-all">{r.email || "no email"}</span>
+        <span>{r.contact_name || t("masterData.noContact")}</span>
+        <span className="mono">{r.phone || t("masterData.noPhone")}</span>
+        <span className="break-all">{r.email || t("masterData.noEmail")}</span>
       </>
     ),
   }),
@@ -86,8 +91,10 @@ const cfg: MasterDataConfig<SupplierRow, SupplierInput> = {
   useCreate: useCreateSupplier,
   useUpdate: useUpdateSupplier,
   useDelete: useDeleteSupplier,
-};
+});
 
 export function SuppliersView() {
+  const t = useT();
+  const cfg = React.useMemo(() => makeCfg(t), [t]);
   return <MasterDataScreen cfg={cfg} />;
 }

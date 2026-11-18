@@ -12,29 +12,40 @@ import {
   useDeleteCategory,
   useUpdateCategory,
 } from "@/lib/query/master-data";
+import * as React from "react";
+
+import { useT, type I18nValue } from "@/lib/i18n/client";
 import { MasterDataScreen, type MasterDataConfig } from "./master-data-screen";
 
-const cfg: MasterDataConfig<CategoryRow, CategoryInput> = {
+const makeCfg = (t: I18nValue["t"]): MasterDataConfig<CategoryRow, CategoryInput> => ({
   resource: "category",
-  title: "Categories",
+  noun: t("masterData.categoryNoun"),
+  items: t("masterData.categoryItems"),
+  title: t("masterData.categoriesTitle"),
   subtitle: (total) =>
-    total === undefined ? "Product categories" : `${total} categor${total === 1 ? "y" : "ies"} · used by product records`,
-  searchPlaceholder: "Category name…",
+    total === undefined
+      ? t("masterData.categoriesSubtitle")
+      : t(total === 1 ? "masterData.categoryCountOne" : "masterData.categoryCountMany", { n: total }),
+  searchPlaceholder: t("masterData.categorySearch"),
   sortFields: CATEGORY_SORT_FIELDS,
   schema: categoryInput,
   fields: [
-    { name: "category_name", label: "Category name", required: true, placeholder: "e.g. Beverages", autoComplete: "off" },
+    {
+      name: "category_name",
+      label: t("masterData.categoryName"),
+      required: true,
+      placeholder: t("masterData.categoryPlaceholder"),
+      autoComplete: "off",
+    },
   ],
   emptyForm: { category_name: "" },
   toForm: (r) => ({ category_name: r.category_name }),
   rowId: (r) => r.id,
   rowName: (r) => r.category_name,
-  deleteBody: () =>
-    "Categories are removed permanently. The backend refuses this while any active product still points at the category — reassign or deactivate those products first.",
-  deleteConfirmLabel: "Delete category",
+  deleteBody: () => t("masterData.categoryDeleteBody"),
   columns: [
-    { key: "id", header: "ID", sortField: "id", cell: (r) => <span className="mono text-[var(--muted)]">{r.id}</span> },
-    { key: "name", header: "Category", sortField: "category_name", cell: (r) => <span className="font-medium">{r.category_name}</span> },
+    { key: "id", header: t("masterData.colId"), sortField: "id", cell: (r) => <span className="mono text-[var(--muted)]">{r.id}</span> },
+    { key: "name", header: t("masterData.colCategory"), sortField: "category_name", cell: (r) => <span className="font-medium">{r.category_name}</span> },
   ],
   card: (r) => ({
     title: r.category_name,
@@ -44,8 +55,10 @@ const cfg: MasterDataConfig<CategoryRow, CategoryInput> = {
   useCreate: useCreateCategory,
   useUpdate: useUpdateCategory,
   useDelete: useDeleteCategory,
-};
+});
 
 export function CategoriesView() {
+  const t = useT();
+  const cfg = React.useMemo(() => makeCfg(t), [t]);
   return <MasterDataScreen cfg={cfg} />;
 }
