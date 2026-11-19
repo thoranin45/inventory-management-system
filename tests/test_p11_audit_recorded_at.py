@@ -40,15 +40,21 @@ def test_audit_api_exposes_recorded_at_utc(client, admin_headers):
 def test_legacy_rows_without_recorded_at_fall_back_to_created_at(client, admin_headers, warehouse_headers, db_session):
     product = _create_product(client, admin_headers, initial_stock=10)
     created = _create_request(client, warehouse_headers, product_id=product["id"]).json()["data"]
-    # simulate pre-revision history: no recorded instant, naive wall clock only
+    # simulate pre-revision history: no recorded instant, naive wall clock only.
+    # created_at is left as written -- the Phase 14C diagnostic reads it as a
+    # provenance anchor, so rewriting it would plant a false offset finding.
     db_session.execute(text(
-        "UPDATE audit_logs SET recorded_at_utc = NULL, created_at = '2026-01-02 03:04:05' "
+        "UPDATE audit_logs SET recorded_at_utc = NULL "
         "WHERE table_name = 'stock_adjustment_requests' AND record_id = :i"
     ), {"i": created["id"]})
     db_session.commit()
+    naive = db_session.execute(text(
+        "SELECT created_at FROM audit_logs WHERE table_name = 'stock_adjustment_requests' "
+        "AND record_id = :i ORDER BY id LIMIT 1"
+    ), {"i": created["id"]}).scalar()
 
     detail = client.get(f"/api/v1/stock-adjustment-requests/{created['id']}", headers=admin_headers).json()["data"]
-    assert detail["history"][0]["at"].startswith("2026-01-02T03:04:05")
+    assert detail["history"][0]["at"].startswith(naive.isoformat()[:19])
     assert not ZONED.search(detail["history"][0]["at"])
 
 
