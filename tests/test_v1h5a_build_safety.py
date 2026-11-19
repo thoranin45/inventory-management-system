@@ -86,7 +86,8 @@ def _context_files(base: Path, rules):
 
 
 @pytest.mark.parametrize("path", [
-    ".env", ".env.demo", ".env.test", ".env.production", "app/.env", "scripts/.env.local",
+    ".env", ".env.demo", ".env.test", ".env.production", ".env.production.app", "app/.env",
+    "scripts/.env.local",
     "alembic/.env", "deploy/keys/server.pem", "certs/tls.key", "backups/inventory.dump",
     "dump/inventory.sql", "data/old.sqlite3", "inventory.db", "app/__pycache__/main.cpython-312.pyc",
     "app/core/__pycache__/x.pyc", ".coverage", ".coverage.host.123", "logs/app.log",
