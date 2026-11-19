@@ -42,4 +42,5 @@ htmlcov/
 .env.db
 
 .env.production
+.env.production.app
 .env.demo

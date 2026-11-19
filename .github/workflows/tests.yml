@@ -95,6 +95,7 @@ jobs:
           cp .env.api.example .env.api
           cp .env.db.example .env.db
           cp .env.production.example .env.production
+          cp .env.production.app.example .env.production.app
 
       - name: Validate Docker Compose (dev)
         run: docker compose -f compose.yml config

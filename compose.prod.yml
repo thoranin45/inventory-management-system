@@ -20,7 +20,12 @@ name: inventory-prod
 #       docker compose -f compose.prod.yml --profile migrate run --rm migrate
 #   See docs/deployment.md.
 # - Configuration and secrets come from .env.production (git-ignored; the
-#   template is .env.production.example).
+#   template is .env.production.example). It holds the MIGRATOR credentials
+#   (POSTGRES_USER, a superuser that owns the schema), used by db and migrate.
+# - The api service also loads .env.production.app (git-ignored; template
+#   .env.production.app.example), which overrides DB_USER / DB_PASSWORD /
+#   DATABASE_URL with the least-privilege runtime role created by
+#   scripts/app_db_role.py. The API never connects as the superuser.
 
 networks:
   inventory-prod:
@@ -77,7 +82,8 @@ services:
     container_name: inventory-prod-api
     restart: unless-stopped
     networks: [inventory-prod]
-    env_file: [.env.production]
+    # Later files win: .env.production.app replaces the DB credentials.
+    env_file: [.env.production, .env.production.app]
     # No host port. Internal only. No command override: the image's CMD starts
     # uvicorn with --proxy-headers and does NOT run migrations.
     expose:

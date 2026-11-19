@@ -20,6 +20,8 @@
 - [ ] `compose.prod.yml`: `api` service has no `alembic upgrade`; images are
       `${API_IMAGE}` / `${FRONTEND_IMAGE}`; only nginx publishes a port, on
       `127.0.0.1:8090`; names are `inventory-prod-*`.
+- [ ] `.env.production.app` present on host, `chmod 600`, with the
+      `inventory_app` credentials (not `POSTGRES_USER`).
 - [ ] `.env.production` present on host, `chmod 600`, `ENV=production`,
       strong `SECRET_KEY` (≥32, not placeholder), `CORS_ORIGINS` = the real
       `https://<host>.<tailnet>.ts.net` origin.
@@ -61,6 +63,9 @@
       - `DEFAULT now()` can be bypassed by a direct SQL writer that supplies
         a value or an explicit NULL, or UPDATEs it later. No API exposes a
         setter, and app code never assigns it.
+      - The API connects as `inventory_app` (`.env.production.app`), never
+        as the superuser `POSTGRES_USER` (P10 finding F2). Prove it with
+        `docker compose -f compose.prod.yml exec api python scripts/app_db_role.py check` → `OK`.
       - Before release, list who can write the table. The API's own DB role
         should be the only non-superuser writer:
         `SELECT grantee, privilege_type FROM information_schema.role_table_grants
