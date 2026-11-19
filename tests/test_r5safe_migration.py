@@ -39,7 +39,7 @@ def _violates(engine, sql, params=None):
 
 
 def test_fresh_head_has_every_constraint_and_the_partial_index(migration_engine):
-    upgrade(migration_engine, "head")
+    upgrade(migration_engine, REVISION)
     with migration_engine.connect() as c:
         assert c.scalar(text("SELECT version_num FROM alembic_version")) == REVISION
         inspector = inspect(c)

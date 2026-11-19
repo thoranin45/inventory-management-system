@@ -18,6 +18,8 @@ export const auditLogSchema = z.object({
   record_id: z.number().nullable(),
   description: z.string().nullable(),
   created_at: z.string().nullable(),
+  /** P11 B1: DB-stamped instant (with offset); null/absent on older history. */
+  recorded_at_utc: z.string().nullable().optional(),
 });
 export type AuditLog = z.infer<typeof auditLogSchema>;
 

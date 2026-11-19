@@ -13,10 +13,24 @@ import { isAdmin } from "@/lib/auth/permissions";
 import { useAuditLogs } from "@/lib/query/audit";
 import type { AuditLog } from "@/lib/api/schemas/audit";
 import { auditActionText, auditEntityText } from "@/lib/audit-copy";
-import { formatIsoDate } from "@/lib/format";
+import { formatBusinessDateTime, formatStoredWallClock } from "@/lib/format";
 import { useT } from "@/lib/i18n/client";
 
 const PAGE_LOCAL_CAP = 200;
+
+/** Bangkok time for rows the DB stamped with an instant; older rows show
+ * their stored wall clock, labelled, never converted (zone unproven). */
+function AuditTime({ row }: { row: AuditLog }) {
+  const t = useT();
+  if (row.recorded_at_utc) {
+    return <span className="mono whitespace-nowrap text-[var(--muted)]">{formatBusinessDateTime(row.recorded_at_utc)}</span>;
+  }
+  return (
+    <span className="mono whitespace-nowrap text-[var(--muted)]" title={t("adjust.storedTimeTitle")}>
+      {formatStoredWallClock(row.created_at)} <span className="text-[var(--warning)]">{t("adjust.storedTime")}</span>
+    </span>
+  );
+}
 
 export function AuditView() {
   const { user } = useSession();
@@ -57,7 +71,7 @@ export function AuditView() {
   const rows = showAll ? filtered : filtered.slice(0, PAGE_LOCAL_CAP);
 
   const columns: Column<AuditLog>[] = [
-    { key: "when", header: t("audit.colWhen"), cell: (r) => <span className="mono text-[var(--muted)]">{formatIsoDate(r.created_at)}</span> },
+    { key: "when", header: t("audit.colWhen"), cell: (r) => <AuditTime row={r} /> },
     { key: "actor", header: t("audit.colActor"), cell: (r) => <span className="font-medium">{r.username ?? "—"}</span> },
     { key: "action", header: t("audit.colAction"), cell: (r) => <StatusBadge tone="neutral" label={auditActionText(t, r.action)} /> },
     {
@@ -110,7 +124,7 @@ export function AuditView() {
               badge: <StatusBadge tone="neutral" label={r.username ?? "—"} />,
               meta: (
                 <>
-                  <span className="mono">{formatIsoDate(r.created_at)}</span>
+                  <AuditTime row={r} />
                   <span>
                     {auditEntityText(t, r.table_name)}
                     {r.record_id != null ? ` #${r.record_id}` : ""}

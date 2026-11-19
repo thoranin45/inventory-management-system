@@ -195,7 +195,8 @@ def _build_detail_response(
         history=[
             AdjustmentRequestHistoryEntry(
                 action=row.action, actor=row.username or "system",
-                at=row.created_at, detail=row.description or "",
+                # an aware instant when the DB stamped one; naive legacy otherwise
+                at=row.recorded_at_utc or row.created_at, detail=row.description or "",
             )
             for row in history_rows
         ],

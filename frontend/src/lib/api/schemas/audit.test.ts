@@ -30,9 +30,9 @@ describe("auditLogListSchema", () => {
     expect(parsed[0].action).toBe("SOFT_DELETE_PRODUCT");
   });
 
-  it("only knows the seven non-sensitive columns — nothing password/token-shaped", () => {
+  it("only knows the eight non-sensitive columns — nothing password/token-shaped", () => {
     const keys = Object.keys(auditLogSchema.shape);
-    expect(keys.sort()).toEqual(["action", "created_at", "description", "id", "record_id", "table_name", "username"]);
+    expect(keys.sort()).toEqual(["action", "created_at", "description", "id", "record_id", "recorded_at_utc", "table_name", "username"]);
     for (const k of keys) expect(k).not.toMatch(/pass|hash|token|secret|authorization|jwt/i);
   });
 
