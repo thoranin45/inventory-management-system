@@ -84,8 +84,8 @@ describe("StockAdjustmentRequestList — R4", () => {
       );
       expect(screen.getAllByText("รออนุมัติ").length).toBeGreaterThan(0);
       expect(screen.getByText("ทั้งหมด")).toBeInTheDocument();
-      expect(screen.getByText("อนุมัติการปรับยอดสต๊อก")).toBeInTheDocument();
-      expect(screen.getAllByText("นับสต๊อกไม่ตรง").length).toBeGreaterThan(0);
+      expect(screen.getByText("อนุมัติการปรับยอดสต็อก")).toBeInTheDocument();
+      expect(screen.getAllByText("นับสต็อกไม่ตรง").length).toBeGreaterThan(0);
       expect(screen.getByRole("link", { name: "คำขอใหม่" })).toBeInTheDocument();
     } finally {
       vi.unstubAllGlobals();

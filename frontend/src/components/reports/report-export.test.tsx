@@ -28,7 +28,7 @@ describe("useReportExport", () => {
     await act(async () => {
       await result.current.run("/api/bff/reports/export/stock");
     });
-    expect(bffBinary).toHaveBeenCalledWith("/api/bff/reports/export/stock");
+    expect(bffBinary).toHaveBeenCalledWith("/api/bff/reports/export/stock?lang=en");
     expect(saveBlob).toHaveBeenCalledWith(expect.any(Blob), "stock_report.xlsx");
     expect(toast.success).toHaveBeenCalled();
   });
@@ -39,7 +39,7 @@ describe("useReportExport", () => {
     await act(async () => {
       await result.current.run("/api/bff/reports/export/low-stock", { threshold: "25" });
     });
-    expect(bffBinary).toHaveBeenCalledWith("/api/bff/reports/export/low-stock?threshold=25");
+    expect(bffBinary).toHaveBeenCalledWith("/api/bff/reports/export/low-stock?threshold=25&lang=en");
   });
 
   it("shows the 400 row-cap message with the Request ID and never saves a file", async () => {

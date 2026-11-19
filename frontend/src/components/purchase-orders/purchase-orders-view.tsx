@@ -47,9 +47,16 @@ export function PurchaseOrdersView() {
   );
 
   const { data, isLoading, isFetching, isError, error, refetch } = usePurchaseOrders(query);
-  const rows = data?.items ?? [];
+  const rows = React.useMemo(() => data?.items ?? [], [data]);
 
   const [selected, setSelected] = React.useState<PurchaseOrderRow | null>(null);
+  // The drawer shows the live list row once the list has it: a row synthesised
+  // right after a create (no customer/supplier name, zero totals) is replaced
+  // as soon as the refetch lands, and status changes flow in the same way.
+  const liveSelected = React.useMemo(
+    () => (selected ? (rows.find((r) => r.id === selected.id) ?? selected) : null),
+    [rows, selected],
+  );
   const [drawerOpen, setDrawerOpen] = React.useState(false);
   const [createOpen, setCreateOpen] = React.useState(false);
 
@@ -124,7 +131,7 @@ export function PurchaseOrdersView() {
       sortField: "created_at",
       secondary: true,
       cell: (r) => (
-        <span className="mono text-[var(--muted)]">
+        <span className="mono whitespace-nowrap text-[var(--muted)]">
           <LocalDate iso={r.created_at} isoInEnglish />
         </span>
       ),
@@ -213,7 +220,7 @@ export function PurchaseOrdersView() {
         })}
       />
 
-      <PurchaseOrderDetailDrawer row={selected} open={drawerOpen} onOpenChange={setDrawerOpen} role={user.role} />
+      <PurchaseOrderDetailDrawer row={liveSelected} open={drawerOpen} onOpenChange={setDrawerOpen} role={user.role} />
       {admin ? <CreatePurchaseOrderDrawer open={createOpen} onOpenChange={setCreateOpen} onCreated={onCreated} /> : null}
     </div>
   );

@@ -16,7 +16,7 @@ import { CameraBarcodeScanner } from "@/components/work/camera-barcode-scanner";
 import { useScanner } from "@/components/work/use-scanner";
 import { isApiError } from "@/lib/api/errors";
 import { compareDecimals, subtractDecimals, sumDecimals } from "@/lib/decimal";
-import { formatQtyDelta } from "@/lib/format";
+import { formatQtyDelta, shortReceiptRef } from "@/lib/format";
 import { useT } from "@/lib/i18n/client";
 import { resolveBarcode, useProductLookup } from "@/lib/query/sales";
 import { usePurchaseOrder, useReceivePurchaseOrder } from "@/lib/query/purchase-orders";
@@ -141,7 +141,7 @@ export function ReceivingConsole({ poId }: { poId: number }) {
           setReviewOpen(false);
           // replay-safe: dedupe by receipt_number so a re-submit doesn't double-list
           setSessionReceipts((prev) => addReceiptOnce(prev, data));
-          toast.success(t("receive.receiptRecorded", { ref: data.receipt_number.replace(/^POR-/, "").slice(0, 8) }), {
+          toast.success(t("receive.receiptRecorded", { ref: shortReceiptRef(data.receipt_number) }), {
             description: t(data.status === "RECEIVED" ? "receive.poFull" : "receive.poPartial"),
           });
           setHighlightPid(null);

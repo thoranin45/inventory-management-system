@@ -10,7 +10,7 @@ describe("console messages (D-R5-10)", () => {
     expect(englishConsoleMessage({ key: "fulfil.lineCountedPick", vars: { done: "2.000", of: "2.000" } })).toBe("✓ Picked +2.000 / 2.000");
     expect(
       englishConsoleMessage({ key: "fulfil.counted", vars: { name: { k: "fulfil.item" }, id: 8, done: "1.000", of: "2.000" } }),
-    ).toBe("Item counted — allocation 8 now 1.000 / 2.000.");
+    ).toBe("Item counted — now 1.000 / 2.000.");
     expect(englishConsoleMessage({ key: "fulfil.undoFailedRequest", vars: { id: "req-u" } })).toBe("Undo failed · Request req-u");
     expect(englishConsoleMessage({ key: "fulfil.everyLineDonePack" })).toBe("Every line is packed. Review and complete packing.");
   });

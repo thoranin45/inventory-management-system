@@ -86,7 +86,7 @@ export function TransferReceiveLine({
           <div className="text-[14px] font-semibold">{name}</div>
           <div className="mt-[3px] flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-[var(--muted)]">
             <span className="mono">{sku}</span>
-            <span className="mono">{batchId != null ? t("receive.batchFallback", { id: batchId }) : t("task.trackNone")}</span>
+            <span className="mono">{batchId != null ? (batchExpiry?.lot_no ?? t("receive.batchFallback", { id: batchId })) : t("task.trackNone")}</span>
             {batchExpiry && (batchExpiry.expiry_date || batchExpiry.days_to_expiry != null) ? (
               <ExpiryBadge days={batchExpiry.days_to_expiry} isoDate={batchExpiry.expiry_date} />
             ) : null}

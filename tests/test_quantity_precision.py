@@ -70,8 +70,10 @@ def test_fractional_dashboard_and_report_export(client, admin_headers, db_sessio
     assert response.status_code == 200
     workbook = load_workbook(BytesIO(response.content))
     row = next(r for r in workbook.active.iter_rows(min_row=2) if r[0].value == product["id"])
-    assert row[3].value == "1.125"
-    assert row[3].data_type == "s"
+    # A real spreadsheet number (SUM works), shown at three places.
+    assert row[3].value == 1.125
+    assert row[3].data_type == "n"
+    assert row[3].number_format == "#,##0.000"
 
 
 def test_boundary_quantity_report_and_excel_are_exact(client, admin_headers):
@@ -87,7 +89,9 @@ def test_boundary_quantity_report_and_excel_are_exact(client, admin_headers):
     response = client.get("/api/v1/reports/export/stock", headers=admin_headers)
     workbook = load_workbook(BytesIO(response.content))
     row = next(r for r in workbook.active.iter_rows(min_row=2) if r[0].value == product["id"])
+    # Beyond what a double holds exactly: kept as exact text, never rounded.
     assert row[3].value == "999999999999999.999"
+    assert row[3].data_type == "s"
 
 
 def test_excess_precision_request_leaves_inventory_untouched(client, admin_headers, db_session):

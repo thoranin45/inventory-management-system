@@ -337,7 +337,7 @@ describe("StockAdjustmentRequestDetailBody — R4", () => {
           <StockAdjustmentRequestDetailBody id={42} role="admin" currentUserId={1} />
         </LanguageProvider>,
       );
-      expect(screen.getByText("นับสต๊อกไม่ตรง")).toBeInTheDocument();
+      expect(screen.getByText("นับสต็อกไม่ตรง")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "อนุมัติ" })).toBeInTheDocument();
       expect(screen.getByText("สร้างคำขอปรับยอด")).toBeInTheDocument();
     } finally {

@@ -16,7 +16,7 @@ import { CameraBarcodeScanner } from "@/components/work/camera-barcode-scanner";
 import { useScanner } from "@/components/work/use-scanner";
 import { isApiError } from "@/lib/api/errors";
 import { compareDecimals, subtractDecimals, sumDecimals } from "@/lib/decimal";
-import { formatQtyDelta } from "@/lib/format";
+import { formatQtyDelta, shortReceiptRef } from "@/lib/format";
 import { useT } from "@/lib/i18n/client";
 import { resolveBarcode, useProductLookup } from "@/lib/query/sales";
 import { useBatchExpiryMap, useReceiveTransfer, useTransfer, useWarehouseNames } from "@/lib/query/transfers";
@@ -107,7 +107,11 @@ export function TransferReceivingConsole({ transferId }: { transferId: number })
         <div className="rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--surface)] p-6">
           <div className="flex items-center gap-2">
             <StatusBadge status={status} />
-            <span className="text-[13px] text-[var(--muted)]">{t("receive.transferNotReceivable", { number: detail.transfer_number })}</span>
+            <span className="text-[13px] text-[var(--muted)]">
+              {t(status === "COMPLETED" ? "receive.transferFullyReceived" : "receive.transferNotReceivable", {
+                number: detail.transfer_number,
+              })}
+            </span>
           </div>
           <Button asChild className="mt-4" variant="secondary">
             <Link href="/transfers">{t("receive.backToTransfers")}</Link>
@@ -149,7 +153,7 @@ export function TransferReceivingConsole({ transferId }: { transferId: number })
         onSuccess: (data) => {
           setReviewOpen(false);
           setSessionReceipts((prev) => addReceiptOnce(prev, data));
-          toast.success(t("receive.receiptRecorded", { ref: data.receipt_number.replace(/^TRR-/, "").slice(0, 8) }), {
+          toast.success(t("receive.receiptRecorded", { ref: shortReceiptRef(data.receipt_number) }), {
             description: t(data.transfer.status === "COMPLETED" ? "receive.transferFull" : "receive.transferPartial"),
           });
           setHighlightItemId(null);
@@ -302,7 +306,7 @@ export function TransferReceivingConsole({ transferId }: { transferId: number })
                     <div key={it.id} className="flex items-baseline justify-between gap-3">
                       <span className={bad ? "text-[var(--danger)]" : ""}>
                         {lookup[it.product_id]?.sku ?? `#${it.product_id}`}
-                        {it.batch_id != null ? ` · b#${it.batch_id}` : ""}
+                        {it.batch_id != null ? ` · ${batchExpiry[it.batch_id]?.lot_no ?? `b#${it.batch_id}`}` : ""}
                       </span>
                       <span className={bad ? "text-[var(--danger)]" : "font-medium"}>
                         {bad ? t("receive.invalid") : <QuantityDisplay value={q} />}
@@ -343,7 +347,7 @@ export function TransferReceivingConsole({ transferId }: { transferId: number })
                     {sessionReceipts.map((r) => (
                       <li key={r.receipt_number} className="py-[9px] text-[12px] first:pt-0 last:pb-0">
                         <div className="flex flex-wrap items-baseline justify-between gap-2">
-                          <span className="mono font-medium">{r.receipt_number}</span>
+                          <span className="mono font-medium" title={r.receipt_number}>{shortReceiptRef(r.receipt_number)}</span>
                           <StatusBadge status={r.transfer.status} />
                         </div>
                       </li>

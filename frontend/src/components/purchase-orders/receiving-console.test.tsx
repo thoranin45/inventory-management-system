@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { shortReceiptRef } from "@/lib/format";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
@@ -88,7 +89,7 @@ describe("ReceivingConsole — partial receive with a persisted Idempotency-Key"
     expect(args.idempotencyKey).toMatch(/^po-rcpt-/);
     expect(args.payload).toEqual({ items: [{ product_id: 3, quantity: "5.000" }] });
 
-    expect(await screen.findByText(purchaseOrderReceiveResponse.data.receipt_number)).toBeInTheDocument();
+    expect(await screen.findByText(shortReceiptRef(purchaseOrderReceiveResponse.data.receipt_number))).toBeInTheDocument();
     // draft cleared → Receive disabled again
     expect(reviewBtn()).toBeDisabled();
   });
@@ -247,7 +248,7 @@ describe("ReceivingConsole — characterization (R3.0)", () => {
     await user.type(sugarQty(), "5");
     await reviewAndConfirm(user); // the backend replays the same receipt
     expect(receiveMutate.mock.calls[1][0].idempotencyKey).not.toBe(k1);
-    const receipt = purchaseOrderReceiveResponse.data.receipt_number;
+    const receipt = shortReceiptRef(purchaseOrderReceiveResponse.data.receipt_number);
     expect(screen.getAllByText((_, el) => el?.textContent === receipt && el.children.length === 0)).toHaveLength(1);
   });
 

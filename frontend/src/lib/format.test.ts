@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatQty, formatQtyDelta, formatMoney, formatCount, agoFromIso, qtyScaleAnomaly } from "./format";
+import { formatQty, formatQtyDelta, formatMoney, formatCount, agoFromIso, qtyScaleAnomaly, shortReceiptRef } from "./format";
 import { sumDecimals, compareDecimals, isZero, ratio } from "./decimal";
 
 describe("formatQty — Concept B fixed 3-decimal inventory quantity, exact (D-R4-1)", () => {
@@ -102,5 +102,15 @@ describe("agoFromIso", () => {
     expect(agoFromIso("2026-09-08T02:00:00Z", now)).toBe("today");
     expect(agoFromIso("2026-09-07T12:00:00Z", now)).toBe("1d ago");
     expect(agoFromIso("2026-09-04T12:00:00Z", now)).toBe("4d ago");
+  });
+});
+
+describe("shortReceiptRef", () => {
+  it("shortens prefixed hex receipt numbers", () => {
+    expect(shortReceiptRef("POR-0123456789abcdef0123456789abcdef")).toBe("POR-01234567");
+    expect(shortReceiptRef("TRR-abcdef0123456789abcdef0123456789")).toBe("TRR-ABCDEF01");
+  });
+  it("leaves other values untouched", () => {
+    expect(shortReceiptRef("PO-2026-0001")).toBe("PO-2026-0001");
   });
 });

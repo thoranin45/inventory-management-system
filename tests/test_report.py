@@ -1,3 +1,4 @@
+import pytest
 import io
 from datetime import date, timedelta
 from decimal import Decimal
@@ -680,3 +681,27 @@ def test_export_expiring_report(
     assert worksheet["G1"].value == "Days Left"
 
     workbook.close()
+
+
+@pytest.mark.parametrize(
+    "path, first, qty_col",
+    [
+        ("export/stock", "รหัสสินค้า (ID)", "D1"),
+        ("export/sales", "เลขที่ใบสั่งขาย", None),
+        ("export/low-stock?threshold=10", "รหัสสินค้า (ID)", "D1"),
+        ("export/expiring", "รหัสล็อต (ID)", "D1"),
+    ],
+)
+def test_export_headers_follow_lang_th(client, admin_headers, path, first, qty_col):
+    sep = "&" if "?" in path else "?"
+    response = client.get(f"/api/v1/reports/{path}{sep}lang=th", headers=admin_headers)
+    assert response.status_code == 200
+    worksheet = load_workbook(io.BytesIO(response.content)).active
+    assert worksheet["A1"].value == first
+    if qty_col:
+        assert worksheet[qty_col].value in ("จำนวนคงเหลือ", "จำนวน")
+
+
+def test_export_rejects_unknown_lang(client, admin_headers):
+    response = client.get("/api/v1/reports/export/stock?lang=fr", headers=admin_headers)
+    assert response.status_code == 422

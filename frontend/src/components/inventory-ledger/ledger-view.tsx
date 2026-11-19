@@ -13,7 +13,7 @@ import { EmptyState } from "@/components/ui/states";
 import { useSession } from "@/components/session-provider";
 import { StockAdjustmentRequestDetailBody } from "@/components/stock-adjustments/request-detail";
 import { isAdmin } from "@/lib/auth/permissions";
-import { formatBusinessDateTime, formatSignedQty, formatStoredWallClock } from "@/lib/format";
+import { formatBusinessDateTime, formatSignedQty, formatStoredWallClock, shortReceiptRef } from "@/lib/format";
 import { useMediaQuery } from "@/lib/hooks/use-viewport";
 import { useInventoryLedger } from "@/lib/query/inventory-movements";
 import { useReportParams, type ReportParamKey } from "@/lib/reports/use-report-params";
@@ -205,7 +205,7 @@ export function InventoryLedgerView() {
       key: "product",
       header: t("reports.colProduct"),
       cell: (r) => (
-        <div>
+        <div className="min-w-[160px]">
           <div className="font-medium">
             {r.product.product_name ?? t("reports.productFallback", { id: r.product.id })}
             {r.product.is_active ? null : <Inactive />}
@@ -425,7 +425,7 @@ export function LedgerRowDetail({
           ) : (
             <span className="mono">{sourceLabelText(t, row)}</span>
           )}
-          {row.source.receipt_number ? <div className="mono text-[11px] text-[var(--faint)]">{row.source.receipt_number}</div> : null}
+          {row.source.receipt_number ? <div className="mono text-[11px] text-[var(--faint)]" title={row.source.receipt_number}>{shortReceiptRef(row.source.receipt_number)}</div> : null}
         </Row>
         {adj ? (
           <>

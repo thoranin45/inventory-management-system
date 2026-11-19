@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { shortReceiptRef } from "@/lib/format";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
@@ -88,7 +89,7 @@ describe("TransferReceivingConsole — receive with a persisted Idempotency-Key"
     expect(args.idempotencyKey).toMatch(/^tr-rcpt-/);
     expect(args.payload).toEqual({ items: [{ transfer_item_id: 2, quantity: "3.000" }] });
 
-    expect(await screen.findByText(transferReceiptResponse.receipt_number)).toBeInTheDocument();
+    expect(await screen.findByText(shortReceiptRef(transferReceiptResponse.receipt_number))).toBeInTheDocument();
     expect(receiveBtn()).toBeDisabled();
   });
 
@@ -158,7 +159,7 @@ describe("TransferReceivingConsole — expired in transit / not receivable", () 
   it("a COMPLETED transfer shows an info screen, not the console", () => {
     detail = { ...transferDetailResponse, status: "COMPLETED" };
     render(<TransferReceivingConsole transferId={1} />);
-    expect(screen.getByText(/not in transit — nothing to receive/i)).toBeInTheDocument();
+    expect(screen.getByText(/has been fully received/i)).toBeInTheDocument();
     expect(screen.queryByLabelText("Receive now")).toBeNull();
   });
 });
@@ -220,7 +221,7 @@ describe("TransferReceivingConsole — characterization (R3.0)", () => {
     await user.type(qty()[0], "2");
     await reviewAndConfirm(user);
     expect(receiveMutate.mock.calls[1][0].idempotencyKey).not.toBe(k1);
-    const receipt = transferReceiptResponse.receipt_number;
+    const receipt = shortReceiptRef(transferReceiptResponse.receipt_number);
     expect(screen.getAllByText((_, el) => el?.textContent === receipt && el.children.length === 0)).toHaveLength(1);
   });
 

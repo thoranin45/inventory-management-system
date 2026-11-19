@@ -76,6 +76,8 @@ export function useWarehouseNames(): { data: Record<number, string> | undefined;
 }
 
 export interface BatchExpiryInfo {
+  /** The lot number people know the batch by (null on legacy rows). */
+  lot_no?: string | null;
   expiry_date: string | null;
   days_to_expiry: number | null;
   is_expired: boolean;
@@ -107,6 +109,7 @@ export function useBatchExpiryMap(productIds: number[]) {
     for (const b of r.data ?? []) {
       if (b.batch_id != null) {
         map[b.batch_id] = {
+          lot_no: b.batch_lot_no ?? null,
           expiry_date: b.batch_expiry_date,
           days_to_expiry: b.days_to_expiry,
           is_expired: b.is_expired,

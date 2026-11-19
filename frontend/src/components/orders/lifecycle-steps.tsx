@@ -27,7 +27,8 @@ export function useStatusLabel() {
 
 /**
  * R5 shared order lifecycle (Concept B LifeSteps): one node per backend
- * status, vertical on phones and horizontal from 768 px. A node is never
+ * status, vertical in narrow containers (phones, the 400 px detail drawer) and
+ * horizontal once its container is at least 640 px wide. A node is never
  * colour-only — its icon SHAPE and a state word carry the state. CANCELLED is a
  * terminal branch shown as a single node instead of the pipeline.
  */
@@ -74,7 +75,8 @@ export function LifecycleSteps({
   }
 
   return (
-    <ol className={cn("flex flex-col min-[768px]:flex-row", className)} aria-label={t(ariaLabelKey)}>
+    <div className="@container">
+    <ol className={cn("flex flex-col @min-[640px]:flex-row", className)} aria-label={t(ariaLabelKey)}>
       {pipeline.map((step, i) => {
         let state: NodeState;
         if (currentIndex < 0) state = "upcoming";
@@ -87,8 +89,8 @@ export function LifecycleSteps({
         const last = i === pipeline.length - 1;
 
         return (
-          <li key={step} className="flex items-stretch gap-3 min-[768px]:flex-1 min-[768px]:flex-col min-[768px]:items-start min-[768px]:gap-2">
-            <div className="flex flex-col items-center min-[768px]:w-full min-[768px]:flex-row">
+          <li key={step} className="flex items-stretch gap-3 @min-[640px]:flex-1 @min-[640px]:flex-col @min-[640px]:items-start @min-[640px]:gap-2">
+            <div className="flex flex-col items-center @min-[640px]:w-full @min-[640px]:flex-row">
               <span
                 aria-hidden
                 className={cn(
@@ -105,13 +107,13 @@ export function LifecycleSteps({
                 <span
                   aria-hidden
                   className={cn(
-                    "w-px flex-1 min-[768px]:mx-1 min-[768px]:h-px min-[768px]:w-auto",
+                    "w-px flex-1 @min-[640px]:mx-1 @min-[640px]:h-px @min-[640px]:w-auto",
                     i < currentIndex ? "bg-[var(--success)]" : "bg-[var(--border)]",
                   )}
                 />
               ) : null}
             </div>
-            <div className={cn("min-w-0 pb-4 min-[768px]:pb-0 min-[768px]:pr-2", last && "pb-0")}>
+            <div className={cn("min-w-0 pb-4 @min-[640px]:pb-0 @min-[640px]:pr-2", last && "pb-0")}>
               <div
                 className={cn("text-[13px] font-medium", state === "upcoming" ? "text-[var(--faint)]" : "text-[var(--foreground)]")}
                 aria-current={state === "current" || state === "blocked" ? "step" : undefined}
@@ -124,5 +126,6 @@ export function LifecycleSteps({
         );
       })}
     </ol>
+    </div>
   );
 }

@@ -185,7 +185,7 @@ function TransferDetailBody({ row, onDone }: { row: TransferRow; onDone: () => v
                         <span className="mono text-[var(--muted)]">
                           {p?.sku ?? it.product_id}
                           {" · "}
-                          {it.batch_id != null ? t("reports.batchNo", { id: it.batch_id }) : t("reports.nonBatch")}
+                          {it.batch_id != null ? (be?.lot_no ?? t("reports.batchNo", { id: it.batch_id })) : t("reports.nonBatch")}
                         </span>
                       </div>
                       <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11.5px] text-[var(--muted)]">

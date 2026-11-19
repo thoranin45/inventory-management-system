@@ -24,6 +24,20 @@ beforeEach(() => {
 });
 
 describe("AuditView", () => {
+  it("shows Bangkok time for stamped rows and the labelled stored time for older rows (P11 B1)", () => {
+    useAuditLogs.mockReturnValue({
+      data: [
+        { ...ROWS[0], recorded_at_utc: "2026-11-19T01:05:00Z" },
+        { ...ROWS[1], recorded_at_utc: null },
+      ],
+      isLoading: false, isFetching: false, isError: false, refetch: vi.fn(),
+    });
+    render(<AuditView />);
+    expect(screen.getAllByText("2026-11-19 08:05").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/2026-09-09 09:00/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("(stored time)").length).toBeGreaterThan(0);
+  });
+
   it("renders the real (unpaginated) contract for an admin and says so", () => {
     render(<AuditView />);
     expect(screen.getByRole("heading", { name: "Audit log" })).toBeInTheDocument();

@@ -8,6 +8,7 @@ import { QuantityDisplay } from "@/components/ui/quantity-display";
 import { useRecentActivity } from "@/lib/query/hooks";
 import { agoFromIso } from "@/lib/format";
 import { useT } from "@/lib/i18n/client";
+import { movementTypeText } from "@/lib/reports/report-copy";
 
 /**
  * Nearest real backend source for the prototype's "Recent activity" band:
@@ -49,7 +50,7 @@ export function RecentActivity() {
               </span>
               <span className="flex min-w-0 flex-col leading-[1.35]">
                 <span className="text-[12.5px] font-semibold">
-                  {(tx.transaction_type ?? t("dashboard.movementFallback")).replace(/_/g, " ")}
+                  {tx.transaction_type ? movementTypeText(t, tx.transaction_type) : t("dashboard.movementFallback")}
                 </span>
                 <span className="truncate text-[11px] text-[var(--muted)]">
                   {tx.remark || t("dashboard.productFallback", { id: tx.product_id ?? "—" })}

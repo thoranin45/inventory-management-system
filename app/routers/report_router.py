@@ -57,6 +57,54 @@ def _xlsx_response(path: str, download_name: str) -> FileResponse:
     )
 
 
+# Spreadsheet column headers per language. ``lang`` is a display choice only;
+# the data and column order are identical in every language.
+_EXPORT_HEADERS = {
+    "stock": {
+        "en": ["Product ID", "SKU", "Product Name", "Stock Qty", "Price", "Stock Value"],
+        "th": ["รหัสสินค้า (ID)", "SKU", "ชื่อสินค้า", "จำนวนคงเหลือ", "ราคาต่อหน่วย", "มูลค่าสต็อก"],
+    },
+    "sales": {
+        "en": ["SO Number", "Customer ID", "Status", "Total Amount", "Created At"],
+        "th": ["เลขที่ใบสั่งขาย", "รหัสลูกค้า (ID)", "สถานะ", "ยอดรวม", "สร้างเมื่อ"],
+    },
+    "low-stock": {
+        "en": ["Product ID", "SKU", "Product Name", "Stock Qty", "Threshold"],
+        "th": ["รหัสสินค้า (ID)", "SKU", "ชื่อสินค้า", "จำนวนคงเหลือ", "เกณฑ์สต็อกต่ำ"],
+    },
+    "expiring": {
+        "en": ["Batch ID", "Product ID", "Lot No", "Quantity", "MFG Date", "Expiry Date", "Days Left"],
+        "th": ["รหัสล็อต (ID)", "รหัสสินค้า (ID)", "เลขล็อต", "จำนวน", "วันผลิต", "วันหมดอายุ", "เหลืออีก (วัน)"],
+    },
+}
+_QTY_FORMAT = "#,##0.000"
+_MONEY_FORMAT = "#,##0.00"
+
+
+def _headers(report: str, lang: str) -> list[str]:
+    return _EXPORT_HEADERS[report]["th" if lang == "th" else "en"]
+
+
+def _qty_cell(value: Decimal):
+    """A quantity as a real spreadsheet number when a double holds it exactly
+    at three places (every realistic quantity), else as exact text — Excel
+    keeps only ~15 significant digits and must never show a rounded stock."""
+    text = quantity_text(value)
+    as_float = float(text)
+    if Decimal(repr(as_float)).quantize(Decimal("0.001")) == Decimal(text):
+        return as_float
+    return text
+
+
+def _format_columns(ws, formats: dict[int, str]) -> None:
+    """Apply number formats to data rows (1-based column -> format)."""
+    for row in ws.iter_rows(min_row=2):
+        for col, fmt in formats.items():
+            cell = row[col - 1]
+            if isinstance(cell.value, (int, float)):
+                cell.number_format = fmt
+
+
 def _report_page(items, total, params, message):
     import math
     return {
@@ -256,6 +304,7 @@ def in_transit_stock_report(db: Session = Depends(get_db)):
 @router.get("/low-stock")
 def low_stock_report(
     threshold: Decimal = Decimal("10.000"),
+    lang: str = Query("en", pattern="^(en|th)$"),
     db: Session = Depends(get_db)
 ):
     products = db.query(Product).filter(
@@ -277,6 +326,7 @@ def low_stock_report(
 @router.get("/expiring")
 def expiring_report(
     days: int = 90,
+    lang: str = Query("en", pattern="^(en|th)$"),
     db: Session = Depends(get_db)
 ):
     today = business_today()
@@ -425,6 +475,7 @@ def transfers_report(
 
 @router.get("/export/stock")
 def export_stock_report(
+    lang: str = Query("en", pattern="^(en|th)$"),
     db: Session = Depends(get_db)
 ):
     base = db.query(Product).filter(Product.is_active == True)
@@ -435,22 +486,24 @@ def export_stock_report(
     wb = Workbook()
     ws = wb.active
     ws.title = "Stock Report"
-    ws.append(["Product ID", "SKU", "Product Name", "Stock Qty", "Price", "Stock Value"])
+    ws.append(_headers("stock", lang))
     for p in products:
         ws.append([
             p.id,
             p.sku,
             p.product_name,
-            quantity_text(p.stock_qty),
+            _qty_cell(p.stock_qty),
             float(p.price),
             float(p.price * p.stock_qty),
         ])
+    _format_columns(ws, {4: _QTY_FORMAT, 5: _MONEY_FORMAT, 6: _MONEY_FORMAT})
     wb.save(file_path)
     return _xlsx_response(file_path, "stock_report.xlsx")
 
 
 @router.get("/export/sales")
 def export_sales_report(
+    lang: str = Query("en", pattern="^(en|th)$"),
     db: Session = Depends(get_db)
 ):
     base = db.query(SalesOrder)
@@ -461,7 +514,7 @@ def export_sales_report(
     wb = Workbook()
     ws = wb.active
     ws.title = "Sales Report"
-    ws.append(["SO Number", "Customer ID", "Status", "Total Amount", "Created At"])
+    ws.append(_headers("sales", lang))
     for so in orders:
         ws.append([
             so.so_number,
@@ -470,6 +523,7 @@ def export_sales_report(
             float(so.total_amount),
             str(so.created_at),
         ])
+    _format_columns(ws, {4: _MONEY_FORMAT})
     wb.save(file_path)
     return _xlsx_response(file_path, "sales_report.xlsx")
 
@@ -477,6 +531,7 @@ def export_sales_report(
 @router.get("/export/low-stock")
 def export_low_stock_report(
     threshold: Decimal = Decimal("10.000"),
+    lang: str = Query("en", pattern="^(en|th)$"),
     db: Session = Depends(get_db)
 ):
     base = db.query(Product).filter(
@@ -490,15 +545,16 @@ def export_low_stock_report(
     wb = Workbook()
     ws = wb.active
     ws.title = "Low Stock Report"
-    ws.append(["Product ID", "SKU", "Product Name", "Stock Qty", "Threshold"])
+    ws.append(_headers("low-stock", lang))
     for p in products:
         ws.append([
             p.id,
             p.sku,
             p.product_name,
-            quantity_text(p.stock_qty),
-            format(threshold, "f"),
+            _qty_cell(p.stock_qty),
+            float(threshold),
         ])
+    _format_columns(ws, {4: _QTY_FORMAT, 5: _QTY_FORMAT})
     wb.save(file_path)
     return _xlsx_response(file_path, "low_stock_report.xlsx")
 
@@ -506,6 +562,7 @@ def export_low_stock_report(
 @router.get("/export/expiring")
 def export_expiring_report(
     days: int = 90,
+    lang: str = Query("en", pattern="^(en|th)$"),
     db: Session = Depends(get_db)
 ):
     today = business_today()
@@ -523,19 +580,17 @@ def export_expiring_report(
     wb = Workbook()
     ws = wb.active
     ws.title = "Expiring Report"
-    ws.append([
-        "Batch ID", "Product ID", "Lot No", "Quantity",
-        "MFG Date", "Expiry Date", "Days Left",
-    ])
+    ws.append(_headers("expiring", lang))
     for b in batches:
         ws.append([
             b.id,
             b.product_id,
             b.lot_no,
-            quantity_text(b.quantity),
+            _qty_cell(b.quantity),
             str(b.mfg_date),
             str(b.expiry_date),
             (b.expiry_date - today).days,
         ])
+    _format_columns(ws, {4: _QTY_FORMAT})
     wb.save(file_path)
     return _xlsx_response(file_path, "expiring_report.xlsx")

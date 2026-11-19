@@ -737,6 +737,10 @@ class AuditLog(Base):
         server_default=func.now()
     )
 
+    # P11 B1 (ee1a00000001): database-stamped instant for every new row;
+    # NULL on pre-revision history, whose naive created_at zone is unproven.
+    recorded_at_utc = Column(DateTime(timezone=True), server_default=func.now())
+
 class Customer(Base):
     __tablename__ = "customers"
 

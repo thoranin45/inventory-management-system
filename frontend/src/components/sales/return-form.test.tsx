@@ -137,7 +137,7 @@ describe("ReturnDrawer", () => {
     expect(screen.getAllByText(/Ordered/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Shipped/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Already returned/).length).toBe(2);
-    expect(screen.getAllByText(/unknown until you submit/i).length).toBe(2);
+    expect(screen.getAllByText(/checked when you submit/i).length).toBe(2);
     expect(screen.getAllByText(/Remaining returnable/).length).toBe(2);
   });
 
@@ -193,7 +193,7 @@ describe("ReturnDrawer", () => {
     expect(screen.getByText(/total returned/i)).toBeInTheDocument();
     // the "already returned" cell for that line now shows a real number
     const teaCard = screen.getByText("Green Tea 200g").closest("div")!.parentElement as HTMLElement;
-    expect(within(teaCard).queryByText(/unknown until you submit/i)).not.toBeInTheDocument();
+    expect(within(teaCard).queryByText(/checked when you submit/i)).not.toBeInTheDocument();
   });
 });
 
