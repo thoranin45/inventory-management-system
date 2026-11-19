@@ -107,13 +107,13 @@ export const STOCK_OUT_STRATEGY_LABELS: Record<
 > = {
   fifo: {
     labelTh: "เข้าก่อน ออกก่อน (FIFO)",
-    subTh: "ตัดสต๊อกที่รับเข้าคลังก่อนออกก่อน",
+    subTh: "ตัดสต็อกที่รับเข้าคลังก่อนออกก่อน",
     label: "First In, First Out (FIFO)",
     sub: "Issues the oldest-received stock first.",
   },
   fefo: {
     labelTh: "หมดอายุก่อน ออกก่อน (FEFO)",
-    subTh: "ตัดสต๊อกที่ใกล้วันหมดอายุก่อนออกก่อน",
+    subTh: "ตัดสต็อกที่ใกล้วันหมดอายุก่อนออกก่อน",
     label: "First Expired, First Out (FEFO)",
     sub: "Issues the stock closest to its expiry date first.",
   },

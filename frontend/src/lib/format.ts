@@ -148,3 +148,12 @@ export function formatBusinessDateTime(iso: string | null | undefined): string {
   const parts = Object.fromEntries(BUSINESS_DATE_TIME.formatToParts(date).map((p) => [p.type, p.value]));
   return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`;
 }
+
+/**
+ * Receipt numbers are `<PREFIX>-<32 hex>` (e.g. POR-…, TRR-…). Show the prefix
+ * plus the first 8 hex chars; callers keep the full value in a `title`.
+ */
+export function shortReceiptRef(receiptNumber: string): string {
+  const m = /^([A-Z]+)-([0-9a-f]{9,})$/i.exec(receiptNumber);
+  return m ? `${m[1]}-${m[2].slice(0, 8).toUpperCase()}` : receiptNumber;
+}

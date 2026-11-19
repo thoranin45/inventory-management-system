@@ -27,7 +27,7 @@ export const BATCH_REASON_CODES = [...REASON_CODES, "EXPIRY_WRITE_OFF"] as const
 export type ReasonCode = (typeof BATCH_REASON_CODES)[number];
 
 export const REASON_LABELS: Record<ReasonCode, { labelTh: string; label: string }> = {
-  CYCLE_COUNT_VARIANCE: { labelTh: "นับสต๊อกไม่ตรง", label: "Cycle count variance" },
+  CYCLE_COUNT_VARIANCE: { labelTh: "นับสต็อกไม่ตรง", label: "Cycle count variance" },
   DAMAGE: { labelTh: "สินค้าเสียหาย", label: "Damage" },
   LOSS_THEFT: { labelTh: "สูญหาย/ถูกขโมย", label: "Loss or theft" },
   SYSTEM_ERROR_CORRECTION: { labelTh: "แก้ไขข้อผิดพลาดระบบ", label: "System error correction" },

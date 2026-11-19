@@ -24,7 +24,7 @@ import {
   transfersReportEnvelope,
 } from "@/lib/api/schemas/reports";
 import { queryKeys } from "./keys";
-import { useT } from "@/lib/i18n/client";
+import { useI18n } from "@/lib/i18n/client";
 import { reportErrorText } from "@/lib/reports/report-copy";
 
 type Query = Record<string, string | number | boolean | undefined | null>;
@@ -79,16 +79,18 @@ export interface ExportState {
  * row-cap message and any Request ID.
  */
 export function useReportExport(): ExportState {
-  const t = useT();
+  const { t, locale } = useI18n();
   const [running, setRunning] = React.useState(false);
 
   const run = React.useCallback(async (path: string, query?: Query) => {
     setRunning(true);
     const toastId = toast.loading(t("reports.preparingWorkbook"));
     try {
-      const { blob, filename } = await bffBinary(
-        path + (query ? "?" + new URLSearchParams(Object.entries(query).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)])).toString() : ""),
+      // the workbook's column headers follow the UI language
+      const params = new URLSearchParams(
+        Object.entries({ ...query, lang: locale }).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)]),
       );
+      const { blob, filename } = await bffBinary(`${path}?${params.toString()}`);
       saveBlob(blob, filename ?? "report.xlsx");
       toast.success(t("reports.workbookDownloaded"), { id: toastId, description: filename });
     } catch (error) {
@@ -101,7 +103,7 @@ export function useReportExport(): ExportState {
     } finally {
       setRunning(false);
     }
-  }, [t]);
+  }, [t, locale]);
 
   return { running, run };
 }

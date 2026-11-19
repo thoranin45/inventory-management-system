@@ -57,6 +57,13 @@ export function SalesView() {
   }, [data, clientOnly]);
 
   const [selected, setSelected] = React.useState<SalesOrderRow | null>(null);
+  // The drawer shows the live list row once the list has it: a row synthesised
+  // right after a create (no customer/supplier name, zero totals) is replaced
+  // as soon as the refetch lands, and status changes flow in the same way.
+  const liveSelected = React.useMemo(
+    () => (selected ? (rows.find((r) => r.id === selected.id) ?? selected) : null),
+    [rows, selected],
+  );
   const [drawerOpen, setDrawerOpen] = React.useState(false);
   const [createOpen, setCreateOpen] = React.useState(false);
 
@@ -140,7 +147,7 @@ export function SalesView() {
       sortField: "created_at",
       secondary: true,
       cell: (r) => (
-        <span className="mono text-[var(--muted)]">
+        <span className="mono whitespace-nowrap text-[var(--muted)]">
           <LocalDate iso={r.created_at} isoInEnglish />
         </span>
       ),
@@ -236,7 +243,7 @@ export function SalesView() {
         })}
       />
 
-      <SalesDetailDrawer row={selected} open={drawerOpen} onOpenChange={setDrawerOpen} role={user.role} />
+      <SalesDetailDrawer row={liveSelected} open={drawerOpen} onOpenChange={setDrawerOpen} role={user.role} />
       {admin ? <CreateSalesOrderDrawer open={createOpen} onOpenChange={setCreateOpen} onCreated={onCreated} /> : null}
     </div>
   );

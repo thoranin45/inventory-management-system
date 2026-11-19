@@ -4,6 +4,7 @@ import * as React from "react";
 
 import { QuantityDisplay } from "@/components/ui/quantity-display";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { shortReceiptRef } from "@/lib/format";
 import { useT } from "@/lib/i18n/client";
 import type { ProductLite } from "@/lib/query/sales";
 import type { PurchaseOrderReceiveResult } from "@/lib/api/schemas/purchase-orders";
@@ -41,7 +42,7 @@ export function ReceiptHistory({
             {sessionReceipts.map((r) => (
               <li key={r.receipt_number} className="py-[9px] text-[12px] first:pt-0 last:pb-0">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <span className="mono font-medium">{r.receipt_number}</span>
+                  <span className="mono font-medium" title={r.receipt_number}>{shortReceiptRef(r.receipt_number)}</span>
                   <StatusBadge status={r.status} />
                 </div>
                 <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[12px] text-[var(--muted)]">

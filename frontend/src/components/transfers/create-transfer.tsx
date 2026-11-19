@@ -20,6 +20,15 @@ import type { Warehouse } from "@/lib/api/schemas/warehouses";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n/client";
 import { transferFormText } from "@/lib/transfer-copy";
+import type { ApiError } from "@/lib/api/errors";
+
+/** Server refusals that have a translated wording; anything else keeps the server's user message. */
+const TRANSFER_API_KEYS = { "Batch is required for this product": "transfers.errBatchRequired" } as const;
+
+function transferApiText(t: ReturnType<typeof useT>, error: ApiError): string {
+  const key = TRANSFER_API_KEYS[error.message as keyof typeof TRANSFER_API_KEYS];
+  return key ? t(key) : error.userMessage;
+}
 
 type FormValues = CreateTransferInput;
 const EMPTY_LINE = { product_id: 0, batch_id: null as number | null, from_location_id: 0, to_location_id: 0, quantity: "" };
@@ -77,6 +86,7 @@ function TransferLine({
   register,
   onProduct,
   onBatch,
+  onBatchTracked,
   onRemove,
   canRemove,
   errors,
@@ -88,6 +98,8 @@ function TransferLine({
   register: UseFormRegister<FormValues>;
   onProduct: (index: number, item: ComboboxItem | null) => void;
   onBatch: (index: number, batchId: number | null) => void;
+  /** Tells the form whether this line's product needs a lot picked. */
+  onBatchTracked: (index: number, tracked: boolean) => void;
   onRemove: () => void;
   canRemove: boolean;
   errors: { product_id?: string; batch_id?: string; quantity?: string; from_location_id?: string };
@@ -117,6 +129,9 @@ function TransferLine({
   );
   const usable = atSource.filter((b) => compareDecimals(b.available_qty, "0") > 0 || b.is_expired);
   const isBatchTracked = atSource.some((b) => b.batch_id != null);
+  React.useEffect(() => {
+    onBatchTracked(index, isBatchTracked);
+  }, [index, isBatchTracked, onBatchTracked]);
   const chosen = batchId != null ? atSource.find((b) => b.batch_id === batchId) : atSource.find((b) => b.batch_id == null);
   const avail = chosen?.available_qty ?? "0";
 
@@ -161,7 +176,7 @@ function TransferLine({
                 <option value="">{t("transfers.chooseBatch")}</option>
                 {usable.map((b) => (
                   <option key={b.id} value={b.batch_id ?? ""} disabled={b.is_expired}>
-                    {t("reports.batchNo", { id: b.batch_id ?? "" })}
+                    {b.batch_lot_no ?? t("reports.batchNo", { id: b.batch_id ?? "" })}
                     {b.batch_expiry_date ? ` · ${t("transfers.expShort", { date: b.batch_expiry_date })}` : ""}
                     {` · ${b.is_expired ? t("transfers.expiredCannotDispatch") : t("transfers.availShort", { qty: b.available_qty })}`}
                   </option>
@@ -230,6 +245,7 @@ function CreateForm({ onClose, onCreated }: { onClose: () => void; onCreated: (d
     register,
     handleSubmit,
     setValue,
+    setError,
     reset,
     formState: { errors },
   } = useForm<FormValues>({
@@ -252,7 +268,15 @@ function CreateForm({ onClose, onCreated }: { onClose: () => void; onCreated: (d
     setValue("destination_warehouse_id", p?.warehouse_id ?? 0, { shouldValidate: true });
     fields.forEach((_, i) => setValue(`items.${i}.to_location_id`, p?.location_id ?? 0));
   };
+  // Which lines hold a lot-tracked product (reported by each line), so a
+  // missing lot is caught here instead of as a server error after submit.
+  const [batchTracked, setBatchTracked] = React.useState<Record<number, boolean>>({});
+  const reportBatchTracked = React.useCallback((index: number, tracked: boolean) => {
+    setBatchTracked((m) => (m[index] === tracked ? m : { ...m, [index]: tracked }));
+  }, []);
+
   const pickProduct = (index: number, item: ComboboxItem | null) => {
+    create.reset();
     setProductLabels((m) => ({ ...m, [index]: item }));
     setValue(`items.${index}.product_id`, item?.id ?? 0, { shouldValidate: true });
     setValue(`items.${index}.batch_id`, null);
@@ -260,12 +284,22 @@ function CreateForm({ onClose, onCreated }: { onClose: () => void; onCreated: (d
     setValue(`items.${index}.to_location_id`, dest?.location_id ?? 0);
   };
   const pickBatch = (index: number, batchId: number | null) => {
+    create.reset();
     setValue(`items.${index}.batch_id`, batchId, { shouldValidate: true });
   };
 
   const rootItemsError = errors.items?.root?.message ?? errors.items?.message;
 
   const onSubmit = (values: FormValues) => {
+    const missingLot = values.items
+      .map((it, i) => (batchTracked[i] && it.batch_id == null ? i : -1))
+      .filter((i) => i >= 0);
+    if (missingLot.length) {
+      missingLot.forEach((i) =>
+        setError(`items.${i}.batch_id`, { type: "manual", message: t("transfers.errBatchRequired") }),
+      );
+      return;
+    }
     create.mutate(values, {
       onSuccess: (data) => {
         toast.success(t("transfers.createdToast", { number: data.transfer_number }), {
@@ -278,7 +312,7 @@ function CreateForm({ onClose, onCreated }: { onClose: () => void; onCreated: (d
         onCreated(data);
       },
       onError: (error) => {
-        const msg = isApiError(error) ? error.userMessage : t("transfers.couldNotCreate");
+        const msg = isApiError(error) ? transferApiText(t, error) : t("transfers.couldNotCreate");
         const rid = isApiError(error) ? error.requestId : undefined;
         toast.error(t("transfers.createFailed"), {
           description: rid ? t("reports.requestSuffix", { message: msg, id: rid }) : msg,
@@ -343,6 +377,7 @@ function CreateForm({ onClose, onCreated }: { onClose: () => void; onCreated: (d
             register={register}
             onProduct={pickProduct}
             onBatch={pickBatch}
+            onBatchTracked={reportBatchTracked}
             onRemove={() => {
               remove(i);
               setProductLabels((m) => {
@@ -385,7 +420,7 @@ function CreateForm({ onClose, onCreated }: { onClose: () => void; onCreated: (d
       ) : null}
       {apiErr ? (
         <p role="alert" className="rounded-[var(--r-sm)] bg-[var(--danger-subtle)] p-2 text-[12px] text-[var(--danger)]">
-          {apiErr.userMessage}
+          {transferApiText(t, apiErr)}
           {apiErr.requestId ? (
             <span className="mt-1 block text-[11px] text-[var(--muted)]">
               {t("common.requestId")} <span className="mono select-all">{apiErr.requestId}</span>
