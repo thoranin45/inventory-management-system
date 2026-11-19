@@ -3,15 +3,15 @@
 import * as React from "react";
 import { keepPreviousData, useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
+import { useSession } from "@/components/session-provider";
 import { bffJson } from "@/lib/api/browser";
 import {
   attentionSummaryEnvelope,
   dashboardSummaryEnvelope,
-  recentTransactionsEnvelope,
   type AttentionSummary,
   type DashboardSummary,
-  type RecentTransaction,
 } from "@/lib/api/schemas/dashboard";
+import { ledgerEnvelope, type LedgerItem } from "@/lib/api/schemas/inventory-movements";
 import { searchResponseEnvelope, type SearchResponse } from "@/lib/api/schemas/search";
 import { productListEnvelope, type ProductListEnvelope } from "@/lib/api/schemas/products";
 import { stockBalanceListEnvelope, type StockBalanceListEnvelope } from "@/lib/api/schemas/stock";
@@ -49,15 +49,31 @@ export function useAttentionSummary() {
   });
 }
 
+/** Rows the dashboard's Recent activity shows. */
+export const RECENT_ACTIVITY_LIMIT = 8;
+
+/**
+ * UI-1 — the dashboard's Recent activity: the newest inventory ledger rows,
+ * in the ledger page's own order (chronological, transit legs hidden), so
+ * each row carries its product, lot and source document. Every
+ * stock-changing mutation already invalidates `queryKeys.recentActivity`;
+ * the viewer id is part of the key because ledger rows are redacted per user.
+ */
 export function useRecentActivity() {
-  return useQuery<RecentTransaction[]>({
-    queryKey: queryKeys.recentActivity,
+  const { user } = useSession();
+  return useQuery<LedgerItem[]>({
+    queryKey: [...queryKeys.recentActivity, String(user.id)],
     queryFn: async ({ signal }) => {
-      const env = await bffJson(
-        "/api/bff/dashboard/recent-transactions",
-        recentTransactionsEnvelope,
-        { signal },
-      );
+      const env = await bffJson("/api/bff/inventory-movements", ledgerEnvelope, {
+        query: {
+          page: 1,
+          page_size: RECENT_ACTIVITY_LIMIT,
+          sort_order: "desc",
+          order_mode: "chronological",
+          include_transit: false,
+        },
+        signal,
+      });
       return env.data.items;
     },
     staleTime: 30_000,

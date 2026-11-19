@@ -9,6 +9,7 @@ import { DataTable, type Column } from "@/components/ui/data-table";
 import { Drawer, DrawerContent } from "@/components/ui/drawer";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
+import { SignedQuantity } from "@/components/ui/signed-quantity";
 import { EmptyState } from "@/components/ui/states";
 import { useSession } from "@/components/session-provider";
 import { StockAdjustmentRequestDetailBody } from "@/components/stock-adjustments/request-detail";
@@ -45,21 +46,6 @@ export const LEDGER_KEYS: readonly ReportParamKey[] = [
   "include_transit",
   "actor",
 ];
-
-/** Signed quantity at full backend precision; colour is never the only cue (sign is explicit). */
-export function SignedQuantity({ value, className }: { value: string; className?: string }) {
-  const neg = value.trim().startsWith("-");
-  const zero = /^-?[0.]+$/.test(value.trim());
-  return (
-    <span
-      className={`mono tabular-nums font-semibold ${zero ? "" : neg ? "text-[var(--danger)]" : "text-[var(--success)]"} ${className ?? ""}`}
-      data-raw={value}
-      title={value}
-    >
-      {formatSignedQty(value)}
-    </span>
-  );
-}
 
 /**
  * Business time of a movement. Only a VERIFIED row (storage zone proven) is

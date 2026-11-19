@@ -87,18 +87,6 @@ export function formatIsoDate(iso: string | null | undefined): string {
   return iso.slice(0, 10);
 }
 
-/** Relative day label used by Recent activity ("today", "1d ago", …). */
-export function agoFromIso(iso: string | null | undefined, nowIso?: string): string {
-  if (!iso) return "";
-  const then = new Date(iso).getTime();
-  const now = nowIso ? new Date(nowIso).getTime() : Date.now();
-  if (Number.isNaN(then) || Number.isNaN(now)) return "";
-  const days = Math.round((now - then) / 86_400_000);
-  if (days <= 0) return "today";
-  if (days === 1) return "1d ago";
-  return `${days}d ago`;
-}
-
 /**
  * Phase 14C — a ledger quantity with its sign and EXACT backend precision
  * ("-0.005" → "−0.005", "12.000" → "+12.000"). Pure string handling: the
