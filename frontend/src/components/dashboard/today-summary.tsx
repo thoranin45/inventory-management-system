@@ -21,7 +21,7 @@ export function TodaySummary({ data }: { data: DashboardSummary }) {
   return (
     <Panel className="wc-summary">
       <PanelHead title={t("dashboard.summaryTitle")} />
-      <div className="p-[18px]">
+      <div className="wc-panel-scroll p-[18px]">
         <div className="flex flex-col">
           {rows.map(([label, value]) => (
             <div

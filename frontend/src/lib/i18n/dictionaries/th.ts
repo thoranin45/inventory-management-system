@@ -84,6 +84,7 @@ export const th: Dictionary = {
     skipToContent: "ข้ามไปยังเนื้อหาหลัก",
     navigation: "การนำทาง",
     expandMenu: "เปิดเมนูทั้งหมด",
+    collapseMenu: "ย่อเมนู",
     breadcrumb: "เส้นทางนำทาง",
     notifications: "การแจ้งเตือน (ยังไม่เปิดใช้งาน)",
     openPalette: "เปิดหน้าต่างค้นหาคำสั่ง",

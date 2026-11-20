@@ -110,7 +110,7 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
             value={query}
             onValueChange={setQuery}
             placeholder={t("palette.placeholder")}
-            className="h-12 flex-1 bg-transparent text-[14px] text-[var(--foreground)] outline-hidden placeholder:text-[var(--faint)]"
+            className="h-12 flex-1 bg-transparent text-[14px] text-[var(--foreground)] wc-bare-input outline-hidden placeholder:text-[var(--faint)]"
           />
           <kbd className="rounded-[var(--r-sm)] border border-[var(--border-strong)] px-[6px] py-[1px] text-[11px] text-[var(--muted)]">
             Esc

@@ -33,7 +33,7 @@ export function InventoryCondition({ data }: { data: DashboardSummary }) {
   return (
     <Panel className="wc-condition">
       <PanelHead title={t("dashboard.conditionTitle")} aside={t("dashboard.ownedAside", { qty: formatQty(owned) })} />
-      <div className="p-[18px]">
+      <div className="wc-panel-scroll p-[18px]">
         {hasStock ? (
           <>
             <div className="flex h-7 overflow-hidden rounded-[var(--r-sm)] border border-[var(--border)]">

@@ -108,7 +108,7 @@ export function RecentActivity() {
           {t("dashboard.activityEmpty")}
         </div>
       ) : (
-        <>
+        <div className="wc-panel-scroll">
           <table className="wc-act-table">
             <thead>
               <tr>
@@ -184,7 +184,7 @@ export function RecentActivity() {
               );
             })}
           </ul>
-        </>
+        </div>
       )}
     </Panel>
   );

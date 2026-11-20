@@ -64,9 +64,9 @@ export function NeedsAttention({
   const lowStock = attention?.low_operational_stock ?? 0;
 
   return (
-    <Panel className="flex flex-col">
+    <Panel className="wc-attention flex flex-col">
       <PanelHead title={t("dashboard.attentionTitle")} />
-      <div className="flex flex-1 flex-col justify-between">
+      <div className="wc-panel-scroll flex flex-1 flex-col justify-between">
         <AttnRow
           severity={lowStock ? "warning" : "ok"}
           name={t("dashboard.lowStock")}

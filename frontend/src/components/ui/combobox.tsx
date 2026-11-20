@@ -102,7 +102,7 @@ export function Combobox({
           <ChevronsUpDown aria-hidden className="h-4 w-4 flex-none text-[var(--muted)]" />
         </button>
       ) : (
-        <div className="flex items-center gap-2 rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 focus-within:outline-2 focus-within:outline-[var(--focus)]">
+        <div className="wc-field flex items-center gap-2 rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--surface)] px-3">
           <Search aria-hidden className="h-4 w-4 flex-none text-[var(--muted)]" />
           <input
             id={id}
@@ -125,7 +125,7 @@ export function Combobox({
               onSearch(term);
             }}
             onKeyDown={onKeyDown}
-            className="min-h-11 w-full bg-transparent py-2 text-[13px] outline-none"
+            className="wc-bare-input min-h-11 w-full bg-transparent py-2 text-[13px] outline-none"
           />
           {loading ? <Loader2 aria-hidden className="h-4 w-4 flex-none animate-spin text-[var(--muted)] motion-reduce:animate-none" /> : null}
         </div>

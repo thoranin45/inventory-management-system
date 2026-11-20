@@ -60,7 +60,7 @@ export function OperationalQueues({ data }: { data: DashboardSummary }) {
   return (
     <Panel className="wc-queues">
       <PanelHead title={t("dashboard.queuesTitle")} aside={t("dashboard.activeAside", { n: active })} />
-      <div className="flex flex-col">
+      <div className="wc-panel-scroll flex flex-col">
         <QueueRow icon={PackageSearch} name={t("dashboard.picking")} desc={t("dashboard.pickingDesc")} count={s.PICKING} href="/picking" />
         <QueueRow icon={ClipboardCheck} name={t("dashboard.packing")} desc={t("dashboard.packingDesc")} count={s.PACKING} href="/packing" />
         <QueueRow icon={Truck} name={t("dashboard.readyToShip")} desc={t("dashboard.readyToShipDesc")} count={s.READY_TO_SHIP} href="/sales" />
