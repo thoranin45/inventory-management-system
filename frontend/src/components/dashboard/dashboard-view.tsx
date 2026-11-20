@@ -51,19 +51,19 @@ export function DashboardView() {
       ) : summary.isError ? (
         <ErrorState error={summary.error} onRetry={() => void summary.refetch()} />
       ) : summary.data ? (
-        <>
+        <div className="wc-dash-body">
           <section className="wc-work-zone">
             <OperationalQueues data={summary.data} />
             <NeedsAttention dashboard={summary.data} attention={attention.data} />
+            <ExpiryHorizon />
           </section>
 
           <section className="wc-lower-zone">
             <RecentActivity />
-            <ExpiryHorizon />
             <InventoryCondition data={summary.data} />
             <TodaySummary data={summary.data} />
           </section>
-        </>
+        </div>
       ) : null}
     </div>
   );

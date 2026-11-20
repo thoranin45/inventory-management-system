@@ -82,6 +82,7 @@ export const en = {
     skipToContent: "Skip to main content",
     navigation: "Navigation",
     expandMenu: "Open full menu",
+    collapseMenu: "Collapse menu",
     breadcrumb: "Breadcrumb",
     notifications: "Notifications (placeholder)",
     openPalette: "Open command palette",

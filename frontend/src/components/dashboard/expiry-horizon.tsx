@@ -38,7 +38,7 @@ export function ExpiryHorizon() {
         title={t("dashboard.expTitle")}
         aside={buckets ? t("dashboard.lotsCount", { n: formatCount(total) }) : undefined}
       />
-      <div className="px-[18px] py-[10px]">
+      <div className="wc-panel-scroll px-[18px] py-[10px]">
         {buckets ? (
           <ul aria-label={t("dashboard.expTitle")} className="flex flex-col">
             {BUCKETS.map(({ key, label, tone, icon: Icon }) => (

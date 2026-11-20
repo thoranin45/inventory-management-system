@@ -18,7 +18,8 @@ const RAIL_ITEM =
  * Concept B iPad icon rail (frozen showroom `.rail`): 76 px column, 48×44
  * icon items with an accessible name and a tooltip, a hairline between
  * sections, and an "expand" item on top that opens the full labelled menu.
- * Same role-filtered items as the sidebar. Only visible 768–1023.98 px.
+ * Same role-filtered items as the sidebar. Visible 768–1023.98 px, and on
+ * desktop when the user has collapsed the sidebar.
  */
 export function IconRail({ onExpand, expanded }: { onExpand: () => void; expanded: boolean }) {
   const pathname = usePathname();

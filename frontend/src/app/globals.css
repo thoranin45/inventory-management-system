@@ -81,12 +81,12 @@
   --font-code: var(--font-plex-mono), var(--font-plex-thai), "IBM Plex Mono", ui-monospace, SFMono-Regular, Consolas,
     monospace;
 
-  /* B fixed metrics: sidebar 236 · header 54 · detail pane 400 · content max 1400 */
+  /* B fixed metrics: sidebar 236 · header 54 · detail pane 400 · content max 1680 (centred beyond it) */
   --sidebar-w: 236px;
   --rail-w: 76px; /* B iPad icon rail */
   --bottom-nav-h: 64px; /* B phone bottom bar: 52px items + 2x6px padding (safe area added separately) */
   --topbar-h: 54px;
-  --content-max: 1400px;
+  --content-max: 1680px;
   --drawer-w: 400px;
 
   color-scheme: light;
@@ -280,6 +280,24 @@
   }
 }
 
+/* Text-field focus: one calm cue, the accent border plus a soft halo. It
+   replaces the stacked offset outline + glow (+ per-field outline utilities)
+   that drew a double box. Unlayered on purpose so it wins over those
+   utilities. Fields whose border belongs to a wrapper (a search icon box)
+   carry .wc-bare-input and the wrapper .wc-field shows the cue instead. */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not(.wc-bare-input):focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+.wc-field:focus-within {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+.wc-bare-input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
 /* Skip link (WCAG 2.4.1): first focusable element, visible only on focus. */
 .wc-skip-link {
   position: fixed;
@@ -355,6 +373,7 @@
 .wc-app {
   display: grid;
   grid-template-columns: var(--sidebar-w) 1fr;
+  transition: grid-template-columns var(--dur-3) var(--ease);
   grid-template-rows: var(--topbar-h) 1fr;
   height: 100vh;
   height: 100dvh;
@@ -388,9 +407,33 @@
 }
 .wc-content > * {
   max-width: var(--content-max);
+  margin-inline: auto; /* wide screens / zoomed out: centred, not left-aligned with empty space on the right */
 }
 
 /* iPad icon rail (R2): only between 768 and 1023.98px */
+/* desktop, menu collapsed by the user: the icon rail replaces the sidebar */
+@media (min-width: 1024px) {
+  .wc-app[data-sidebar="collapsed"] {
+    grid-template-columns: var(--rail-w) 1fr;
+  }
+  .wc-app[data-sidebar="collapsed"] .wc-sidebar-slot {
+    display: none;
+  }
+  .wc-app[data-sidebar="collapsed"] .wc-rail-slot {
+    display: flex;
+    grid-column: 1;
+    grid-row: 2;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    z-index: 25;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wc-app {
+    transition: none;
+  }
+}
 .wc-rail-slot {
   display: none;
 }
@@ -563,33 +606,93 @@
   height: 27px;
   width: 48px;
 }
+.wc-dash-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+/* top band: queues · needs attention · expiry horizon */
 .wc-work-zone {
   display: grid;
-  grid-template-columns: 1.6fr 1fr;
+  grid-template-columns: 1.25fr 1fr 1fr;
   gap: 16px;
   align-items: stretch;
 }
+/* lower band: recent activity beside inventory condition over today's summary */
 .wc-lower-zone {
   display: grid;
-  grid-template-columns: 1.5fr 1fr;
+  grid-template-columns: 2fr 1fr;
+  grid-template-rows: auto 1fr;
   gap: 16px;
-  align-items: start;
+  align-items: stretch;
 }
 .wc-lower-zone > .wc-activity {
   grid-column: 1;
-  grid-row: 1 / span 3;
-}
-.wc-lower-zone > .wc-expiry {
-  grid-column: 2;
-  grid-row: 1;
+  grid-row: 1 / span 2;
 }
 .wc-lower-zone > .wc-condition {
   grid-column: 2;
-  grid-row: 2;
+  grid-row: 1;
 }
 .wc-lower-zone > .wc-summary {
   grid-column: 2;
-  grid-row: 3;
+  grid-row: 2;
+}
+.wc-panel-scroll .wc-act-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+}
+/* Desktop with enough height: the dashboard fits the window. The two bands
+   share the height below the KPI strip and each card scrolls inside itself,
+   so the page never scrolls and the columns end level. Shorter or narrower
+   windows fall back to the normal scrolling page. */
+@media (min-width: 1280px) and (min-height: 860px) {
+  .wc-dash {
+    height: 100%;
+    min-height: 0;
+  }
+  .wc-dash-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .wc-work-zone,
+  .wc-lower-zone {
+    min-height: 0;
+  }
+  .wc-lower-zone {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .wc-dash-body .wc-panel {
+    min-height: 0;
+    overflow: hidden;
+  }
+  .wc-dash-body .wc-panel-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  /* queue and attention rows share the card height instead of a fixed 14px padding */
+  .wc-dash-body .wc-queues .wc-panel-scroll > a,
+  .wc-dash-body .wc-attention .wc-panel-scroll > a {
+    flex: 1 0 auto;
+    padding-block: 8px;
+  }
+}
+/* header, quick actions and the KPI strip never shrink to make room */
+.wc-dash > :not(.wc-dash-body) {
+  flex-shrink: 0;
+}
+@media (max-width: 1279.98px) {
+  .wc-work-zone {
+    grid-template-columns: 1fr 1fr;
+  }
+  .wc-work-zone > .wc-expiry {
+    grid-column: 1 / -1;
+  }
 }
 /* expiry horizon: label, bar, count */
 .wc-hbar {
@@ -714,8 +817,8 @@
   .wc-lower-zone {
     grid-template-columns: 1fr;
   }
+  .wc-work-zone > .wc-expiry,
   .wc-lower-zone > .wc-activity,
-  .wc-lower-zone > .wc-expiry,
   .wc-lower-zone > .wc-condition,
   .wc-lower-zone > .wc-summary {
     grid-column: 1;

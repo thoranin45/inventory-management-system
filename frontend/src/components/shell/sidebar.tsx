@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { RotateCcw } from "lucide-react";
+import { PanelLeftClose, RotateCcw } from "lucide-react";
 
 import { NAV_GROUPS, isNavActive, visibleNavItems } from "@/lib/nav";
 import { isAdmin } from "@/lib/auth/permissions";
@@ -16,7 +16,7 @@ import { SidebarSearch } from "./sidebar-search";
  * Sidebar panel content. On desktop it is the persistent left column; on iPad
  * it is the full menu opened from the icon rail, with Search at the top.
  */
-export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
+export function SidebarNav({ onNavigate, onCollapse }: { onNavigate?: () => void; onCollapse?: () => void }) {
   const pathname = usePathname();
   const { user } = useSession();
   const t = useT();
@@ -86,6 +86,17 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
           <RotateCcw aria-hidden className="h-4 w-4 flex-none" />
           <span className="truncate">{t("nav.reportsExports")}</span>
         </Link>
+        {onCollapse ? (
+          <button
+            type="button"
+            onClick={onCollapse}
+            aria-expanded
+            className="flex h-[38px] items-center gap-[11px] rounded-[var(--r-sm)] px-[10px] text-left text-[13px] text-[var(--muted)] hover:bg-[var(--surface-sunken)] hover:text-[var(--foreground)]"
+          >
+            <PanelLeftClose aria-hidden className="h-4 w-4 flex-none" />
+            <span className="truncate">{t("shell.collapseMenu")}</span>
+          </button>
+        ) : null}
       </div>
     </nav>
   );
