@@ -59,6 +59,13 @@ jobs:
       # arrange data; the production brute-force limit (5 per 5 min) would
       # throttle that. Production keeps its default.
       AUTH_RATE_LIMIT_MAX_REQUESTS: "1000"
+      # Every request in this job comes from 127.0.0.1, the browser's (through
+      # the BFF) and the specs' own API calls alike, so they all share one
+      # general bucket (default 300 per 60 s per client IP). The suite runs
+      # at about that rate (responsive.spec opens the dashboard 12 times in
+      # ~40 s), so later specs got 429s. Production keeps its default, which
+      # applies per client IP.
+      RATE_LIMIT_MAX_REQUESTS: "1000"
       PYTHONUNBUFFERED: "1"
       NEXT_TELEMETRY_DISABLED: "1"
       E2E_BASE_URL: http://127.0.0.1:3000
