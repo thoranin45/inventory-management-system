@@ -116,12 +116,15 @@ const R6_SCOPE = [
   "app/not-found.tsx",
   "components/audit/audit-view.tsx",
   "components/dashboard/dashboard-view.tsx",
+  "components/dashboard/expiry-horizon.tsx",
   "components/dashboard/inventory-condition.tsx",
   "components/dashboard/kpi-zone.tsx",
   "components/dashboard/needs-attention.tsx",
   "components/dashboard/operational-queues.tsx",
+  "components/dashboard/quick-actions.tsx",
   "components/dashboard/recent-activity.tsx",
   "components/dashboard/today-summary.tsx",
+  "components/ui/signed-quantity.tsx",
   // P6 batch 2. master-data-screen.tsx and delete-confirm.tsx are localized
   // too, but the heuristic counts their TypeScript generics (`=> Promise<…>`)
   // as text, so the baseline ratchet covers them instead.

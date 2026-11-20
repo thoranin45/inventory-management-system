@@ -42,7 +42,7 @@ point this at production.**
 # backend (repo root), against a throwaway database
 alembic upgrade head
 ADMIN_USERNAME=e2e-admin ADMIN_PASSWORD=<12+ chars> python scripts/create_first_admin.py
-AUTH_RATE_LIMIT_MAX_REQUESTS=1000 uvicorn app.main:app --host 127.0.0.1 --port 8081
+AUTH_RATE_LIMIT_MAX_REQUESTS=1000 RATE_LIMIT_MAX_REQUESTS=1000 uvicorn app.main:app --host 127.0.0.1 --port 8081
 
 # frontend
 cd frontend

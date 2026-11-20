@@ -3,7 +3,8 @@ export const queryKeys = {
   session: ["session"] as const,
   dashboardSummary: ["dashboard", "summary"] as const,
   attentionSummary: ["attention", "summary"] as const,
-  recentActivity: ["dashboard", "recent-transactions"] as const,
+  /** Dashboard Recent activity (newest ledger rows); stock-changing mutations invalidate this prefix. */
+  recentActivity: ["dashboard", "recent-activity"] as const,
   search: (q: string) => ["search", q] as const,
 
   products: {

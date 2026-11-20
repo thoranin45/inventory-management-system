@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatQty, formatQtyDelta, formatMoney, formatCount, agoFromIso, qtyScaleAnomaly, shortReceiptRef } from "./format";
+import { formatQty, formatQtyDelta, formatMoney, formatCount, qtyScaleAnomaly, shortReceiptRef } from "./format";
 import { sumDecimals, compareDecimals, isZero, ratio } from "./decimal";
 
 describe("formatQty — Concept B fixed 3-decimal inventory quantity, exact (D-R4-1)", () => {
@@ -93,15 +93,6 @@ describe("Decimal-safe helpers (scaled BigInt, no parseFloat)", () => {
   it("ratio for a bar width, clamped end conversion", () => {
     expect(ratio("6172.000", "6892.000")).toBeCloseTo(0.8955, 3);
     expect(ratio("5", "0")).toBe(0);
-  });
-});
-
-describe("agoFromIso", () => {
-  it("relative day labels", () => {
-    const now = "2026-09-08T12:00:00Z";
-    expect(agoFromIso("2026-09-08T02:00:00Z", now)).toBe("today");
-    expect(agoFromIso("2026-09-07T12:00:00Z", now)).toBe("1d ago");
-    expect(agoFromIso("2026-09-04T12:00:00Z", now)).toBe("4d ago");
   });
 });
 

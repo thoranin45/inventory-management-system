@@ -504,22 +504,64 @@
   }
 }
 
-/* ---------- dashboard composition (ported from the approved prototype) ---------- */
+/* ---------- dashboard composition (ported from the approved prototype; UI-1: Design Showroom B) ---------- */
 .wc-dash {
   display: flex;
   flex-direction: column;
   gap: 20px;
 }
-.wc-kpi-zone {
-  display: grid;
-  grid-template-columns: minmax(260px, 300px) 1fr;
-  gap: 16px;
-  align-items: stretch;
+/* page-head actions: the stock buttons sit in the head from tablet up, as a large pair on phones */
+.wc-dash-desk-actions {
+  display: contents;
 }
-.wc-kpi-rest {
+.wc-dash-phone-actions {
+  display: none;
+}
+/* KPI strip: one bordered band of whole-number counts; the 1px gap draws the dividers */
+.wc-kpi-strip {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 12px;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-panel);
+}
+.wc-kpi {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 14px 16px;
+  background: var(--surface);
+  color: inherit;
+  text-decoration: none;
+  transition: background var(--dur-1) var(--ease);
+}
+.wc-kpi:hover {
+  background: var(--surface-sunken);
+}
+.wc-kpi:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+.wc-kpi-label {
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.wc-kpi-value {
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+}
+.wc-kpi-skeleton {
+  height: 27px;
+  width: 48px;
 }
 .wc-work-zone {
   display: grid;
@@ -535,19 +577,136 @@
 }
 .wc-lower-zone > .wc-activity {
   grid-column: 1;
-  grid-row: 1 / span 2;
+  grid-row: 1 / span 3;
 }
-.wc-lower-zone > .wc-condition {
+.wc-lower-zone > .wc-expiry {
   grid-column: 2;
   grid-row: 1;
 }
-.wc-lower-zone > .wc-summary {
+.wc-lower-zone > .wc-condition {
   grid-column: 2;
   grid-row: 2;
 }
-@media (max-width: 1200px) {
-  .wc-kpi-zone {
-    grid-template-columns: 1fr;
+.wc-lower-zone > .wc-summary {
+  grid-column: 2;
+  grid-row: 3;
+}
+/* expiry horizon: label, bar, count */
+.wc-hbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(70px, 40%) 34px;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+}
+.wc-hbar-label {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.wc-hbar-track {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--surface-sunken);
+}
+.wc-hbar-track > i {
+  display: block;
+  height: 100%;
+  border-radius: 0 4px 4px 0;
+}
+.wc-hbar-count {
+  text-align: right;
+  font-size: 13px;
+  font-weight: 600;
+}
+/* recent activity: a table from tablet up, a list on phones */
+.wc-act-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.wc-act-table th {
+  overflow: hidden;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--faint);
+}
+.wc-act-table td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.wc-act-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.wc-act-table .wc-num {
+  text-align: right;
+}
+.wc-act-table th:first-child,
+.wc-act-table td:first-child {
+  padding-left: 18px;
+}
+.wc-act-table th:last-child,
+.wc-act-table td:last-child {
+  padding-right: 18px;
+}
+.wc-act-table th:nth-child(1) {
+  width: 104px;
+}
+.wc-act-table th:nth-child(2) {
+  width: 150px;
+}
+.wc-act-table th:nth-child(4) {
+  width: 116px;
+}
+.wc-act-table th:nth-child(5) {
+  width: 150px;
+}
+.wc-act-list {
+  display: none;
+}
+.wc-act-list > li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 14px;
+  border-top: 1px solid var(--border);
+}
+.wc-act-list > li:first-child {
+  border-top: 0;
+}
+.wc-act-ico {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  place-items: center;
+  border-radius: var(--r-md);
+  background: var(--surface-sunken);
+}
+@media (max-width: 1359.98px) {
+  /* the reference column needs the full-width table; the list on phones still shows it */
+  .wc-act-table .wc-act-ref {
+    display: none;
+  }
+  .wc-act-table th:nth-child(4),
+  .wc-act-table td:nth-child(4) {
+    padding-right: 18px;
+  }
+}
+@media (max-width: 1199.98px) {
+  .wc-kpi-strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 @media (max-width: 1120px) {
@@ -556,15 +715,11 @@
     grid-template-columns: 1fr;
   }
   .wc-lower-zone > .wc-activity,
+  .wc-lower-zone > .wc-expiry,
   .wc-lower-zone > .wc-condition,
   .wc-lower-zone > .wc-summary {
     grid-column: 1;
     grid-row: auto;
-  }
-}
-@media (min-width: 768px) and (max-width: 1120px) {
-  .wc-kpi-rest {
-    grid-template-columns: repeat(3, 1fr);
   }
 }
 @media (max-width: 1023.98px) {
@@ -576,8 +731,30 @@
   .wc-dash {
     gap: 14px;
   }
-  .wc-kpi-rest {
-    grid-template-columns: repeat(2, 1fr);
+  .wc-dash-desk-actions {
+    display: none;
+  }
+  .wc-dash-phone-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .wc-kpi-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  /* phones show the role's first four tiles, as the design */
+  .wc-kpi:nth-child(n + 5) {
+    display: none;
+  }
+  .wc-kpi-value {
+    font-size: 24px;
+  }
+  .wc-act-table {
+    display: none;
+  }
+  .wc-act-list {
+    display: flex;
+    flex-direction: column;
   }
 }
 

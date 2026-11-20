@@ -1,27 +1,30 @@
 "use client";
 
-import { RotateCcw } from "lucide-react";
-
 import { PageHeader } from "@/components/ui/page-header";
-import { Button } from "@/components/ui/button";
 import { ErrorState, Skeleton } from "@/components/ui/states";
+import { useSession } from "@/components/session-provider";
+import { isAdmin } from "@/lib/auth/permissions";
+import { formatDisplayDate } from "@/lib/business-date";
 import { useAttentionSummary, useDashboardSummary } from "@/lib/query/hooks";
-import { formatIsoDate } from "@/lib/format";
-import { useT } from "@/lib/i18n/client";
+import { useI18n } from "@/lib/i18n/client";
+import { ExpiryHorizon } from "./expiry-horizon";
 import { InventoryCondition } from "./inventory-condition";
 import { KpiZone } from "./kpi-zone";
 import { NeedsAttention } from "./needs-attention";
 import { OperationalQueues } from "./operational-queues";
+import { DashboardActions, PhoneQuickActions, useDashboardRefresh } from "./quick-actions";
 import { RecentActivity } from "./recent-activity";
 import { TodaySummary } from "./today-summary";
 
 export function DashboardView() {
   const summary = useDashboardSummary();
   const attention = useAttentionSummary();
-  const t = useT();
+  const { t, locale } = useI18n();
+  const { user } = useSession();
+  const refresh = useDashboardRefresh();
 
   const subtitle = summary.data
-    ? t("dashboard.subtitleAsOf", { date: formatIsoDate(summary.data.as_of_date) })
+    ? t("dashboard.subtitleAsOf", { date: formatDisplayDate(summary.data.as_of_date, locale) })
     : t("dashboard.subtitle");
 
   return (
@@ -30,18 +33,18 @@ export function DashboardView() {
         title={t("dashboard.title")}
         subtitle={subtitle}
         actions={
-          <Button
-            variant="secondary"
-            onClick={() => {
-              void summary.refetch();
-              void attention.refetch();
-            }}
-          >
-            <RotateCcw aria-hidden className="h-[15px] w-[15px]" />
-            {t("dashboard.refresh")}
-          </Button>
+          <DashboardActions
+            admin={isAdmin(user.role)}
+            generatedAt={summary.data?.generated_at}
+            refreshing={summary.isFetching}
+            onRefresh={refresh}
+          />
         }
       />
+      <PhoneQuickActions />
+
+      {/* Each tile loads on its own, so the strip shows even while the summary is still loading. */}
+      <KpiZone />
 
       {summary.isLoading ? (
         <DashboardSkeleton />
@@ -49,8 +52,6 @@ export function DashboardView() {
         <ErrorState error={summary.error} onRetry={() => void summary.refetch()} />
       ) : summary.data ? (
         <>
-          <KpiZone data={summary.data} />
-
           <section className="wc-work-zone">
             <OperationalQueues data={summary.data} />
             <NeedsAttention dashboard={summary.data} attention={attention.data} />
@@ -58,6 +59,7 @@ export function DashboardView() {
 
           <section className="wc-lower-zone">
             <RecentActivity />
+            <ExpiryHorizon />
             <InventoryCondition data={summary.data} />
             <TodaySummary data={summary.data} />
           </section>
@@ -70,20 +72,13 @@ export function DashboardView() {
 function DashboardSkeleton() {
   return (
     <div className="flex flex-col gap-5" aria-hidden>
-      <div className="wc-kpi-zone">
-        <Skeleton className="h-[110px]" />
-        <div className="wc-kpi-rest">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <Skeleton key={i} className="h-[94px]" />
-          ))}
-        </div>
-      </div>
       <div className="wc-work-zone">
         <Skeleton className="h-[360px]" />
         <Skeleton className="h-[360px]" />
       </div>
       <div className="wc-lower-zone">
         <Skeleton className="h-[420px]" />
+        <Skeleton className="h-[220px]" />
         <Skeleton className="h-[220px]" />
         <Skeleton className="h-[300px]" />
       </div>
