@@ -9,7 +9,7 @@ Rules (one place, so every document rounds the same way):
   is the sum of the lines.
 """
 from dataclasses import dataclass
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Iterable
 
 CENT = Decimal("0.01")
@@ -25,9 +25,13 @@ def _decimal(value, name: str, step: Decimal) -> Decimal:
         raise ValueError(f"{name} must be finite")
     if number < 0:
         raise ValueError(f"{name} must not be negative")
-    if number != number.quantize(step):
+    try:
+        exact = number == number.quantize(step)
+    except InvalidOperation:
+        raise ValueError(f"{name} is too large") from None
+    if not exact:
         raise ValueError(f"{name} has more than {abs(step.as_tuple().exponent)} decimal places")
-    return number
+    return abs(number)  # normalises -0 to 0
 
 
 def money(value) -> Decimal:
@@ -77,6 +81,8 @@ def document_totals(
     prices_include_vat: bool = False,
     document_discount=Decimal("0"),
 ) -> DocumentTotals:
+    if type(vat_registered) is not bool or type(prices_include_vat) is not bool:
+        raise TypeError("vat_registered and prices_include_vat must be bool")
     subtotal = Decimal("0.00")
     line_discounts = Decimal("0.00")
     for line in lines:

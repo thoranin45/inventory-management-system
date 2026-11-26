@@ -1,12 +1,16 @@
+import re
 from datetime import datetime
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
+_THAI_DIGITS = str.maketrans("๐๑๒๓๔๕๖๗๘๙", "0123456789")
+
+
 def thai_tax_id_is_valid(value: str) -> bool:
-    """13 digits with the Revenue Department / national ID check digit."""
-    if len(value) != 13 or not value.isdigit():
+    """13 ASCII digits with the Revenue Department / national ID check digit."""
+    if not re.fullmatch(r"[0-9]{13}", value):
         return False
     total = sum(int(digit) * (13 - index) for index, digit in enumerate(value[:12]))
     return (11 - total % 11) % 10 == int(value[12])
@@ -16,7 +20,7 @@ def normalize_tax_id(value: str | None) -> str | None:
     """Blank -> None; otherwise digits only (spaces/dashes removed), checksum-validated."""
     if value is None:
         return None
-    digits = value.replace("-", "").replace(" ", "")
+    digits = value.translate(_THAI_DIGITS).replace("-", "").replace(" ", "")
     if digits == "":
         return None
     if not thai_tax_id_is_valid(digits):
@@ -28,10 +32,10 @@ def normalize_branch_code(value: str | None) -> str | None:
     """Blank -> None; otherwise exactly 5 digits (00000 = head office)."""
     if value is None:
         return None
-    code = value.strip()
+    code = value.strip().translate(_THAI_DIGITS)
     if code == "":
         return None
-    if len(code) != 5 or not code.isdigit():
+    if not re.fullmatch(r"[0-9]{5}", code):
         raise ValueError("branch_code must be 5 digits (00000 = head office)")
     return code
 

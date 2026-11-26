@@ -81,3 +81,11 @@ def test_database_rejects_bad_counter_rows(db_session):
     with pytest.raises(IntegrityError):
         db_session.execute(text("INSERT INTO document_sequences (doc_type, year, next_value) VALUES ('INV', 2026, 0)"))
     db_session.rollback()
+
+
+def test_a_datetime_is_refused_so_utc_instants_cannot_pick_the_year(db_session):
+    from datetime import datetime, timezone
+    with pytest.raises(TypeError):
+        allocate_number(db_session, "INV", datetime(2026, 12, 31, 18, 0, tzinfo=timezone.utc))
+    with pytest.raises(ValueError):
+        allocate_number(db_session, "INV", date(1999, 12, 31))

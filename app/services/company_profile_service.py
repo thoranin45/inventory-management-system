@@ -1,7 +1,7 @@
 """F0a: the seller's company profile (single row, id = 1)."""
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from app.core.unit_of_work import UnitOfWork
@@ -28,13 +28,14 @@ def update_company_profile_service(
     values["vat_rate"] = Decimal(values["vat_rate"]).quantize(Decimal("0.01"))
 
     with UnitOfWork(db) as uow:
+        # Make sure the single row exists before locking it, so two concurrent
+        # first saves queue on the row lock instead of racing on the INSERT.
+        db.execute(text("INSERT INTO company_profile (id) VALUES (:id) ON CONFLICT (id) DO NOTHING"),
+                   {"id": PROFILE_ID})
         profile = db.execute(
             select(CompanyProfile).where(CompanyProfile.id == PROFILE_ID).with_for_update()
-        ).scalar_one_or_none()
-        created = profile is None
-        if created:
-            profile = CompanyProfile(id=PROFILE_ID)
-            db.add(profile)
+        ).scalar_one()
+        created = profile.updated_by_user_id is None
 
         changed = sorted(
             name for name, value in values.items()

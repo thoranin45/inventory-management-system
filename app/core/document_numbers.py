@@ -28,9 +28,11 @@ def format_number(doc_type: str, year: int, value: int) -> str:
 def allocate_number(db: Session, doc_type: str, business_date: date) -> str:
     if not _DOC_TYPE.fullmatch(doc_type or ""):
         raise ValueError("doc_type must be 2-8 uppercase letters")
-    if not isinstance(business_date, date):
-        raise TypeError("business_date must be a date")
+    if type(business_date) is not date:  # a datetime (e.g. a UTC instant) is refused
+        raise TypeError("business_date must be a date, not a datetime")
     year = business_date.year
+    if not 2000 <= year <= 9999:
+        raise ValueError("business_date year must be between 2000 and 9999")
 
     db.execute(
         text(

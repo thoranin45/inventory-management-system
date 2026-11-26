@@ -92,3 +92,16 @@ def test_vat_rate_range():
         document_totals([Line(D("1"), D("1.00"))], vat_registered=True, vat_rate=D("100.01"))
     zero = document_totals([Line(D("1"), D("1.00"))], vat_registered=True, vat_rate=D("0"))
     assert zero.vat_amount == D("0.00") and zero.grand_total == D("1.00")
+
+
+def test_vat_flags_must_be_real_booleans():
+    with pytest.raises(TypeError):
+        document_totals([Line(D("1"), D("1.00"))], vat_registered="false")
+    with pytest.raises(TypeError):
+        document_totals([Line(D("1"), D("1.00"))], vat_registered=True, prices_include_vat=1)
+
+
+def test_huge_values_and_negative_zero():
+    with pytest.raises(ValueError):
+        money(D("1e30"))
+    assert str(money(D("-0"))) == "0.00"

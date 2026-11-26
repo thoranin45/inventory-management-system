@@ -61,3 +61,18 @@ def test_invalid_tax_fields_are_rejected(client, admin_headers):
 def test_warehouse_still_cannot_create_customers(client, warehouse_headers):
     response = client.post(URL, json={"customer_name": _name(), "tax_id": VALID_TAX_ID}, headers=warehouse_headers)
     assert response.status_code == 403
+
+
+def test_thai_numerals_are_accepted_and_stored_as_ascii(client, admin_headers):
+    created = client.post(URL, json={
+        "customer_name": _name(), "tax_id": "๐๑๐๕๕๓๖๐๙๒๖๔๑", "branch_code": "๐๐๐๐๑",
+    }, headers=admin_headers)
+    assert created.status_code == 201, created.text
+    data = created.json()["data"]
+    assert (data["tax_id"], data["branch_code"]) == (VALID_TAX_ID, "00001")
+
+
+def test_other_unicode_digits_get_a_field_error_not_a_database_error(client, admin_headers):
+    arabic_indic = "٠١٠٥٥٣٦٠٩٢٦٤١"  # valid checksum, but not ASCII or Thai digits
+    response = client.post(URL, json={"customer_name": _name(), "tax_id": arabic_indic}, headers=admin_headers)
+    assert response.status_code == 422
