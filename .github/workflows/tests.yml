@@ -107,9 +107,10 @@ jobs:
         run: docker compose -f compose.prod.yml config --quiet
 
       - name: Validate nginx config (prod)
-        # nginx -t resolves upstream hosts; map the compose service name.
+        # No --add-host: the upstream uses `resolve`, so the config must load
+        # even when `frontend` cannot be resolved yet.
         run: >
-          docker run --rm --add-host frontend:127.0.0.1
+          docker run --rm
           -v "$PWD/nginx/prod.conf:/etc/nginx/conf.d/default.conf:ro"
           nginx:1.27-alpine nginx -t
 

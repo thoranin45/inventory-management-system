@@ -185,6 +185,11 @@ gated step.
    ```bash
    docker compose -f compose.prod.yml up -d
    ```
+   This recreates `api` and `frontend` with new container IPs. nginx
+   re-resolves `frontend` through Docker DNS (`resolve` in `nginx/prod.conf`),
+   so it can return 502 for up to ~10 s and then recovers by itself. If
+   `http://127.0.0.1:8090/login` still returns 502 after 30 s, run
+   `docker compose -f compose.prod.yml restart nginx`.
 7. **Readiness** — as in first-deploy step 8; `migration` must equal the
    expected head, and `scripts/app_db_role.py check` prints `OK`.
 8. **Smoke test** (read-only, from inside the API container):
