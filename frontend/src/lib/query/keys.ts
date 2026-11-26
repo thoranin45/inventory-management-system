@@ -27,6 +27,7 @@ export const queryKeys = {
     shippingLabel: (id: number | string) => ["sales-orders", "shipping-label", String(id)] as const,
   },
   scanResolve: (barcode: string, context: string) => ["scan", "resolve", context, barcode] as const,
+  companyProfile: ["company-profile"] as const,
   customers: {
     all: ["customers"] as const,
     list: (params: Record<string, unknown>) => ["customers", "list", params] as const,

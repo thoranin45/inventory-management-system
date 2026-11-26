@@ -66,6 +66,14 @@ const FORM_FIXED: Record<string, MessageKey> = {
   "Choose a JPEG, PNG or WebP image.": "masterData.errImageType",
   "Image is too large. The limit is 5 MiB.": "masterData.errImageTooLarge",
   "That file is empty.": "masterData.errFileEmpty",
+  // F0b finance fields (lib/api/schemas/finance-fields.ts)
+  "Enter a valid 13-digit Thai tax ID": "finance.errTaxId",
+  "Branch code must be 5 digits (00000 = head office)": "finance.errBranchCode",
+  "Credit term must be a whole number of days from 0 to 365": "finance.errCreditTerm",
+  "VAT rate must be a number from 0 to 100 with up to 2 decimals": "finance.errVatRate",
+  // backend 422 wording for the same rules (app/schemas/company_profile_schema.py)
+  "Value error, tax_id must be a valid 13-digit Thai tax ID": "finance.errTaxId",
+  "Value error, branch_code must be 5 digits (00000 = head office)": "finance.errBranchCode",
 };
 
 /** zod field label → key, so "{field}" is translated too */
@@ -81,6 +89,11 @@ const FIELD: Record<string, MessageKey> = {
   Barcode: "product.barcode",
   "Product name": "product.productName",
   Price: "masterData.fieldPrice",
+  "Billing address": "finance.billingAddress",
+  "Legal name (Thai)": "finance.legalNameTh",
+  "Legal name (English)": "finance.legalNameEn",
+  "Address (Thai)": "finance.addressTh",
+  "Address (English)": "finance.addressEn",
 };
 
 const FIELD_ALT = Object.keys(FIELD)

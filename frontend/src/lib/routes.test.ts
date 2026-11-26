@@ -64,7 +64,8 @@ describe("navigation helpers", () => {
     const wh = visibleNavItems(false).map((n) => n.key);
     expect(wh).not.toContain("stock-adjustment-approvals");
     expect(wh).not.toContain("audit");
-    expect(wh).toHaveLength(NAV_ITEMS.length - 2);
+    expect(wh).not.toContain("company-profile");
+    expect(wh).toHaveLength(NAV_ITEMS.length - 3);
   });
 
   it("active matching is segment-aware", () => {

@@ -1,6 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import {
   ArrowLeftRight,
+  Building2,
   BookOpen,
   Boxes,
   ClipboardCheck,
@@ -71,6 +72,8 @@ export const NAV_ITEMS: NavItem[] = [
   { key: "transfers", labelKey: "nav.transfers", href: "/transfers", icon: ArrowLeftRight, group: "inventory" },
   { key: "customers", labelKey: "nav.customers", href: "/customers", icon: Users, group: "master" },
   { key: "suppliers", labelKey: "nav.suppliers", href: "/suppliers", icon: Factory, group: "master" },
+  // F0b: finance is Admin-only for now (Owner, 26 Nov); the backend still lets every signed-in user read it.
+  { key: "company-profile", labelKey: "nav.companyProfile", href: "/company-profile", icon: Building2, group: "master", adminOnly: true },
   { key: "reports", labelKey: "nav.reports", href: "/reports", icon: ClipboardCheck, group: "reports" },
   { key: "audit", labelKey: "nav.audit", href: "/audit", icon: ScrollText, group: "reports", adminOnly: true },
 ];

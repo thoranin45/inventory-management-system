@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { apiEnvelope, decimalString, paginated } from "./common";
+import { branchCodeField, creditTermField, nullableText, taxIdField } from "./finance-fields";
 
 /**
  * Phase 7 — Product & Master-Data CRUD contract, verified against the live
@@ -96,6 +97,11 @@ export const customerRowSchema = z.object({
   phone: z.string().nullish(),
   email: z.string().nullish(),
   address: z.string().nullish(),
+  // F0a/F0b billing data (all optional)
+  tax_id: z.string().nullish(),
+  branch_code: z.string().nullish(),
+  billing_address: z.string().nullish(),
+  credit_term_days: z.number().int().nullish(),
 });
 export type CustomerRow = z.infer<typeof customerRowSchema>;
 
@@ -108,6 +114,11 @@ export const customerInput = z.object({
   phone: optionalText(50, "Phone"),
   email: optionalEmail,
   address: optionalText(500, "Address"),
+  // F0b: blank → null so an edit can clear a stored value.
+  tax_id: taxIdField,
+  branch_code: branchCodeField,
+  billing_address: nullableText(1000, "Billing address"),
+  credit_term_days: creditTermField,
 });
 export type CustomerInput = z.infer<typeof customerInput>;
 

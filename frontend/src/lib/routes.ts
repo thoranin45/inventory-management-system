@@ -37,6 +37,7 @@ const RULES: [RegExp, string, Leaf?][] = [
   [/^\/categories$/, "categories"],
   [/^\/customers$/, "customers"],
   [/^\/suppliers$/, "suppliers"],
+  [/^\/company-profile$/, "company-profile"],
   [/^\/stock$/, "stock"],
   [/^\/inventory\/ledger$/, "inventory-ledger"],
   [/^\/stock-in$/, "stock-in"],
@@ -76,7 +77,7 @@ export function resolveRoute(pathname: string): RouteTrail | null {
 
 /** Every concrete route the registry covers (used by tests). */
 export const REGISTERED_ROUTE_EXAMPLES = [
-  "/", "/dashboard", "/products", "/categories", "/customers", "/suppliers", "/stock", "/inventory/ledger",
+  "/", "/dashboard", "/products", "/categories", "/customers", "/suppliers", "/company-profile", "/stock", "/inventory/ledger",
   "/stock-in", "/stock-out", "/stock-adjustments/mine", "/stock-adjustments/new", "/stock-adjustments/approvals",
   "/sales", "/picking", "/picking/12", "/packing", "/packing/12", "/shipping", "/purchase-orders",
   "/purchase-orders/7/receive", "/transfers", "/transfers/3/receive", "/reports", "/audit",

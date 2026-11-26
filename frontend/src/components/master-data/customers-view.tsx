@@ -15,6 +15,7 @@ import {
 import * as React from "react";
 
 import { useT, type I18nValue } from "@/lib/i18n/client";
+import { formatTaxId } from "@/lib/thai-tax-id";
 import { MasterDataScreen, type MasterDataConfig } from "./master-data-screen";
 
 const makeCfg = (t: I18nValue["t"]): MasterDataConfig<CustomerRow, CustomerInput> => ({
@@ -34,13 +35,31 @@ const makeCfg = (t: I18nValue["t"]): MasterDataConfig<CustomerRow, CustomerInput
     { name: "phone", label: t("masterData.phone"), kind: "tel", autoComplete: "off" },
     { name: "email", label: t("masterData.email"), kind: "email", autoComplete: "off" },
     { name: "address", label: t("masterData.address"), kind: "textarea", autoComplete: "off" },
+    // F0b: billing / tax data, all optional (used by quotations and invoices later)
+    { name: "tax_id", label: t("finance.taxId"), inputMode: "numeric", autoComplete: "off", hint: t("finance.taxIdHint") },
+    { name: "branch_code", label: t("finance.branchCode"), inputMode: "numeric", autoComplete: "off", hint: t("finance.branchCodeHint") },
+    { name: "billing_address", label: t("finance.billingAddress"), kind: "textarea", autoComplete: "off", hint: t("finance.billingAddressHint") },
+    { name: "credit_term_days", label: t("finance.creditTermDays"), inputMode: "numeric", autoComplete: "off", hint: t("finance.creditTermHint") },
   ],
-  emptyForm: { customer_name: "", phone: "", email: "", address: "" },
+  emptyForm: {
+    customer_name: "",
+    phone: "",
+    email: "",
+    address: "",
+    tax_id: "",
+    branch_code: "",
+    billing_address: "",
+    credit_term_days: "",
+  },
   toForm: (r) => ({
     customer_name: r.customer_name,
     phone: r.phone ?? "",
     email: r.email ?? "",
     address: r.address ?? "",
+    tax_id: r.tax_id ?? "",
+    branch_code: r.branch_code ?? "",
+    billing_address: r.billing_address ?? "",
+    credit_term_days: r.credit_term_days === null || r.credit_term_days === undefined ? "" : String(r.credit_term_days),
   }),
   rowId: (r) => r.id,
   rowName: (r) => r.customer_name,
@@ -62,6 +81,12 @@ const makeCfg = (t: I18nValue["t"]): MasterDataConfig<CustomerRow, CustomerInput
       header: t("masterData.email"),
       secondary: true,
       cell: (r) => <span className="text-[var(--muted)] break-all">{r.email || "—"}</span>,
+    },
+    {
+      key: "tax_id",
+      header: t("finance.taxId"),
+      secondary: true,
+      cell: (r) => <span className="mono text-[var(--muted)]">{r.tax_id ? formatTaxId(r.tax_id) : "—"}</span>,
     },
     {
       key: "address",

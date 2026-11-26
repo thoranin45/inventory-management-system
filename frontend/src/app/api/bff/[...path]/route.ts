@@ -128,6 +128,10 @@ const ALLOW: { method: string; pattern: RegExp }[] = [
   { method: "PUT", pattern: /^customers\/\d+$/ },
   { method: "DELETE", pattern: /^customers\/\d+$/ },
 
+  // F0b — seller company profile (GET: signed-in; PUT: require_admin).
+  { method: "GET", pattern: /^company-profile$/ },
+  { method: "PUT", pattern: /^company-profile$/ },
+
   { method: "GET", pattern: /^suppliers\/\d+$/ },
   { method: "POST", pattern: /^suppliers$/ },
   { method: "PUT", pattern: /^suppliers\/\d+$/ },

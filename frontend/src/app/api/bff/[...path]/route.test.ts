@@ -21,6 +21,14 @@ describe("BFF allow-list", () => {
     expect(isAllowed("POST", "stock/out-fefo")).toBe(true);
   });
 
+  it("F0b: allows GET and PUT company-profile only", () => {
+    expect(isAllowed("GET", "company-profile")).toBe(true);
+    expect(isAllowed("PUT", "company-profile")).toBe(true);
+    expect(isAllowed("POST", "company-profile")).toBe(false);
+    expect(isAllowed("DELETE", "company-profile")).toBe(false);
+    expect(isAllowed("GET", "company-profile/1")).toBe(false);
+  });
+
   it("still allows the pre-existing Stock-In routes (regression)", () => {
     expect(isAllowed("POST", "stock/in")).toBe(true);
     expect(isAllowed("POST", "batches")).toBe(true);
