@@ -5,18 +5,24 @@ addresses would print as empty boxes. IBM Plex Sans Thai (the same family the
 web UI uses; SIL Open Font License 1.1, see app/assets/fonts/OFL.txt) is
 embedded instead.
 
-Known limit (verified on a rendered sample, F0a): reportlab 4.2.2 does not
-run complex text shaping, so a tone mark over an upper vowel (e.g. the tone
-mark in "ที่", "ซื้อ", "ดื่ม") is drawn on top of the vowel instead of above
-it. reportlab >= 5 with uharfbuzz and ``ParagraphStyle(shaping=1)`` draws it
-correctly; that upgrade is a separate, approved-on-its-own change and must
-land before any customer-facing Thai document (F2) is printed.
+Thai needs complex text shaping: a tone mark over an upper vowel (e.g. the
+tone mark in "ที่", "ซื้อ", "ดื่ม") must be moved or swapped for a variant glyph,
+or it is drawn on top of the vowel. reportlab 5 does this with uharfbuzz, but
+only for a paragraph style with ``shaping=1``. Build every Thai paragraph
+style with ``thai_style()`` so shaping is never forgotten (F1-0; reportlab
+4.2.2 could not shape at all, verified on a rendered sample in F0a).
 """
 from pathlib import Path
 
 from reportlab.lib.fonts import addMapping
+from reportlab.lib.styles import ParagraphStyle
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
+
+try:  # reportlab shapes text only when uharfbuzz is importable
+    import uharfbuzz  # noqa: F401
+except ImportError:  # pragma: no cover - requirements.txt pins it
+    uharfbuzz = None
 
 FONT_DIR = Path(__file__).resolve().parent.parent / "assets" / "fonts"
 THAI_FONT = "IBMPlexSansThai"
@@ -39,3 +45,16 @@ def register_thai_fonts() -> tuple[str, str]:
     addMapping(THAI_FONT, 0, 1, THAI_FONT)
     addMapping(THAI_FONT, 1, 1, THAI_FONT_BOLD)
     return THAI_FONT, THAI_FONT_BOLD
+
+
+def thai_style(name: str, *, bold: bool = False, **kwargs) -> ParagraphStyle:
+    """A ParagraphStyle in the Thai font with text shaping switched on.
+
+    Raises if shaping cannot run (uharfbuzz missing), so a document never
+    silently prints misplaced Thai tone marks.
+    """
+    regular, bold_name = register_thai_fonts()
+    if uharfbuzz is None or not pdfmetrics.getFont(regular).shapable:
+        raise RuntimeError("Thai PDF text needs uharfbuzz for shaping; install requirements.txt")
+    kwargs.setdefault("fontName", bold_name if bold else regular)
+    return ParagraphStyle(name, shaping=1, **kwargs)

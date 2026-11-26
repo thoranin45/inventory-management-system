@@ -4,7 +4,7 @@ annotated-types==0.8.0
 anyio==4.14.2
 bcrypt==4.0.1
 certifi==2026.10.18
-chardet==7.4.3
+charset-normalizer==3.5.1
 click==8.4.2
 colorama==0.4.6
 coverage==7.15.3
@@ -40,11 +40,12 @@ python-barcode==0.16.0
 python-dotenv==1.2.2
 python-multipart==0.0.31
 qrcode==7.4.2
-reportlab==4.2.2
+reportlab==5.1.2
 six==1.17.0
 SQLAlchemy==2.0.50
 starlette==1.10.0
 typing_extensions==4.16.0
 typing-inspection==0.4.5
 tzdata==2026.3
+uharfbuzz==0.57.0
 uvicorn==0.33.0
