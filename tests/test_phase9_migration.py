@@ -10,7 +10,7 @@ from tests.database_support import migration_config
 from tests.test_migrations import migration_engine, upgrade  # noqa: F401
 
 PHASE8 = "e71a00000001"
-HEAD = "ef1a00000001"  # F0a finance foundation; P11 B1 audit recorded_at_utc; R5-SAFE.1B integrity; V1-H3 ec1a00000001; V1-H1 eb1a00000001; Phase 14C ea1a00000003/ea1a00000004
+HEAD = "f01a00000001"  # F1a quotations; F0a finance foundation; P11 B1 audit recorded_at_utc; R5-SAFE.1B integrity; V1-H3 ec1a00000001; V1-H1 eb1a00000001; Phase 14C ea1a00000003/ea1a00000004
 
 
 def _columns(conn, table):

@@ -39,6 +39,7 @@ from app.routers.category_router import router as category_router
 from app.routers.code_router import router as code_router
 from app.routers.customer_router import router as customer_router
 from app.routers.company_profile_router import router as company_profile_router
+from app.routers.quotation_router import router as quotation_router
 from app.routers.dashboard_router import router as dashboard_router
 from app.routers.health_router import router as health_router
 from app.routers.system_router import router as system_router
@@ -239,6 +240,11 @@ app.include_router(
 
 app.include_router(
     company_profile_router,
+    prefix=API_V1_PREFIX,
+)
+
+app.include_router(
+    quotation_router,
     prefix=API_V1_PREFIX,
 )
 
