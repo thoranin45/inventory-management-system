@@ -34,6 +34,10 @@ def create_customer_service(
         phone=data.phone,
         email=data.email,
         address=data.address,
+        tax_id=data.tax_id,
+        branch_code=data.branch_code,
+        billing_address=data.billing_address,
+        credit_term_days=data.credit_term_days,
     )
 
     with UnitOfWork(db) as uow:

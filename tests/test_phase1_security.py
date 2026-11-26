@@ -55,6 +55,7 @@ def _admin_only(method: str, path: str) -> bool:
         return False
     if any(path.startswith(f"/api/v1/{resource}") for resource in (
         "products", "categories", "customers", "suppliers", "stock-balances",
+        "company-profile",
     )):
         return True
     if path.startswith("/api/v1/purchase-orders"):

@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy import (
     Column,
@@ -746,6 +748,11 @@ class Customer(Base):
 
     __table_args__ = (
         Index("ix_customers_customer_name", "customer_name"),
+        # F0a finance foundation (ef1a00000001): optional tax data for billing
+        # documents. Format only; the 13-digit checksum is checked in the API.
+        CheckConstraint("tax_id ~ '^[0-9]{13}$'", name="ck_customers_tax_id_format"),
+        CheckConstraint("branch_code ~ '^[0-9]{5}$'", name="ck_customers_branch_code_format"),
+        CheckConstraint("credit_term_days >= 0", name="ck_customers_credit_term_days_nonnegative"),
     )
 
     id = Column(Integer, primary_key=True)
@@ -754,6 +761,10 @@ class Customer(Base):
     email = Column(String(255))
     address = Column(String(500))
     created_at = Column(DateTime, server_default=func.now())
+    tax_id = Column(String(13), nullable=True)
+    branch_code = Column(String(5), nullable=True)
+    billing_address = Column(Text, nullable=True)
+    credit_term_days = Column(Integer, nullable=True)
 
 class SalesOrder(Base):
     __tablename__ = "sales_orders"
@@ -1810,3 +1821,58 @@ class StockAdjustmentRequest(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class CompanyProfile(Base):
+    """F0a: the seller's own details printed on finance documents.
+
+    Single row (id = 1). ``vat_registered`` stays false until the business
+    registers for VAT; while false, documents carry no VAT line.
+    """
+
+    __tablename__ = "company_profile"
+    __table_args__ = (
+        CheckConstraint("id = 1", name="ck_company_profile_singleton"),
+        CheckConstraint("tax_id ~ '^[0-9]{13}$'", name="ck_company_profile_tax_id_format"),
+        CheckConstraint("branch_code ~ '^[0-9]{5}$'", name="ck_company_profile_branch_code_format"),
+        CheckConstraint("vat_rate >= 0 AND vat_rate <= 100", name="ck_company_profile_vat_rate_range"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=False)
+    legal_name_th = Column(String(255), nullable=True)
+    legal_name_en = Column(String(255), nullable=True)
+    tax_id = Column(String(13), nullable=True)
+    branch_code = Column(String(5), nullable=True)
+    address_th = Column(Text, nullable=True)
+    address_en = Column(Text, nullable=True)
+    phone = Column(String(50), nullable=True)
+    email = Column(String(255), nullable=True)
+    vat_registered = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    vat_rate = Column(Numeric(5, 2), nullable=False, default=Decimal("7.00"), server_default=text("7.00"))
+    prices_include_vat = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_by_user_id = Column(
+        Integer,
+        ForeignKey("users.id", name="fk_company_profile_updated_by_user"),
+        nullable=True,
+    )
+
+
+class DocumentSequence(Base):
+    """F0a: gapless running numbers per document type and calendar year.
+
+    Allocated only through ``app.core.document_numbers.allocate_number`` with
+    a row lock inside the issuing transaction, so a rolled-back document
+    never consumes a number (a PostgreSQL SEQUENCE would).
+    """
+
+    __tablename__ = "document_sequences"
+    __table_args__ = (
+        CheckConstraint("doc_type ~ '^[A-Z]{2,8}$'", name="ck_document_sequences_doc_type_format"),
+        CheckConstraint("year >= 2000 AND year <= 9999", name="ck_document_sequences_year_range"),
+        CheckConstraint("next_value >= 1", name="ck_document_sequences_next_value_positive"),
+    )
+
+    doc_type = Column(String(16), primary_key=True)
+    year = Column(SmallInteger, primary_key=True, autoincrement=False)
+    next_value = Column(Integer, nullable=False, default=1, server_default=text("1"))

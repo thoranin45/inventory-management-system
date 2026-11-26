@@ -12,7 +12,7 @@ from tests.database_support import migration_config
 from tests.test_migrations import migration_engine, upgrade
 
 PHASE7 = "e61a00000001"
-HEAD = "ee1a00000001"
+HEAD = "ef1a00000001"
 
 _EXPECTED_INDEXES = {
     "sales_orders": "ix_sales_orders_status_created_at",
@@ -56,6 +56,8 @@ _PRESERVED_TABLES = ("products", "customers", "suppliers", "sales_orders", "purc
 _ADDED_COLUMNS = {
     "sales_orders": {"fulfillment_claim_epoch", "fulfillment_claim_token_hash", "fulfillment_claim_user_id",
                      "fulfillment_claim_phase", "fulfillment_claim_acquired_at"},
+    # F0a ef1a00000001: optional, NULL for every existing customer.
+    "customers": {"tax_id", "branch_code", "billing_address", "credit_term_days"},
 }
 
 
