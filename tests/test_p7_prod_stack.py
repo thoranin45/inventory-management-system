@@ -99,7 +99,8 @@ def test_prod_compose_migrations_are_one_shot_only():
 
 def test_prod_nginx_proxies_only_the_frontend():
     conf = _code(_read("nginx/prod.conf"))
-    assert "server frontend:3000;" in conf
+    assert "set $frontend_upstream http://frontend:3000;" in conf
+    assert "proxy_pass $frontend_upstream;" in conf
     assert "api:8081" not in conf
     assert "location /api/v1" not in conf
 
@@ -115,6 +116,19 @@ def test_prod_nginx_matches_the_reviewed_demo_rules():
         ]
 
     assert rules(_read("nginx/prod.conf")) == rules(_read("nginx/demo.conf"))
+
+
+def test_nginx_re_resolves_the_frontend_after_a_container_is_recreated():
+    # Prod incident 2026-11-26: a static `upstream { server frontend:3000; }`
+    # is resolved once at nginx start, so recreating the frontend container
+    # (new IP) left nginx proxying to a dead address (502 on every page).
+    # Both configs must resolve through Docker DNS at request time instead.
+    for path in ("nginx/prod.conf", "nginx/demo.conf"):
+        conf = _code(_read(path))
+        assert "resolver 127.0.0.11 valid=10s" in conf, path
+        assert not any(ln.strip().startswith("upstream ") for ln in conf.splitlines()), path  # no static upstream block
+        assert "proxy_pass $frontend_upstream;" in conf, path
+        assert "proxy_pass http://" not in conf, path   # every proxy_pass goes through the variable
 
 
 # --------------------------------------------------------------------------- #
