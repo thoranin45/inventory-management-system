@@ -132,6 +132,16 @@ const ALLOW: { method: string; pattern: RegExp }[] = [
   { method: "GET", pattern: /^company-profile$/ },
   { method: "PUT", pattern: /^company-profile$/ },
 
+  // F1b — quotations (require_admin for every method, reads included).
+  { method: "GET", pattern: /^quotations$/ },
+  { method: "POST", pattern: /^quotations$/ },
+  { method: "GET", pattern: /^quotations\/\d+$/ },
+  { method: "PUT", pattern: /^quotations\/\d+$/ },
+  { method: "DELETE", pattern: /^quotations\/\d+$/ },
+  { method: "POST", pattern: /^quotations\/\d+\/(issue|accept|reject|void|revise|convert)$/ },
+  // Binary PDF (rendered on the fly, never cached).
+  { method: "GET", pattern: /^quotations\/\d+\/pdf$/ },
+
   { method: "GET", pattern: /^suppliers\/\d+$/ },
   { method: "POST", pattern: /^suppliers$/ },
   { method: "PUT", pattern: /^suppliers\/\d+$/ },

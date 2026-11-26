@@ -8,6 +8,7 @@ import {
   ClipboardList,
   Ellipsis,
   Factory,
+  FileText,
   LayoutGrid,
   Layers,
   PackageMinus,
@@ -65,6 +66,8 @@ export const NAV_ITEMS: NavItem[] = [
   { key: "stock-adjustments", labelKey: "nav.stockAdjustments", href: "/stock-adjustments/mine", icon: ClipboardList, group: "inventory" },
   { key: "stock-adjustment-approvals", labelKey: "nav.approvals", href: "/stock-adjustments/approvals", icon: ShieldCheck, group: "inventory", adminOnly: true },
   { key: "sales", labelKey: "nav.sales", href: "/sales", icon: ShoppingCart, group: "orders" },
+  // F1b: finance is Admin-only (Owner, 26 Nov); the backend refuses every quotation call from other roles.
+  { key: "quotations", labelKey: "nav.quotations", href: "/quotations", icon: FileText, group: "orders", adminOnly: true },
   { key: "picking", labelKey: "nav.picking", href: "/picking", icon: PackageSearch, group: "tasks" },
   { key: "packing", labelKey: "nav.packing", href: "/packing", icon: ClipboardCheck, group: "tasks" },
   { key: "shipping", labelKey: "nav.shipping", href: "/shipping", icon: Send, group: "tasks" },

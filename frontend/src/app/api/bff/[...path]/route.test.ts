@@ -29,6 +29,23 @@ describe("BFF allow-list", () => {
     expect(isAllowed("GET", "company-profile/1")).toBe(false);
   });
 
+  it("F1b: allows the quotation routes and nothing wider", () => {
+    expect(isAllowed("GET", "quotations")).toBe(true);
+    expect(isAllowed("POST", "quotations")).toBe(true);
+    expect(isAllowed("GET", "quotations/12")).toBe(true);
+    expect(isAllowed("PUT", "quotations/12")).toBe(true);
+    expect(isAllowed("DELETE", "quotations/12")).toBe(true);
+    for (const action of ["issue", "accept", "reject", "void", "revise", "convert"]) {
+      expect(isAllowed("POST", `quotations/12/${action}`)).toBe(true);
+      expect(isAllowed("GET", `quotations/12/${action}`)).toBe(false);
+    }
+    expect(isAllowed("GET", "quotations/12/pdf")).toBe(true);
+    expect(isAllowed("POST", "quotations/12/pdf")).toBe(false);
+    expect(isAllowed("POST", "quotations/12/delete")).toBe(false);
+    expect(isAllowed("PUT", "quotations")).toBe(false);
+    expect(isAllowed("GET", "quotations/abc")).toBe(false);
+  });
+
   it("still allows the pre-existing Stock-In routes (regression)", () => {
     expect(isAllowed("POST", "stock/in")).toBe(true);
     expect(isAllowed("POST", "batches")).toBe(true);

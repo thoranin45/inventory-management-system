@@ -50,6 +50,15 @@ export const AUDIT_ACTION_KEY: Record<string, MessageKey> = {
   DERIVE_INVENTORY_TOTAL: "auditCopy.act_DERIVE_INVENTORY_TOTAL",
   CREATE_COMPANY_PROFILE: "auditCopy.act_CREATE_COMPANY_PROFILE",
   UPDATE_COMPANY_PROFILE: "auditCopy.act_UPDATE_COMPANY_PROFILE",
+  CREATE_QUOTATION: "auditCopy.act_CREATE_QUOTATION",
+  UPDATE_QUOTATION: "auditCopy.act_UPDATE_QUOTATION",
+  DELETE_QUOTATION: "auditCopy.act_DELETE_QUOTATION",
+  ISSUE_QUOTATION: "auditCopy.act_ISSUE_QUOTATION",
+  ACCEPT_QUOTATION: "auditCopy.act_ACCEPT_QUOTATION",
+  REJECT_QUOTATION: "auditCopy.act_REJECT_QUOTATION",
+  VOID_QUOTATION: "auditCopy.act_VOID_QUOTATION",
+  REVISE_QUOTATION: "auditCopy.act_REVISE_QUOTATION",
+  CONVERT_QUOTATION: "auditCopy.act_CONVERT_QUOTATION",
 };
 
 /** Table names the backend writes to audit_logs.table_name. */
@@ -71,6 +80,7 @@ export const AUDIT_ENTITY_KEY: Record<string, MessageKey> = {
   warehouses: "auditCopy.ent_warehouses",
   warehouse_locations: "auditCopy.ent_warehouse_locations",
   company_profile: "auditCopy.ent_company_profile",
+  quotations: "auditCopy.ent_quotations",
 };
 
 export function auditActionText(t: T, action: string | null): string {

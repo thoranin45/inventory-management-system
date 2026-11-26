@@ -28,6 +28,11 @@ export const queryKeys = {
   },
   scanResolve: (barcode: string, context: string) => ["scan", "resolve", context, barcode] as const,
   companyProfile: ["company-profile"] as const,
+  quotations: {
+    all: ["quotations"] as const,
+    list: (params: Record<string, unknown>) => ["quotations", "list", params] as const,
+    detail: (id: number | string) => ["quotations", "detail", String(id)] as const,
+  },
   customers: {
     all: ["customers"] as const,
     list: (params: Record<string, unknown>) => ["customers", "list", params] as const,

@@ -25,11 +25,11 @@ describe("Concept B navigation model", () => {
   it("keeps every destination exactly as before (grouping is presentation only)", () => {
     expect(NAV_ITEMS.map((n) => n.href)).toEqual([
       "/dashboard", "/products", "/categories", "/stock", "/inventory/ledger", "/stock-in", "/stock-out",
-      "/stock-adjustments/mine", "/stock-adjustments/approvals", "/sales", "/picking", "/packing", "/shipping",
+      "/stock-adjustments/mine", "/stock-adjustments/approvals", "/sales", "/quotations", "/picking", "/packing", "/shipping",
       "/purchase-orders", "/transfers", "/customers", "/suppliers", "/company-profile", "/reports", "/audit",
     ]);
     expect(NAV_ITEMS.filter((n) => n.adminOnly).map((n) => n.key)).toEqual([
-      "stock-adjustment-approvals", "company-profile", "audit",
+      "stock-adjustment-approvals", "quotations", "company-profile", "audit",
     ]);
   });
 
