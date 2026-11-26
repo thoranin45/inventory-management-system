@@ -121,7 +121,7 @@ def test_demo_nginx_never_proxies_the_api_directly():
     code = "\n".join(ln for ln in txt.splitlines() if not ln.lstrip().startswith("#"))
     assert "location /api/v1" not in code
     assert "api:8081" not in code
-    assert "proxy_pass http://demo_frontend" in code  # it proxies only the frontend
+    assert "set $frontend_upstream http://frontend:3000;" in code  # it proxies only the frontend
 
 
 def test_demo_nginx_restores_the_real_client_ip():

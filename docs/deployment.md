@@ -185,7 +185,15 @@ gated step.
    ```bash
    docker compose -f compose.prod.yml up -d
    ```
-7. **Readiness** — as in first-deploy step 8; `migration` must equal the
+   nginx looks up `frontend` through Docker DNS on each request (cached for
+   10 s), so recreating the frontend container needs no nginx restart.
+   nginx reads `nginx/prod.conf` only when it starts: after a release that
+   changes that file, run `docker compose -f compose.prod.yml restart nginx`
+   once. (Before this fix nginx kept the frontend's old IP and served 502 on
+   every page until restarted — prod incident 2026-11-26.)
+7. **Readiness** — check the site through nginx too
+   (`curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8090/login` → 200;
+   502 means nginx cannot reach the frontend). Then as in first-deploy step 8; `migration` must equal the
    expected head, and `scripts/app_db_role.py check` prints `OK`.
 8. **Smoke test** (read-only, from inside the API container):
    ```bash
