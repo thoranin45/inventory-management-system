@@ -48,6 +48,8 @@ export const AUDIT_ACTION_KEY: Record<string, MessageKey> = {
   RESTORE_PRODUCT: "auditCopy.act_RESTORE_PRODUCT",
   UPLOAD_PRODUCT_IMAGE: "auditCopy.act_UPLOAD_PRODUCT_IMAGE",
   DERIVE_INVENTORY_TOTAL: "auditCopy.act_DERIVE_INVENTORY_TOTAL",
+  CREATE_COMPANY_PROFILE: "auditCopy.act_CREATE_COMPANY_PROFILE",
+  UPDATE_COMPANY_PROFILE: "auditCopy.act_UPDATE_COMPANY_PROFILE",
 };
 
 /** Table names the backend writes to audit_logs.table_name. */
@@ -67,7 +69,9 @@ export const AUDIT_ENTITY_KEY: Record<string, MessageKey> = {
   inventory_movements: "auditCopy.ent_inventory_movements",
   inventory_transfer_items: "auditCopy.ent_inventory_transfer_items",
   warehouses: "auditCopy.ent_warehouses",
-  warehouse_locations: "auditCopy.ent_warehouse_locations",};
+  warehouse_locations: "auditCopy.ent_warehouse_locations",
+  company_profile: "auditCopy.ent_company_profile",
+};
 
 export function auditActionText(t: T, action: string | null): string {
   const key = action ? AUDIT_ACTION_KEY[action] : undefined;

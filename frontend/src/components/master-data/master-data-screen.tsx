@@ -28,6 +28,8 @@ export interface MasterField {
   autoComplete?: string;
   required?: boolean;
   hint?: string;
+  /** on-screen keyboard hint, e.g. "numeric" for a tax ID */
+  inputMode?: "numeric" | "text";
 }
 
 interface UseListResult<Row> {
@@ -181,6 +183,7 @@ function MasterForm<Row, Input>({
                 className={inputCls}
                 placeholder={f.placeholder}
                 autoComplete={f.autoComplete}
+                inputMode={f.inputMode}
                 value={values[f.name] ?? ""}
                 onChange={(e) => set(f.name, e.currentTarget.value)}
               />

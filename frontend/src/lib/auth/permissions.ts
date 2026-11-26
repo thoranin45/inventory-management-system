@@ -19,6 +19,7 @@ export type UiAction =
   | "product:update"
   | "product:delete"
   | "master:write"
+  | "company-profile:write"
   | "stock-adjustment-request:create"
   | "stock-adjustment-request:approve";
 
@@ -28,8 +29,9 @@ export function canShowAction(role: Role, action: UiAction): boolean {
     case "product:update":
     case "product:delete":
     case "master:write":
+    case "company-profile:write":
       // Backend: create/update/delete on products, categories, customers and
-      // suppliers all require_admin. Warehouse users get read-only screens.
+      // suppliers (and PUT /company-profile) all require_admin. Warehouse users get read-only screens.
       return isAdmin(role);
     case "stock-adjustment-request:create":
       // Backend: require_warehouse (admin is a superset role and may also

@@ -81,7 +81,14 @@ describe("categoryInput", () => {
 describe("customerInput / supplierInput", () => {
   it("drops empty optional strings so they are never POSTed", () => {
     const parsed = customerInput.parse({ customer_name: "Acme", phone: "", email: "", address: "" });
-    expect(parsed).toEqual({ customer_name: "Acme" });
+    // F0b tax fields are the exception: blank is an explicit null, so an edit can clear them.
+    expect(parsed).toEqual({
+      customer_name: "Acme",
+      tax_id: null,
+      branch_code: null,
+      billing_address: null,
+      credit_term_days: null,
+    });
   });
   it("validates email only when present", () => {
     expect(customerInput.safeParse({ customer_name: "Acme", email: "not-an-email" }).success).toBe(false);
