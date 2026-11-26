@@ -1876,3 +1876,86 @@ class DocumentSequence(Base):
     doc_type = Column(String(16), primary_key=True)
     year = Column(SmallInteger, primary_key=True, autoincrement=False)
     next_value = Column(Integer, nullable=False, default=1, server_default=text("1"))
+
+
+QUOTATION_STATUSES = ("DRAFT", "ISSUED", "ACCEPTED", "REJECTED", "VOID", "CONVERTED")
+_QUOTATION_STATUS_SQL = "|".join(QUOTATION_STATUSES)
+
+
+class Quotation(Base):
+    """F1a: a sales quotation (QT-2026-0001).
+
+    DRAFT is editable and has no number. Issuing allocates the number and
+    freezes the lines, the totals and a snapshot of the seller and customer,
+    so later edits to the customer or the company profile never change an
+    issued document. ACCEPTED quotations convert to exactly one sales order.
+    """
+
+    __tablename__ = "quotations"
+    __table_args__ = (
+        CheckConstraint(f"status ~ '^({_QUOTATION_STATUS_SQL})$'", name="ck_quotations_status"),
+        CheckConstraint("(status = 'DRAFT') = (quotation_number IS NULL)", name="ck_quotations_number_iff_issued"),
+        CheckConstraint("(status = 'CONVERTED') = (sales_order_id IS NOT NULL)", name="ck_quotations_converted_has_order"),
+        CheckConstraint("valid_until IS NULL OR issue_date IS NULL OR valid_until >= issue_date",
+                        name="ck_quotations_valid_until_after_issue"),
+        CheckConstraint("subtotal >= 0 AND vat_base >= 0 AND vat_amount >= 0 AND grand_total >= 0",
+                        name="ck_quotations_totals_nonnegative"),
+        Index("ix_quotations_status_created_at", "status", "created_at"),
+        Index("ix_quotations_customer_id", "customer_id"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    quotation_number = Column(String(20), unique=True, nullable=True)
+    status = Column(String(16), nullable=False, default="DRAFT")
+    customer_id = Column(Integer, ForeignKey("customers.id", name="fk_quotations_customer"), nullable=False)
+    issue_date = Column(Date, nullable=True)
+    valid_until = Column(Date, nullable=True)
+    notes = Column(Text, nullable=True)
+    customer_snapshot = Column(JSONB, nullable=True)
+    seller_snapshot = Column(JSONB, nullable=True)
+    subtotal = Column(Numeric(14, 2), nullable=False, default=Decimal("0.00"))
+    vat_base = Column(Numeric(14, 2), nullable=False, default=Decimal("0.00"))
+    vat_amount = Column(Numeric(14, 2), nullable=False, default=Decimal("0.00"))
+    grand_total = Column(Numeric(14, 2), nullable=False, default=Decimal("0.00"))
+    sales_order_id = Column(Integer, ForeignKey("sales_orders.id", name="fk_quotations_sales_order"),
+                            unique=True, nullable=True)
+    revision_of_id = Column(Integer, ForeignKey("quotations.id", name="fk_quotations_revision_of"), nullable=True)
+    void_reason = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_by_user_id = Column(Integer, ForeignKey("users.id", name="fk_quotations_created_by"), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    issued_at = Column(DateTime(timezone=True), nullable=True)
+    issued_by_user_id = Column(Integer, ForeignKey("users.id", name="fk_quotations_issued_by"), nullable=True)
+    decided_at = Column(DateTime(timezone=True), nullable=True)
+    decided_by_user_id = Column(Integer, ForeignKey("users.id", name="fk_quotations_decided_by"), nullable=True)
+    voided_at = Column(DateTime(timezone=True), nullable=True)
+    voided_by_user_id = Column(Integer, ForeignKey("users.id", name="fk_quotations_voided_by"), nullable=True)
+    converted_at = Column(DateTime(timezone=True), nullable=True)
+    converted_by_user_id = Column(Integer, ForeignKey("users.id", name="fk_quotations_converted_by"), nullable=True)
+
+    items = relationship("QuotationItem", order_by="QuotationItem.line_no",
+                         cascade="all, delete-orphan", passive_deletes=True)
+
+
+class QuotationItem(Base):
+    """F1a: one product line of a quotation (no discounts in F1, Owner 26 Nov)."""
+
+    __tablename__ = "quotation_items"
+    __table_args__ = (
+        UniqueConstraint("quotation_id", "product_id", name="uq_quotation_items_quotation_product"),
+        UniqueConstraint("quotation_id", "line_no", name="uq_quotation_items_quotation_line"),
+        CheckConstraint("line_no >= 1", name="ck_quotation_items_line_no_positive"),
+        CheckConstraint("quantity > 0", name="ck_quotation_items_quantity_positive"),
+        CheckConstraint("unit_price > 0", name="ck_quotation_items_unit_price_positive"),
+        CheckConstraint("line_total >= 0", name="ck_quotation_items_line_total_nonnegative"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    quotation_id = Column(Integer, ForeignKey("quotations.id", name="fk_quotation_items_quotation", ondelete="CASCADE"),
+                          nullable=False)
+    line_no = Column(SmallInteger, nullable=False)
+    product_id = Column(Integer, ForeignKey("products.id", name="fk_quotation_items_product"), nullable=False)
+    description = Column(String(300), nullable=False)
+    quantity = Column(Numeric(18, 3), nullable=False)
+    unit_price = Column(Numeric(14, 2), nullable=False)
+    line_total = Column(Numeric(14, 2), nullable=False)
