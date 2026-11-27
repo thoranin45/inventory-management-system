@@ -76,6 +76,21 @@ export function multiplyDecimals(a: DecimalString, b: DecimalString): DecimalStr
   return fromScaled(scaled, pa.scale + pb.scale);
 }
 
+/**
+ * Round to `dp` places, half away from zero (= the backend's ROUND_HALF_UP
+ * for money). Exact BigInt math; "1.125" x "10.01" = "11.26125" -> "11.26".
+ * Returns "0" (at `dp` places) for a value that is not a decimal string.
+ */
+export function roundHalfUp(value: DecimalString, dp: number): DecimalString {
+  if (!isDecimalString(value)) return padScale("0", dp);
+  const p = parts(value);
+  if (p.scale <= dp) return padScale(fromScaled(p.neg ? -p.scaled : p.scaled, p.scale), dp);
+  const div = 10n ** BigInt(p.scale - dp);
+  let q = p.scaled / div;
+  if ((p.scaled % div) * 2n >= div) q += 1n;
+  return fromScaled(p.neg && q !== 0n ? -q : q, dp);
+}
+
 function fromScaled(scaled: bigint, scale: number): DecimalString {
   const neg = scaled < 0n;
   const digits = (neg ? -scaled : scaled).toString().padStart(scale + 1, "0");

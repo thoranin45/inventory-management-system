@@ -65,7 +65,8 @@ describe("navigation helpers", () => {
     expect(wh).not.toContain("stock-adjustment-approvals");
     expect(wh).not.toContain("audit");
     expect(wh).not.toContain("company-profile");
-    expect(wh).toHaveLength(NAV_ITEMS.length - 3);
+    expect(wh).not.toContain("quotations");
+    expect(wh).toHaveLength(NAV_ITEMS.length - 4);
   });
 
   it("active matching is segment-aware", () => {

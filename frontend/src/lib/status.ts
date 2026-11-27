@@ -44,6 +44,12 @@ export const CANONICAL_STATUS = {
   PENDING: { tone: "neutral", icon: Clock, labelKey: "status.PENDING" },
   APPROVED: { tone: "neutral", icon: CircleCheck, labelKey: "status.APPROVED" },
   REJECTED: { tone: "neutral", icon: CircleX, labelKey: "status.REJECTED" },
+  // F1b quotations
+  ISSUED: { tone: "info", icon: Send, labelKey: "status.ISSUED" },
+  ACCEPTED: { tone: "success", icon: CircleCheck, labelKey: "status.ACCEPTED" },
+  CONVERTED: { tone: "success", icon: PackageCheck, labelKey: "status.CONVERTED" },
+  VOID: { tone: "danger", icon: Ban, labelKey: "status.VOID" },
+  EXPIRED: { tone: "warning", icon: Clock, labelKey: "status.EXPIRED" },
   active: { tone: "success", icon: CircleCheck, labelKey: "status.active" },
   inactive: { tone: "neutral", icon: CircleMinus, labelKey: "status.inactive" },
 } as const satisfies Record<string, { tone: Tone; icon: LucideIcon; labelKey: MessageKey }>;
