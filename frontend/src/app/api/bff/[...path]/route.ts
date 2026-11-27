@@ -85,7 +85,6 @@ const ALLOW: { method: string; pattern: RegExp }[] = [
   { method: "POST", pattern: /^sales-orders\/\d+\/ship$/ },
   { method: "POST", pattern: /^sales-orders\/\d+\/complete$/ },
   { method: "POST", pattern: /^sales-orders\/\d+\/return$/ },
-  { method: "GET", pattern: /^sales-orders\/\d+\/invoice$/ },
   { method: "GET", pattern: /^audit-logs$/ },
   { method: "GET", pattern: /^audit-logs\/\d+$/ },
 

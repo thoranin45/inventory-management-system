@@ -20,7 +20,8 @@ from sqlalchemy.engine import URL, Connection, make_url
 # F0a: ef1a00000001 (company_profile, customer tax fields, document_sequences)
 # F1a: f01a00000001 (quotations, quotation_items)
 # F2a: f02a00000001 (invoices, adjustment notes, company_profile.default_credit_days)
-EXPECTED_ALEMBIC_HEAD = "f02a00000001"
+# F3a: f03a00000001 (payment receipts, billing notes)
+EXPECTED_ALEMBIC_HEAD = "f03a00000001"
 
 
 def current_db_revision(connection: Connection) -> str | None:

@@ -2121,3 +2121,139 @@ class AdjustmentNoteItem(Base):
     quantity = Column(Numeric(18, 3), nullable=False)
     unit_price = Column(Numeric(14, 2), nullable=False)
     line_total = Column(Numeric(14, 2), nullable=False)
+
+
+PAYMENT_RECEIPT_STATUSES = ("ISSUED", "VOID")
+PAYMENT_METHODS = ("CASH", "TRANSFER", "CHEQUE", "OTHER")
+
+
+class PaymentReceipt(Base):
+    """F3a: a receipt (RC-2026-0001) for money received from one customer.
+
+    Issued when it is recorded (no draft: a payment is a fact). Its
+    allocations settle one or more ISSUED invoices of that customer, each up to
+    the invoice balance. VOID puts the amounts back on the invoices. Not a tax
+    receipt while the business is not VAT-registered.
+    """
+
+    __tablename__ = "payment_receipts"
+    __table_args__ = (
+        CheckConstraint("status ~ '^(ISSUED|VOID)$'", name="ck_payment_receipts_status"),
+        CheckConstraint("method ~ '^(CASH|TRANSFER|CHEQUE|OTHER)$'", name="ck_payment_receipts_method"),
+        CheckConstraint("amount_total >= 0 AND wht_total >= 0", name="ck_payment_receipts_totals_nonnegative"),
+        CheckConstraint("settled_total = amount_total + wht_total AND settled_total > 0",
+                        name="ck_payment_receipts_settled_total"),
+        Index("ix_payment_receipts_customer_id", "customer_id"),
+        Index("ix_payment_receipts_status_received_date", "status", "received_date"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    receipt_number = Column(String(20), unique=True, nullable=False)
+    status = Column(String(16), nullable=False, default="ISSUED")
+    customer_id = Column(Integer, ForeignKey("customers.id", name="fk_payment_receipts_customer"), nullable=False)
+    received_date = Column(Date, nullable=False)
+    method = Column(String(16), nullable=False)
+    reference = Column(String(100), nullable=True)
+    notes = Column(Text, nullable=True)
+    amount_total = Column(Numeric(14, 2), nullable=False)
+    wht_total = Column(Numeric(14, 2), nullable=False, default=Decimal("0.00"))
+    settled_total = Column(Numeric(14, 2), nullable=False)
+    client_request_id = Column(String(64), unique=True, nullable=True)
+    customer_snapshot = Column(JSONB, nullable=True)
+    seller_snapshot = Column(JSONB, nullable=True)
+    void_reason = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_by_user_id = Column(Integer, ForeignKey("users.id", name="fk_payment_receipts_created_by"),
+                                nullable=False)
+    voided_at = Column(DateTime(timezone=True), nullable=True)
+    voided_by_user_id = Column(Integer, ForeignKey("users.id", name="fk_payment_receipts_voided_by"), nullable=True)
+
+    allocations = relationship("PaymentReceiptAllocation", order_by="PaymentReceiptAllocation.line_no",
+                               cascade="all, delete-orphan", passive_deletes=True)
+
+
+class PaymentReceiptAllocation(Base):
+    """F3a: the part of one receipt that settles one invoice (cash plus withheld tax)."""
+
+    __tablename__ = "payment_receipt_allocations"
+    __table_args__ = (
+        UniqueConstraint("payment_receipt_id", "invoice_id", name="uq_payment_receipt_allocations_receipt_invoice"),
+        UniqueConstraint("payment_receipt_id", "line_no", name="uq_payment_receipt_allocations_receipt_line"),
+        CheckConstraint("line_no >= 1", name="ck_payment_receipt_allocations_line_no_positive"),
+        CheckConstraint("amount >= 0 AND wht_amount >= 0", name="ck_payment_receipt_allocations_nonnegative"),
+        CheckConstraint("amount + wht_amount > 0", name="ck_payment_receipt_allocations_positive"),
+        Index("ix_payment_receipt_allocations_invoice_id", "invoice_id"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    payment_receipt_id = Column(
+        Integer, ForeignKey("payment_receipts.id", name="fk_payment_receipt_allocations_receipt",
+                            ondelete="CASCADE"), nullable=False)
+    line_no = Column(SmallInteger, nullable=False)
+    invoice_id = Column(Integer, ForeignKey("invoices.id", name="fk_payment_receipt_allocations_invoice"),
+                        nullable=False)
+    amount = Column(Numeric(14, 2), nullable=False)
+    wht_amount = Column(Numeric(14, 2), nullable=False, default=Decimal("0.00"))
+    wht_certificate_no = Column(String(50), nullable=True)
+
+
+class BillingNote(Base):
+    """F3a: a billing note (BN-2026-0001) listing one customer's unpaid invoices.
+
+    Informational: it never changes invoice balances. DRAFT is editable and
+    has no number; issuing fixes each invoice's amount at its balance then.
+    """
+
+    __tablename__ = "billing_notes"
+    __table_args__ = (
+        CheckConstraint(f"status ~ '^({_FINANCE_DOC_STATUS_SQL})$'", name="ck_billing_notes_status"),
+        CheckConstraint("(status = 'DRAFT') = (billing_number IS NULL)", name="ck_billing_notes_number_iff_issued"),
+        CheckConstraint("total_amount >= 0", name="ck_billing_notes_total_nonnegative"),
+        CheckConstraint("payment_due_date IS NULL OR issue_date IS NULL OR payment_due_date >= issue_date",
+                        name="ck_billing_notes_due_after_issue"),
+        Index("ix_billing_notes_customer_id", "customer_id"),
+        Index("ix_billing_notes_status_created_at", "status", "created_at"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    billing_number = Column(String(20), unique=True, nullable=True)
+    status = Column(String(16), nullable=False, default="DRAFT")
+    customer_id = Column(Integer, ForeignKey("customers.id", name="fk_billing_notes_customer"), nullable=False)
+    issue_date = Column(Date, nullable=True)
+    payment_due_date = Column(Date, nullable=True)
+    notes = Column(Text, nullable=True)
+    total_amount = Column(Numeric(14, 2), nullable=False, default=Decimal("0.00"))
+    customer_snapshot = Column(JSONB, nullable=True)
+    seller_snapshot = Column(JSONB, nullable=True)
+    void_reason = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_by_user_id = Column(Integer, ForeignKey("users.id", name="fk_billing_notes_created_by"), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    issued_at = Column(DateTime(timezone=True), nullable=True)
+    issued_by_user_id = Column(Integer, ForeignKey("users.id", name="fk_billing_notes_issued_by"), nullable=True)
+    voided_at = Column(DateTime(timezone=True), nullable=True)
+    voided_by_user_id = Column(Integer, ForeignKey("users.id", name="fk_billing_notes_voided_by"), nullable=True)
+
+    items = relationship("BillingNoteItem", order_by="BillingNoteItem.line_no",
+                         cascade="all, delete-orphan", passive_deletes=True)
+
+
+class BillingNoteItem(Base):
+    """F3a: one invoice on a billing note, with the amount billed (its balance)."""
+
+    __tablename__ = "billing_note_items"
+    __table_args__ = (
+        UniqueConstraint("billing_note_id", "invoice_id", name="uq_billing_note_items_note_invoice"),
+        UniqueConstraint("billing_note_id", "line_no", name="uq_billing_note_items_note_line"),
+        CheckConstraint("line_no >= 1", name="ck_billing_note_items_line_no_positive"),
+        CheckConstraint("amount >= 0", name="ck_billing_note_items_amount_nonnegative"),
+        Index("ix_billing_note_items_invoice_id", "invoice_id"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    billing_note_id = Column(
+        Integer, ForeignKey("billing_notes.id", name="fk_billing_note_items_note", ondelete="CASCADE"),
+        nullable=False)
+    line_no = Column(SmallInteger, nullable=False)
+    invoice_id = Column(Integer, ForeignKey("invoices.id", name="fk_billing_note_items_invoice"), nullable=False)
+    amount = Column(Numeric(14, 2), nullable=False)

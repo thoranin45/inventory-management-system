@@ -41,6 +41,7 @@ from app.routers.customer_router import router as customer_router
 from app.routers.company_profile_router import router as company_profile_router
 from app.routers.quotation_router import router as quotation_router
 from app.routers.invoice_router import adjustment_router, router as invoice_router
+from app.routers.payment_router import billing_router, receipt_router
 from app.routers.dashboard_router import router as dashboard_router
 from app.routers.health_router import router as health_router
 from app.routers.system_router import router as system_router
@@ -256,6 +257,16 @@ app.include_router(
 
 app.include_router(
     adjustment_router,
+    prefix=API_V1_PREFIX,
+)
+
+app.include_router(
+    receipt_router,
+    prefix=API_V1_PREFIX,
+)
+
+app.include_router(
+    billing_router,
     prefix=API_V1_PREFIX,
 )
 

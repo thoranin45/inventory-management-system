@@ -17,7 +17,6 @@ from app.repositories.dashboard_repository import DashboardRepository
 from app.services.dashboard_service import get_stock_summary_service
 from tests.test_stock import _create_product, _create_batch
 from tests import test_purchase_order as purchase
-from tests import test_sales_order as sales
 
 
 CONTRACTS = [
@@ -163,24 +162,3 @@ def test_batch_lot_scope_preserves_case_and_duplicate_rejection(client, admin_he
     response = client.post("/api/v1/batches", headers=admin_headers,
                            json={**payload, "product_id": first["id"], "lot_no": lot.lower()})
     assert response.status_code == 201
-
-
-def test_fractional_invoice_keeps_quantity_text(client, admin_headers, monkeypatch):
-    product = sales._create_product(client, admin_headers)
-    customer = sales._create_customer(client, admin_headers)
-    sales._create_batch(client, admin_headers, product["id"], quantity="1.125", expiry_days=90)
-    order = sales._create_sales_order(client, admin_headers, customer["id"], product["id"],
-                                     quantity="1.125", unit_price=1)
-    from app.routers import sales_order_router
-    original_table = sales_order_router.Table
-    captured = []
-
-    def record_table(data, *args, **kwargs):
-        captured.extend(data)
-        return original_table(data, *args, **kwargs)
-
-    monkeypatch.setattr(sales_order_router, "Table", record_table)
-    response = client.get(f"/api/v1/sales-orders/{order['sales_order_id']}/invoice", headers=admin_headers)
-    assert response.status_code == 200
-    assert captured[1][1] == "1.125"
-    assert response.content.startswith(b"%PDF")

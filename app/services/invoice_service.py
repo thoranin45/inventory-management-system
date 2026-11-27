@@ -18,8 +18,13 @@ audit row):
   seller/customer snapshots.
 - An invoice with an ISSUED adjustment note cannot be voided (void the
   adjustment first).
-- "Overdue" is not stored: an ISSUED invoice whose due_date is before
-  business_today() is reported as overdue (payments come in F3).
+- "Overdue" is not stored: an ISSUED invoice with a balance left whose
+  due_date is before business_today() is reported as overdue.
+- F3a: balance = grand_total - ISSUED adjustments - ISSUED receipt
+  allocations (cash plus withheld tax). payment_status (UNPAID / PARTIAL /
+  PAID) is computed from it. An invoice with an ISSUED receipt cannot be
+  voided (void the receipt first), and an adjustment can't push the balance
+  below zero.
 
 Adjustment notes (not a VAT credit note) lower an ISSUED invoice:
 
@@ -54,6 +59,8 @@ from app.models import (
     Customer,
     Invoice,
     InvoiceItem,
+    PaymentReceipt,
+    PaymentReceiptAllocation,
     Product,
     Quotation,
     SalesOrder,
@@ -148,8 +155,49 @@ def _apply_invoice_totals(db: Session, invoice: Invoice, vat: dict | None = None
     invoice.grand_total = totals.grand_total
 
 
-def _is_overdue(invoice: Invoice, today: date) -> bool:
+def _is_overdue(invoice: Invoice, today: date, balance: Decimal | None = None) -> bool:
+    if balance is not None and balance <= 0:
+        return False
     return invoice.status == "ISSUED" and invoice.due_date is not None and invoice.due_date < today
+
+
+def _paid_query():
+    """Sum of ISSUED receipt allocations (cash + withheld tax); add a WHERE on the invoice."""
+    return (
+        select(func.coalesce(func.sum(PaymentReceiptAllocation.amount + PaymentReceiptAllocation.wht_amount), 0))
+        .join(PaymentReceipt, PaymentReceipt.id == PaymentReceiptAllocation.payment_receipt_id)
+        .where(PaymentReceipt.status == "ISSUED")
+    )
+
+
+def paid_total(db: Session, invoice_id: int, exclude_receipt_id: int | None = None) -> Decimal:
+    query = _paid_query().where(PaymentReceiptAllocation.invoice_id == invoice_id)
+    if exclude_receipt_id is not None:
+        query = query.where(PaymentReceipt.id != exclude_receipt_id)
+    return Decimal(db.execute(query).scalar_one()).quantize(Decimal("0.01"))
+
+
+def invoice_balance(db: Session, invoice: Invoice) -> Decimal:
+    return invoice.grand_total - _issued_adjusted_total(db, invoice.id) - paid_total(db, invoice.id)
+
+
+def balance_expression():
+    """SQL: an invoice's balance (grand total - issued adjustments - issued receipts)."""
+    adjusted = (
+        select(func.coalesce(func.sum(AdjustmentNote.grand_total), 0))
+        .where(AdjustmentNote.invoice_id == Invoice.id, AdjustmentNote.status == "ISSUED")
+        .correlate(Invoice).scalar_subquery()
+    )
+    paid = _paid_query().where(PaymentReceiptAllocation.invoice_id == Invoice.id).correlate(Invoice).scalar_subquery()
+    return Invoice.grand_total - adjusted - paid
+
+
+def payment_status(invoice: Invoice, paid: Decimal, balance: Decimal) -> str | None:
+    if invoice.status != "ISSUED":
+        return None
+    if balance <= 0:
+        return "PAID"
+    return "PARTIAL" if paid > 0 else "UNPAID"
 
 
 def _issued_adjusted_total(db: Session, invoice_id: int, exclude_note_id: int | None = None) -> Decimal:
@@ -161,13 +209,15 @@ def _issued_adjusted_total(db: Session, invoice_id: int, exclude_note_id: int | 
 
 
 def _invoice_summary(invoice: Invoice, customer_name: str | None, so_number: str | None,
-                     adjusted: Decimal, today: date) -> dict:
+                     adjusted: Decimal, today: date, paid: Decimal = ZERO) -> dict:
     snapshot = invoice.customer_snapshot or {}
+    balance = invoice.grand_total - adjusted - paid
     return {
         "id": invoice.id,
         "invoice_number": invoice.invoice_number,
         "status": invoice.status,
-        "is_overdue": _is_overdue(invoice, today),
+        "is_overdue": _is_overdue(invoice, today, balance),
+        "payment_status": payment_status(invoice, paid, balance),
         "sales_order_id": invoice.sales_order_id,
         "sales_order_number": so_number,
         "customer_id": invoice.customer_id,
@@ -177,7 +227,8 @@ def _invoice_summary(invoice: Invoice, customer_name: str | None, so_number: str
         "credit_days": invoice.credit_days,
         "grand_total": invoice.grand_total,
         "adjusted_total": adjusted,
-        "balance": invoice.grand_total - adjusted,
+        "paid_total": paid,
+        "balance": balance,
         "created_at": invoice.created_at,
         "updated_at": invoice.updated_at,
     }
@@ -248,10 +299,17 @@ def invoice_detail(db: Session, invoice: Invoice) -> dict:
         receipt_rows.append({"id": receipt.id, "receipt_number": receipt.receipt_number,
                              "returned_at": receipt.returned_at, "items": lines})
     amounts = _adjusted_amounts(db, invoice.id)
+    payments = db.execute(
+        select(PaymentReceipt, PaymentReceiptAllocation)
+        .join(PaymentReceiptAllocation, PaymentReceiptAllocation.payment_receipt_id == PaymentReceipt.id)
+        .where(PaymentReceiptAllocation.invoice_id == invoice.id)
+        .order_by(PaymentReceipt.id)
+    ).all()
+    paid = sum((a.amount + a.wht_amount for r, a in payments if r.status == "ISSUED"), ZERO)
     today = _today()
     return phase8_json({
         **_invoice_summary(invoice, customer.customer_name if customer else None,
-                           order.so_number if order else None, adjusted, today),
+                           order.so_number if order else None, adjusted, today, paid),
         "quotation_id": invoice.quotation_id,
         "quotation_number": quotation_number,
         "notes": invoice.notes,
@@ -284,6 +342,11 @@ def invoice_detail(db: Session, invoice: Invoice) -> dict:
             for n in notes
         ],
         "return_receipts": receipt_rows,
+        "payments": [
+            {"id": r.id, "receipt_number": r.receipt_number, "status": r.status, "received_date": r.received_date,
+             "method": r.method, "amount": a.amount, "wht_amount": a.wht_amount}
+            for r, a in payments
+        ],
     })
 
 
@@ -295,15 +358,21 @@ def get_invoice_service(db: Session, invoice_id: int) -> dict:
 
 
 def list_invoices_service(db: Session, params: ListParams, customer_id: int | None = None,
-                          sales_order_id: int | None = None) -> dict:
+                          sales_order_id: int | None = None, payment: str | None = None) -> dict:
+    """``payment``: "open" (ISSUED with a balance left, incl. partly paid) or "paid"."""
     query = db.query(Invoice)
     today = _today()
+    balance = balance_expression()
     if params.status:
         wanted = params.status.upper()
         if wanted == "OVERDUE":
-            query = query.filter(Invoice.status == "ISSUED", Invoice.due_date < today)
+            query = query.filter(Invoice.status == "ISSUED", Invoice.due_date < today, balance > 0)
         else:
             query = query.filter(Invoice.status == wanted)
+    if payment == "open":
+        query = query.filter(Invoice.status == "ISSUED", balance > 0)
+    elif payment == "paid":
+        query = query.filter(Invoice.status == "ISSUED", balance <= 0)
     if customer_id:
         query = query.filter(Invoice.customer_id == customer_id)
     if sales_order_id:
@@ -337,8 +406,16 @@ def list_invoices_service(db: Session, params: ListParams, customer_id: int | No
         .where(AdjustmentNote.invoice_id.in_(invoice_ids), AdjustmentNote.status == "ISSUED")
         .group_by(AdjustmentNote.invoice_id)
     ).all()) if invoice_ids else {}
+    paid = dict(db.execute(
+        select(PaymentReceiptAllocation.invoice_id,
+               func.sum(PaymentReceiptAllocation.amount + PaymentReceiptAllocation.wht_amount))
+        .join(PaymentReceipt, PaymentReceipt.id == PaymentReceiptAllocation.payment_receipt_id)
+        .where(PaymentReceiptAllocation.invoice_id.in_(invoice_ids), PaymentReceipt.status == "ISSUED")
+        .group_by(PaymentReceiptAllocation.invoice_id)
+    ).all()) if invoice_ids else {}
     rows = [_invoice_summary(i, names.get(i.customer_id), numbers.get(i.sales_order_id),
-                             Decimal(adjusted.get(i.id, ZERO)).quantize(Decimal("0.01")), today)
+                             Decimal(adjusted.get(i.id, ZERO)).quantize(Decimal("0.01")), today,
+                             Decimal(paid.get(i.id, ZERO)).quantize(Decimal("0.01")))
             for i in items]
     return paginated_body(rows, total, params, "Invoices retrieved")
 
@@ -461,6 +538,8 @@ def void_invoice_service(db: Session, invoice_id: int, reason: str, user: User) 
         ).scalar_one()
         if issued_notes:
             _error("Invoice has issued adjustment notes; void them before voiding the invoice")
+        if paid_total(db, invoice.id) > 0:
+            _error("Invoice has issued receipts; void them before voiding the invoice")
         invoice.status = "VOID"
         invoice.void_reason = reason
         invoice.voided_at = func.now()
@@ -483,6 +562,11 @@ def revenue_summary_service(db: Session, year: int | None = None) -> dict:
         select(func.coalesce(func.sum(AdjustmentNote.grand_total), 0))
         .where(AdjustmentNote.status == "ISSUED", AdjustmentNote.issue_date >= start, AdjustmentNote.issue_date < end)
     ).scalar_one())
+    received = Decimal(db.execute(
+        select(func.coalesce(func.sum(PaymentReceipt.settled_total), 0))
+        .where(PaymentReceipt.status == "ISSUED", PaymentReceipt.received_date >= start,
+               PaymentReceipt.received_date < end)
+    ).scalar_one())
     net = round_money(invoiced - adjusted)
     share = net / VAT_THRESHOLD
     level = "over" if share >= 1 else "warning" if share >= VAT_WARNING_SHARE else "ok"
@@ -491,6 +575,7 @@ def revenue_summary_service(db: Session, year: int | None = None) -> dict:
         "invoiced_total": round_money(invoiced),
         "adjusted_total": round_money(adjusted),
         "net_revenue": net,
+        "received_total": round_money(received),
         "vat_threshold": VAT_THRESHOLD,
         "threshold_percent": (share * 100).quantize(Decimal("0.01")),
         "level": level,
@@ -580,6 +665,9 @@ def _check_limits(db: Session, note: AdjustmentNote, invoice: Invoice) -> None:
             _invalid(f"Line {line.line_no}: the adjustment is larger than what is left of the invoice line")
     if note.grand_total > invoice.grand_total - _issued_adjusted_total(db, invoice.id, exclude):
         _invalid("Adjustments would be larger than the invoice total")
+    if note.grand_total > invoice.grand_total - _issued_adjusted_total(db, invoice.id, exclude) \
+            - paid_total(db, invoice.id):
+        _invalid("The adjustment is larger than the unpaid balance; void a receipt first")
 
 
 def _replace_note_lines(db: Session, note: AdjustmentNote, invoice: Invoice, data: AdjustmentDraftInput) -> None:
