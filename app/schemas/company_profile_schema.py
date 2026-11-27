@@ -56,6 +56,7 @@ class CompanyProfileUpdate(BaseModel):
     vat_registered: bool = False
     vat_rate: Decimal = Field(default=Decimal("7.00"), ge=0, le=100, max_digits=5, decimal_places=2)
     prices_include_vat: bool = False
+    default_credit_days: int = Field(default=30, ge=0, le=365)
 
     _tax_id = field_validator("tax_id")(normalize_tax_id)
     _branch_code = field_validator("branch_code")(normalize_branch_code)
@@ -73,6 +74,7 @@ class CompanyProfileResponse(BaseModel):
     vat_registered: bool = False
     vat_rate: Decimal = Decimal("7.00")
     prices_include_vat: bool = False
+    default_credit_days: int = 30
     updated_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)

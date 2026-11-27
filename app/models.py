@@ -1836,6 +1836,8 @@ class CompanyProfile(Base):
         CheckConstraint("tax_id ~ '^[0-9]{13}$'", name="ck_company_profile_tax_id_format"),
         CheckConstraint("branch_code ~ '^[0-9]{5}$'", name="ck_company_profile_branch_code_format"),
         CheckConstraint("vat_rate >= 0 AND vat_rate <= 100", name="ck_company_profile_vat_rate_range"),
+        CheckConstraint("default_credit_days >= 0 AND default_credit_days <= 365",
+                        name="ck_company_profile_default_credit_days_range"),
     )
 
     id = Column(Integer, primary_key=True, autoincrement=False)
@@ -1850,6 +1852,8 @@ class CompanyProfile(Base):
     vat_registered = Column(Boolean, nullable=False, default=False, server_default=text("false"))
     vat_rate = Column(Numeric(5, 2), nullable=False, default=Decimal("7.00"), server_default=text("7.00"))
     prices_include_vat = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    # F2a: invoice due date = issue date + credit days (0 = cash).
+    default_credit_days = Column(SmallInteger, nullable=False, default=30, server_default=text("30"))
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_by_user_id = Column(
         Integer,
@@ -1955,6 +1959,164 @@ class QuotationItem(Base):
                           nullable=False)
     line_no = Column(SmallInteger, nullable=False)
     product_id = Column(Integer, ForeignKey("products.id", name="fk_quotation_items_product"), nullable=False)
+    description = Column(String(300), nullable=False)
+    quantity = Column(Numeric(18, 3), nullable=False)
+    unit_price = Column(Numeric(14, 2), nullable=False)
+    line_total = Column(Numeric(14, 2), nullable=False)
+
+
+FINANCE_DOC_STATUSES = ("DRAFT", "ISSUED", "VOID")
+_FINANCE_DOC_STATUS_SQL = "|".join(FINANCE_DOC_STATUSES)
+
+
+class Invoice(Base):
+    """F2a: an invoice (INV-2026-0001) billed from one shipped sales order.
+
+    Not a tax invoice while the business is not VAT-registered. DRAFT is
+    editable (line discounts, credit days, notes) and has no number; issuing
+    allocates the number and freezes lines, totals and the seller/customer
+    snapshots. At most one non-void invoice exists per sales order.
+    """
+
+    __tablename__ = "invoices"
+    __table_args__ = (
+        CheckConstraint(f"status ~ '^({_FINANCE_DOC_STATUS_SQL})$'", name="ck_invoices_status"),
+        CheckConstraint("(status = 'DRAFT') = (invoice_number IS NULL)", name="ck_invoices_number_iff_issued"),
+        CheckConstraint("credit_days >= 0 AND credit_days <= 365", name="ck_invoices_credit_days_range"),
+        CheckConstraint("due_date IS NULL OR issue_date IS NULL OR due_date >= issue_date",
+                        name="ck_invoices_due_after_issue"),
+        CheckConstraint("subtotal >= 0 AND discount_total >= 0 AND vat_base >= 0 AND vat_amount >= 0 "
+                        "AND grand_total >= 0", name="ck_invoices_totals_nonnegative"),
+        Index("uq_invoices_active_sales_order", "sales_order_id", unique=True,
+              postgresql_where=text("status <> 'VOID'")),
+        Index("ix_invoices_status_created_at", "status", "created_at"),
+        Index("ix_invoices_customer_id", "customer_id"),
+        Index("ix_invoices_issue_date", "issue_date"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    invoice_number = Column(String(20), unique=True, nullable=True)
+    status = Column(String(16), nullable=False, default="DRAFT")
+    sales_order_id = Column(Integer, ForeignKey("sales_orders.id", name="fk_invoices_sales_order"), nullable=False)
+    customer_id = Column(Integer, ForeignKey("customers.id", name="fk_invoices_customer"), nullable=False)
+    quotation_id = Column(Integer, ForeignKey("quotations.id", name="fk_invoices_quotation"), nullable=True)
+    issue_date = Column(Date, nullable=True)
+    credit_days = Column(SmallInteger, nullable=False)
+    due_date = Column(Date, nullable=True)
+    notes = Column(Text, nullable=True)
+    customer_snapshot = Column(JSONB, nullable=True)
+    seller_snapshot = Column(JSONB, nullable=True)
+    subtotal = Column(Numeric(14, 2), nullable=False, default=Decimal("0.00"))
+    discount_total = Column(Numeric(14, 2), nullable=False, default=Decimal("0.00"))
+    vat_base = Column(Numeric(14, 2), nullable=False, default=Decimal("0.00"))
+    vat_amount = Column(Numeric(14, 2), nullable=False, default=Decimal("0.00"))
+    grand_total = Column(Numeric(14, 2), nullable=False, default=Decimal("0.00"))
+    void_reason = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_by_user_id = Column(Integer, ForeignKey("users.id", name="fk_invoices_created_by"), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    issued_at = Column(DateTime(timezone=True), nullable=True)
+    issued_by_user_id = Column(Integer, ForeignKey("users.id", name="fk_invoices_issued_by"), nullable=True)
+    voided_at = Column(DateTime(timezone=True), nullable=True)
+    voided_by_user_id = Column(Integer, ForeignKey("users.id", name="fk_invoices_voided_by"), nullable=True)
+
+    items = relationship("InvoiceItem", order_by="InvoiceItem.line_no",
+                         cascade="all, delete-orphan", passive_deletes=True)
+
+
+class InvoiceItem(Base):
+    """F2a: one invoice line, copied from a sales order line (qty and price locked)."""
+
+    __tablename__ = "invoice_items"
+    __table_args__ = (
+        UniqueConstraint("invoice_id", "product_id", name="uq_invoice_items_invoice_product"),
+        UniqueConstraint("invoice_id", "line_no", name="uq_invoice_items_invoice_line"),
+        CheckConstraint("line_no >= 1", name="ck_invoice_items_line_no_positive"),
+        CheckConstraint("quantity > 0", name="ck_invoice_items_quantity_positive"),
+        CheckConstraint("unit_price >= 0", name="ck_invoice_items_unit_price_nonnegative"),
+        CheckConstraint("discount_amount >= 0", name="ck_invoice_items_discount_nonnegative"),
+        CheckConstraint("line_total >= 0", name="ck_invoice_items_line_total_nonnegative"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    invoice_id = Column(Integer, ForeignKey("invoices.id", name="fk_invoice_items_invoice", ondelete="CASCADE"),
+                        nullable=False)
+    line_no = Column(SmallInteger, nullable=False)
+    product_id = Column(Integer, ForeignKey("products.id", name="fk_invoice_items_product"), nullable=False)
+    description = Column(String(300), nullable=False)
+    quantity = Column(Numeric(18, 3), nullable=False)
+    unit_price = Column(Numeric(14, 2), nullable=False)
+    discount_amount = Column(Numeric(14, 2), nullable=False, default=Decimal("0.00"))
+    line_total = Column(Numeric(14, 2), nullable=False)
+
+
+class AdjustmentNote(Base):
+    """F2a: an internal adjustment note (ADJ-2026-0001) that lowers an issued invoice.
+
+    Not a VAT credit note. Built either from a sales return receipt of the
+    invoice's sales order or as a manual price reduction. Issued adjustments
+    of one invoice never add up to more than the invoice total.
+    """
+
+    __tablename__ = "adjustment_notes"
+    __table_args__ = (
+        CheckConstraint(f"status ~ '^({_FINANCE_DOC_STATUS_SQL})$'", name="ck_adjustment_notes_status"),
+        CheckConstraint("(status = 'DRAFT') = (adjustment_number IS NULL)",
+                        name="ck_adjustment_notes_number_iff_issued"),
+        CheckConstraint("subtotal >= 0 AND vat_base >= 0 AND vat_amount >= 0 AND grand_total >= 0",
+                        name="ck_adjustment_notes_totals_nonnegative"),
+        Index("ix_adjustment_notes_invoice_id", "invoice_id"),
+        Index("ix_adjustment_notes_status_created_at", "status", "created_at"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    adjustment_number = Column(String(20), unique=True, nullable=True)
+    status = Column(String(16), nullable=False, default="DRAFT")
+    invoice_id = Column(Integer, ForeignKey("invoices.id", name="fk_adjustment_notes_invoice"), nullable=False)
+    sales_return_receipt_id = Column(
+        Integer, ForeignKey("sales_return_receipts.id", name="fk_adjustment_notes_return_receipt"), nullable=True)
+    reason = Column(Text, nullable=False)
+    issue_date = Column(Date, nullable=True)
+    customer_snapshot = Column(JSONB, nullable=True)
+    seller_snapshot = Column(JSONB, nullable=True)
+    subtotal = Column(Numeric(14, 2), nullable=False, default=Decimal("0.00"))
+    vat_base = Column(Numeric(14, 2), nullable=False, default=Decimal("0.00"))
+    vat_amount = Column(Numeric(14, 2), nullable=False, default=Decimal("0.00"))
+    grand_total = Column(Numeric(14, 2), nullable=False, default=Decimal("0.00"))
+    void_reason = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_by_user_id = Column(Integer, ForeignKey("users.id", name="fk_adjustment_notes_created_by"),
+                                nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    issued_at = Column(DateTime(timezone=True), nullable=True)
+    issued_by_user_id = Column(Integer, ForeignKey("users.id", name="fk_adjustment_notes_issued_by"), nullable=True)
+    voided_at = Column(DateTime(timezone=True), nullable=True)
+    voided_by_user_id = Column(Integer, ForeignKey("users.id", name="fk_adjustment_notes_voided_by"), nullable=True)
+
+    items = relationship("AdjustmentNoteItem", order_by="AdjustmentNoteItem.line_no",
+                         cascade="all, delete-orphan", passive_deletes=True)
+
+
+class AdjustmentNoteItem(Base):
+    """F2a: one adjustment line: a quantity of an invoice line at a reduction per unit."""
+
+    __tablename__ = "adjustment_note_items"
+    __table_args__ = (
+        UniqueConstraint("adjustment_note_id", "invoice_item_id", name="uq_adjustment_note_items_note_invoice_item"),
+        UniqueConstraint("adjustment_note_id", "line_no", name="uq_adjustment_note_items_note_line"),
+        CheckConstraint("line_no >= 1", name="ck_adjustment_note_items_line_no_positive"),
+        CheckConstraint("quantity > 0", name="ck_adjustment_note_items_quantity_positive"),
+        CheckConstraint("unit_price > 0", name="ck_adjustment_note_items_unit_price_positive"),
+        CheckConstraint("line_total >= 0", name="ck_adjustment_note_items_line_total_nonnegative"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    adjustment_note_id = Column(
+        Integer, ForeignKey("adjustment_notes.id", name="fk_adjustment_note_items_note", ondelete="CASCADE"),
+        nullable=False)
+    line_no = Column(SmallInteger, nullable=False)
+    invoice_item_id = Column(Integer, ForeignKey("invoice_items.id", name="fk_adjustment_note_items_invoice_item"),
+                             nullable=False)
     description = Column(String(300), nullable=False)
     quantity = Column(Numeric(18, 3), nullable=False)
     unit_price = Column(Numeric(14, 2), nullable=False)
