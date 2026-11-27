@@ -142,6 +142,23 @@ const ALLOW: { method: string; pattern: RegExp }[] = [
   // Binary PDF (rendered on the fly, never cached).
   { method: "GET", pattern: /^quotations\/\d+\/pdf$/ },
 
+  // F2b — invoices and adjustment notes (require_admin for every method, reads included).
+  { method: "GET", pattern: /^invoices$/ },
+  { method: "POST", pattern: /^invoices$/ },
+  { method: "GET", pattern: /^invoices\/revenue-summary$/ },
+  { method: "GET", pattern: /^invoices\/\d+$/ },
+  { method: "PUT", pattern: /^invoices\/\d+$/ },
+  { method: "DELETE", pattern: /^invoices\/\d+$/ },
+  { method: "POST", pattern: /^invoices\/\d+\/(issue|void)$/ },
+  { method: "GET", pattern: /^invoices\/\d+\/pdf$/ },
+  { method: "GET", pattern: /^adjustment-notes$/ },
+  { method: "POST", pattern: /^adjustment-notes$/ },
+  { method: "GET", pattern: /^adjustment-notes\/\d+$/ },
+  { method: "PUT", pattern: /^adjustment-notes\/\d+$/ },
+  { method: "DELETE", pattern: /^adjustment-notes\/\d+$/ },
+  { method: "POST", pattern: /^adjustment-notes\/\d+\/(issue|void)$/ },
+  { method: "GET", pattern: /^adjustment-notes\/\d+\/pdf$/ },
+
   { method: "GET", pattern: /^suppliers\/\d+$/ },
   { method: "POST", pattern: /^suppliers$/ },
   { method: "PUT", pattern: /^suppliers\/\d+$/ },

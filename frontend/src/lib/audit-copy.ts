@@ -59,6 +59,16 @@ export const AUDIT_ACTION_KEY: Record<string, MessageKey> = {
   VOID_QUOTATION: "auditCopy.act_VOID_QUOTATION",
   REVISE_QUOTATION: "auditCopy.act_REVISE_QUOTATION",
   CONVERT_QUOTATION: "auditCopy.act_CONVERT_QUOTATION",
+  CREATE_INVOICE: "auditCopy.act_CREATE_INVOICE",
+  UPDATE_INVOICE: "auditCopy.act_UPDATE_INVOICE",
+  DELETE_INVOICE: "auditCopy.act_DELETE_INVOICE",
+  ISSUE_INVOICE: "auditCopy.act_ISSUE_INVOICE",
+  VOID_INVOICE: "auditCopy.act_VOID_INVOICE",
+  CREATE_ADJUSTMENT_NOTE: "auditCopy.act_CREATE_ADJUSTMENT_NOTE",
+  UPDATE_ADJUSTMENT_NOTE: "auditCopy.act_UPDATE_ADJUSTMENT_NOTE",
+  DELETE_ADJUSTMENT_NOTE: "auditCopy.act_DELETE_ADJUSTMENT_NOTE",
+  ISSUE_ADJUSTMENT_NOTE: "auditCopy.act_ISSUE_ADJUSTMENT_NOTE",
+  VOID_ADJUSTMENT_NOTE: "auditCopy.act_VOID_ADJUSTMENT_NOTE",
 };
 
 /** Table names the backend writes to audit_logs.table_name. */
@@ -81,6 +91,8 @@ export const AUDIT_ENTITY_KEY: Record<string, MessageKey> = {
   warehouse_locations: "auditCopy.ent_warehouse_locations",
   company_profile: "auditCopy.ent_company_profile",
   quotations: "auditCopy.ent_quotations",
+  invoices: "auditCopy.ent_invoices",
+  adjustment_notes: "auditCopy.ent_adjustment_notes",
 };
 
 export function auditActionText(t: T, action: string | null): string {

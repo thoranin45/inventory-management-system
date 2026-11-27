@@ -21,6 +21,7 @@ export const companyProfileSchema = z.object({
   vat_registered: z.boolean(),
   vat_rate: decimalString,
   prices_include_vat: z.boolean(),
+  default_credit_days: z.number().optional(),
   updated_at: z.string().nullish(),
 });
 export type CompanyProfile = z.infer<typeof companyProfileSchema>;
@@ -44,6 +45,12 @@ export const companyProfileInput = z.object({
     .trim()
     .refine((v) => /^\d{1,3}(\.\d{1,2})?$/.test(v) && Number(v) <= 100, VAT_RATE_MESSAGE),
   prices_include_vat: z.boolean(),
+  // F2b: invoice due date = issue date + these days (0 = cash).
+  default_credit_days: z
+    .string()
+    .trim()
+    .refine((v) => /^\d{1,3}$/.test(v) && Number(v) <= 365, "Enter 0 to 365 days")
+    .transform(Number),
 });
 /** What the form holds (strings and booleans). */
 export type CompanyProfileForm = z.input<typeof companyProfileInput>;
@@ -63,5 +70,6 @@ export function companyProfileToForm(p: CompanyProfile): CompanyProfileForm {
     vat_registered: p.vat_registered,
     vat_rate: p.vat_rate,
     prices_include_vat: p.prices_include_vat,
+    default_credit_days: String(p.default_credit_days ?? 30),
   };
 }

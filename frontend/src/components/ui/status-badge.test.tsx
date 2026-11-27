@@ -26,7 +26,7 @@ describe("StatusBadge (R2.6 filled chips)", () => {
       DRAFT: "neutral", CONFIRMED: "info", PICKING: "info", PACKING: "info", READY_TO_SHIP: "accent",
       IN_TRANSIT: "accent", SHIPPED: "success", PARTIALLY_RECEIVED: "warning", RECEIVED: "success",
       COMPLETED: "success", CANCELLED: "danger", PENDING: "neutral", APPROVED: "neutral", REJECTED: "neutral",
-      ISSUED: "info", ACCEPTED: "success", CONVERTED: "success", VOID: "danger", EXPIRED: "warning",
+      ISSUED: "info", ACCEPTED: "success", CONVERTED: "success", VOID: "danger", EXPIRED: "warning", OVERDUE: "warning",
       active: "success", inactive: "neutral",
     });
   });

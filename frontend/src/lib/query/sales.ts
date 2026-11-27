@@ -3,7 +3,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { bffJson } from "@/lib/api/browser";
-import { bffBinary, openBlob } from "@/lib/api/binary";
 import {
   completeFulfillmentInput,
   createSalesOrderInput,
@@ -204,12 +203,6 @@ export function useReturnSalesOrder() {
     retry: false,
     onSuccess: (data) => invalidate(data.sales_order_id),
   });
-}
-
-/** GET /sales-orders/{id}/invoice → PDF. Opens in a new tab (returns false if popup-blocked). */
-export async function openInvoice(id: number | string): Promise<{ opened: boolean }> {
-  const { blob } = await bffBinary(`/api/bff/sales-orders/${id}/invoice`);
-  return { opened: openBlob(blob) };
 }
 
 /* ================= Phase 4 — Picking / Packing / Scanner ================= */

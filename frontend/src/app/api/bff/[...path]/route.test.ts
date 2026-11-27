@@ -46,6 +46,24 @@ describe("BFF allow-list", () => {
     expect(isAllowed("GET", "quotations/abc")).toBe(false);
   });
 
+  it("F2b: allows the invoice and adjustment-note routes and nothing wider", () => {
+    for (const base of ["invoices", "adjustment-notes"]) {
+      expect(isAllowed("GET", base)).toBe(true);
+      expect(isAllowed("POST", base)).toBe(true);
+      expect(isAllowed("GET", `${base}/7`)).toBe(true);
+      expect(isAllowed("PUT", `${base}/7`)).toBe(true);
+      expect(isAllowed("DELETE", `${base}/7`)).toBe(true);
+      expect(isAllowed("POST", `${base}/7/issue`)).toBe(true);
+      expect(isAllowed("POST", `${base}/7/void`)).toBe(true);
+      expect(isAllowed("GET", `${base}/7/pdf`)).toBe(true);
+      expect(isAllowed("POST", `${base}/7/accept`)).toBe(false);
+      expect(isAllowed("PUT", base)).toBe(false);
+      expect(isAllowed("GET", `${base}/x`)).toBe(false);
+    }
+    expect(isAllowed("GET", "invoices/revenue-summary")).toBe(true);
+    expect(isAllowed("POST", "invoices/revenue-summary")).toBe(false);
+  });
+
   it("still allows the pre-existing Stock-In routes (regression)", () => {
     expect(isAllowed("POST", "stock/in")).toBe(true);
     expect(isAllowed("POST", "batches")).toBe(true);

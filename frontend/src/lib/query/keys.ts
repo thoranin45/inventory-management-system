@@ -33,6 +33,17 @@ export const queryKeys = {
     list: (params: Record<string, unknown>) => ["quotations", "list", params] as const,
     detail: (id: number | string) => ["quotations", "detail", String(id)] as const,
   },
+  invoices: {
+    all: ["invoices"] as const,
+    list: (params: Record<string, unknown>) => ["invoices", "list", params] as const,
+    detail: (id: number | string) => ["invoices", "detail", String(id)] as const,
+    revenue: (year: number | string) => ["invoices", "revenue", String(year)] as const,
+  },
+  adjustments: {
+    all: ["adjustments"] as const,
+    list: (params: Record<string, unknown>) => ["adjustments", "list", params] as const,
+    detail: (id: number | string) => ["adjustments", "detail", String(id)] as const,
+  },
   customers: {
     all: ["customers"] as const,
     list: (params: Record<string, unknown>) => ["customers", "list", params] as const,

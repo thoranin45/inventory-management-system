@@ -11,7 +11,7 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
 import { useOrderCopy } from "@/components/orders/use-order-copy";
 import { formatBusinessDateTime, formatStoredWallClock } from "@/lib/format";
-import { type Role } from "@/lib/auth/permissions";
+import { isAdmin, type Role } from "@/lib/auth/permissions";
 import { useT } from "@/lib/i18n/client";
 import { attentionMessage } from "@/lib/order-copy";
 import { useProductLookup, useSalesOrder } from "@/lib/query/sales";
@@ -202,7 +202,7 @@ function SalesDetailBody({ row, role, onDone }: { row: SalesOrderRow; role: Role
           {["READY_TO_SHIP", "SHIPPED", "COMPLETED"].includes(upper) ? (
             <Section title={t("sales.documents")}>
               <div className="py-3">
-                <SalesDocuments orderId={row.id} />
+                <SalesDocuments orderId={row.id} status={upper} canInvoice={isAdmin(role)} />
               </div>
             </Section>
           ) : null}

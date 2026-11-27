@@ -50,6 +50,8 @@ export const CANONICAL_STATUS = {
   CONVERTED: { tone: "success", icon: PackageCheck, labelKey: "status.CONVERTED" },
   VOID: { tone: "danger", icon: Ban, labelKey: "status.VOID" },
   EXPIRED: { tone: "warning", icon: Clock, labelKey: "status.EXPIRED" },
+  // F2b invoices (computed: ISSUED and past the due date)
+  OVERDUE: { tone: "warning", icon: Clock, labelKey: "status.OVERDUE" },
   active: { tone: "success", icon: CircleCheck, labelKey: "status.active" },
   inactive: { tone: "neutral", icon: CircleMinus, labelKey: "status.inactive" },
 } as const satisfies Record<string, { tone: Tone; icon: LucideIcon; labelKey: MessageKey }>;
