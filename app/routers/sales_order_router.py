@@ -1,20 +1,9 @@
 from app.core.dependencies import require_warehouse
-import os
 
 from fastapi import (
     APIRouter,
     Depends,
     Header,
-)
-from fastapi.responses import FileResponse
-from reportlab.lib import colors
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.platypus import (
-    Paragraph,
-    SimpleDocTemplate,
-    Spacer,
-    Table,
-    TableStyle,
 )
 
 from app.core.dependencies import (
@@ -26,7 +15,6 @@ from app.core.dependencies import (
 )
 from app.core.response import success_response
 from app.core.pagination import ListParams, list_params
-from app.core.quantity import quantity_text
 from app.models import User
 from app.schemas.sales_order_schema import (
     SalesOrderCreate, CompleteFulfillment, FulfillmentScan, FulfillmentUndo,
@@ -154,193 +142,6 @@ def shipping_label_data(
         ),
         "order_barcode": order["so_number"],
     })
-
-
-@router.get("/{sales_order_id}/invoice")
-def generate_invoice(
-    sales_order_id: int,
-    sales_order_repo: SalesOrderRepositoryDependency,
-):
-    sales_order_data = get_sales_order_service(
-        sales_order_repo=sales_order_repo,
-        sales_order_id=sales_order_id,
-    )
-
-    customer = sales_order_repo.get_customer_by_id(
-        sales_order_data["customer_id"]
-    )
-
-    invoice_directory = os.path.join(
-        "app",
-        "static",
-        "invoices",
-    )
-
-    os.makedirs(
-        invoice_directory,
-        exist_ok=True,
-    )
-
-    pdf_path = os.path.join(
-        invoice_directory,
-        f"{sales_order_data['so_number']}.pdf",
-    )
-
-    document = SimpleDocTemplate(
-        pdf_path
-    )
-
-    styles = getSampleStyleSheet()
-    elements = []
-
-    elements.append(
-        Paragraph(
-            "INVOICE",
-            styles["Title"],
-        )
-    )
-
-    elements.append(
-        Spacer(
-            1,
-            12,
-        )
-    )
-
-    elements.append(
-        Paragraph(
-            (
-                "Invoice No: "
-                f"{sales_order_data['so_number']}"
-            ),
-            styles["Normal"],
-        )
-    )
-
-    customer_name = (
-        customer.customer_name
-        if customer is not None
-        else "-"
-    )
-
-    elements.append(
-        Paragraph(
-            f"Customer: {customer_name}",
-            styles["Normal"],
-        )
-    )
-
-    elements.append(
-        Paragraph(
-            (
-                "Date: "
-                f"{sales_order_data['created_at']}"
-            ),
-            styles["Normal"],
-        )
-    )
-
-    elements.append(
-        Paragraph(
-            (
-                "Status: "
-                f"{sales_order_data['status']}"
-            ),
-            styles["Normal"],
-        )
-    )
-
-    elements.append(
-        Spacer(
-            1,
-            12,
-        )
-    )
-
-    table_data = [
-        [
-            "Product",
-            "Qty",
-            "Unit Price",
-            "Total",
-        ]
-    ]
-
-    for item in sales_order_data["items"]:
-        product = sales_order_repo.get_product_by_id(
-            item["product_id"]
-        )
-
-        product_name = (
-            product.product_name
-            if product is not None
-            else "-"
-        )
-
-        table_data.append(
-            [
-                product_name,
-                quantity_text(item["quantity"]),
-                f"{item['unit_price']:.2f}",
-                f"{item['total_price']:.2f}",
-            ]
-        )
-
-    table_data.append(
-        [
-            "",
-            "",
-            "Grand Total",
-            f"{sales_order_data['total_amount']:.2f}",
-        ]
-    )
-
-    table = Table(
-        table_data
-    )
-
-    table.setStyle(
-        TableStyle(
-            [
-                (
-                    "BACKGROUND",
-                    (0, 0),
-                    (-1, 0),
-                    colors.lightgrey,
-                ),
-                (
-                    "GRID",
-                    (0, 0),
-                    (-1, -1),
-                    1,
-                    colors.black,
-                ),
-                (
-                    "ALIGN",
-                    (1, 1),
-                    (-1, -1),
-                    "CENTER",
-                ),
-                (
-                    "FONTNAME",
-                    (0, 0),
-                    (-1, 0),
-                    "Helvetica-Bold",
-                ),
-            ]
-        )
-    )
-
-    elements.append(table)
-    document.build(elements)
-
-    return FileResponse(
-        path=pdf_path,
-        media_type="application/pdf",
-        filename=(
-            f"{sales_order_data['so_number']}.pdf"
-        ),
-    )
 
 
 @router.put("/{sales_order_id}/cancel")

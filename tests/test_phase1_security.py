@@ -51,6 +51,7 @@ def test_business_route_matrix_covers_the_mounted_api():
 def _admin_only(method: str, path: str) -> bool:
     if path.startswith((
         "/api/v1/audit-logs", "/api/v1/quotations", "/api/v1/invoices", "/api/v1/adjustment-notes",
+        "/api/v1/payment-receipts", "/api/v1/billing-notes",
     )) or path == "/api/v1/auth/register":
         return True
     if method == "GET":

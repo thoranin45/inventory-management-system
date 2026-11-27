@@ -1,4 +1,6 @@
 """F2a: /api/v1/invoices and /api/v1/adjustment-notes (Admin only, including reads)."""
+from datetime import date
+
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
 from sqlalchemy import select
@@ -9,6 +11,7 @@ from app.core.pagination import ListParams, list_params
 from app.models import AdjustmentNote, Invoice, Quotation, SalesOrder, SalesReturnReceipt, User
 from app.schemas.invoice_schema import AdjustmentDraftInput, InvoiceDraftUpdate, InvoiceFromOrderInput, VoidInput
 from app.services import invoice_service as service
+from app.services import payment_service
 from app.services.invoice_pdf import render_adjustment_pdf, render_invoice_pdf
 
 PRINTABLE = {"ISSUED", "VOID"}
@@ -38,13 +41,29 @@ def list_invoices(
     params: ListParams = Depends(list_params),
     customer_id: int | None = Query(default=None, gt=0),
     sales_order_id: int | None = Query(default=None, gt=0),
+    payment: str | None = Query(default=None, pattern="^(open|paid)$"),
 ):
-    return service.list_invoices_service(db, params, customer_id, sales_order_id)
+    return service.list_invoices_service(db, params, customer_id, sales_order_id, payment)
 
 
 @router.get("/revenue-summary")
 def revenue_summary(db: DatabaseSession, year: int | None = Query(default=None, ge=2000, le=9999)):
     return _ok("Revenue summary retrieved", service.revenue_summary_service(db, year))
+
+
+@router.get("/ar-aging")
+def ar_aging(db: DatabaseSession, as_of: date | None = None):
+    return _ok("AR aging retrieved", payment_service.ar_aging_service(db, as_of))
+
+
+@router.get("/ar-aging/export")
+def ar_aging_export(db: DatabaseSession, as_of: date | None = None,
+                    lang: str = Query("en", pattern="^(en|th)$")):
+    content = payment_service.ar_aging_xlsx(db, as_of, lang)
+    return Response(content=content,
+                    media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": 'attachment; filename="ar_aging.xlsx"',
+                             "Cache-Control": "no-store"})
 
 
 @router.post("", status_code=201)

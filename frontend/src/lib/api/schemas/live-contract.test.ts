@@ -1255,9 +1255,8 @@ describe.skipIf(!LIVE)("live Shipping / Return / Complete / Audit contract (Phas
 
     expect((await api(`/api/v1/sales-orders/${id}/ship`, { method: "POST" })).status).toBe(409);
 
-    const inv = await api(`/api/v1/sales-orders/${id}/invoice`);
-    expect(inv.status).toBe(200);
-    expect(inv.headers.get("content-type")).toMatch(/application\/pdf/);
+    // F3a: the old per-order invoice PDF is gone; invoices live under /api/v1/invoices.
+    expect([404, 405]).toContain((await api(`/api/v1/sales-orders/${id}/invoice`)).status);
 
     // V1-H1: the return carries an Idempotency-Key; resubmitting the same return with it replays.
     const retKey = `so-ret-${trUuid()}`;
