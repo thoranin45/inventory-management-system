@@ -58,7 +58,11 @@ def test_sort_order_asc_desc(client, admin_headers):
         _create_customer(client, admin_headers)
     asc = client.get("/api/v1/customers?sort_by=id&sort_order=asc&page_size=50", headers=admin_headers).json()["data"]["items"]
     desc = client.get("/api/v1/customers?sort_by=id&sort_order=desc&page_size=50", headers=admin_headers).json()["data"]["items"]
-    assert [r["id"] for r in asc] == list(reversed([r["id"] for r in desc]))
+    asc_ids, desc_ids = [r["id"] for r in asc], [r["id"] for r in desc]
+    # Compare ordering, not whole pages: once the shared test DB holds more than
+    # one page of customers, the first asc page and the first desc page differ.
+    assert asc_ids == sorted(asc_ids) and desc_ids == sorted(desc_ids, reverse=True)
+    assert asc_ids[0] < desc_ids[0]
 
 
 def test_status_filter_sales_orders(client, admin_headers):

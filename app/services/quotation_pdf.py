@@ -78,6 +78,44 @@ def _p(text, style) -> Paragraph:
     return Paragraph(escape(str(text or "")).replace("\n", "<br/>"), style)
 
 
+def seller_lines(seller: dict, body, small, name_style) -> list:
+    """The seller block (top left), from a document's seller snapshot."""
+    lines = [_p(seller.get("legal_name_th") or seller.get("legal_name_en") or "-", name_style)]
+    if seller.get("legal_name_th") and seller.get("legal_name_en"):
+        lines.append(_p(seller["legal_name_en"], body))
+    for key in ("address_th", "address_en"):
+        if seller.get(key):
+            lines.append(_p(seller[key], small))
+    contact = "  ".join(filter(None, [
+        f"โทร / Tel {seller['phone']}" if seller.get("phone") else None,
+        seller.get("email"),
+    ]))
+    if contact:
+        lines.append(_p(contact, small))
+    if seller.get("tax_id"):
+        branch = seller.get("branch_code")
+        branch_text = "สำนักงานใหญ่ / Head office" if branch in (None, "00000") else f"สาขา / Branch {branch}"
+        lines.append(_p(f"เลขประจำตัวผู้เสียภาษี / Tax ID {seller['tax_id']}  {branch_text}", small))
+    return lines
+
+
+def customer_box(customer: dict, body, small, bold) -> Table:
+    """The boxed customer block, from a document's customer snapshot."""
+    lines = [_p("ลูกค้า / Customer", small), _p(customer.get("name") or "-", bold)]
+    if customer.get("address"):
+        lines.append(_p(customer["address"], body))
+    if customer.get("tax_id"):
+        branch = customer.get("branch_code")
+        branch_text = "" if branch is None else (
+            "  สำนักงานใหญ่ / Head office" if branch == "00000" else f"  สาขา / Branch {branch}")
+        lines.append(_p(f"เลขประจำตัวผู้เสียภาษี / Tax ID {customer['tax_id']}{branch_text}", small))
+    box = Table([[lines]], colWidths=[180 * mm])
+    box.setStyle(TableStyle([("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#999999")),
+                             ("LEFTPADDING", (0, 0), (-1, -1), 6), ("TOPPADDING", (0, 0), (-1, -1), 4),
+                             ("BOTTOMPADDING", (0, 0), (-1, -1), 6)]))
+    return box
+
+
 def render_quotation_pdf(quotation: Quotation) -> bytes:
     body = thai_style("qt-body", fontSize=9.5, leading=14)
     small = thai_style("qt-small", fontSize=8.5, leading=12, textColor=colors.HexColor("#555555"))
@@ -89,23 +127,7 @@ def render_quotation_pdf(quotation: Quotation) -> bytes:
 
     seller = quotation.seller_snapshot or {}
     customer = quotation.customer_snapshot or {}
-
-    seller_lines = [_p(seller.get("legal_name_th") or seller.get("legal_name_en") or "-", seller_name_style)]
-    if seller.get("legal_name_th") and seller.get("legal_name_en"):
-        seller_lines.append(_p(seller["legal_name_en"], body))
-    for key in ("address_th", "address_en"):
-        if seller.get(key):
-            seller_lines.append(_p(seller[key], small))
-    contact = "  ".join(filter(None, [
-        f"โทร / Tel {seller['phone']}" if seller.get("phone") else None,
-        seller.get("email"),
-    ]))
-    if contact:
-        seller_lines.append(_p(contact, small))
-    if seller.get("tax_id"):
-        branch = seller.get("branch_code")
-        branch_text = "สำนักงานใหญ่ / Head office" if branch in (None, "00000") else f"สาขา / Branch {branch}"
-        seller_lines.append(_p(f"เลขประจำตัวผู้เสียภาษี / Tax ID {seller['tax_id']}  {branch_text}", small))
+    seller_block = seller_lines(seller, body, small, seller_name_style)
 
     head_right = [
         _p("ใบเสนอราคา / QUOTATION", title),
@@ -114,22 +136,11 @@ def render_quotation_pdf(quotation: Quotation) -> bytes:
         _p(f"วันที่ / Date {_date(quotation.issue_date)}", right),
         _p(f"ยืนราคาถึง / Valid until {_date(quotation.valid_until)}", right),
     ]
-    header = Table([[seller_lines, head_right]], colWidths=[105 * mm, 75 * mm])
+    header = Table([[seller_block, head_right]], colWidths=[105 * mm, 75 * mm])
     header.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"),
                                 ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0)]))
 
-    customer_lines = [_p("ลูกค้า / Customer", small), _p(customer.get("name") or "-", bold)]
-    if customer.get("address"):
-        customer_lines.append(_p(customer["address"], body))
-    if customer.get("tax_id"):
-        branch = customer.get("branch_code")
-        branch_text = "" if branch is None else (
-            "  สำนักงานใหญ่ / Head office" if branch == "00000" else f"  สาขา / Branch {branch}")
-        customer_lines.append(_p(f"เลขประจำตัวผู้เสียภาษี / Tax ID {customer['tax_id']}{branch_text}", small))
-    customer_box = Table([[customer_lines]], colWidths=[180 * mm])
-    customer_box.setStyle(TableStyle([("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#999999")),
-                                      ("LEFTPADDING", (0, 0), (-1, -1), 6), ("TOPPADDING", (0, 0), (-1, -1), 4),
-                                      ("BOTTOMPADDING", (0, 0), (-1, -1), 6)]))
+    customer_block = customer_box(customer, body, small, bold)
 
     rows = [[_p("#", bold), _p("รายการ / Description", bold), _p("จำนวน / Qty", right),
              _p("ราคาต่อหน่วย / Unit price", right), _p("จำนวนเงิน / Amount", right)]]
@@ -156,7 +167,7 @@ def render_quotation_pdf(quotation: Quotation) -> bytes:
     totals_table.setStyle(TableStyle([("LINEABOVE", (0, -1), (-1, -1), 0.6, colors.black),
                                       ("LINEBELOW", (0, -1), (-1, -1), 1.2, colors.black)]))
 
-    story = [header, Spacer(1, 8), customer_box, Spacer(1, 8), lines, Spacer(1, 4), totals_table,
+    story = [header, Spacer(1, 8), customer_block, Spacer(1, 8), lines, Spacer(1, 4), totals_table,
              Spacer(1, 4), _p(f"({baht_text(Decimal(quotation.grand_total))})", right), Spacer(1, 10)]
     if quotation.notes:
         story += [_p("หมายเหตุ / Notes", bold), _p(quotation.notes, body), Spacer(1, 8)]
