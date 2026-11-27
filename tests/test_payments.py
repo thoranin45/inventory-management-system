@@ -351,7 +351,7 @@ def test_every_payment_action_is_audited(client, admin_headers, make_order, cust
     _act(client, admin_headers, BN, note["id"], "void", json={"reason": "ผิด"})
     db_session.expire_all()
     receipt_actions = db_session.execute(select(AuditLog.action).where(
-        AuditLog.table_name == "payment_receipts", AuditLog.record_id == receipt["id"])).scalars().all()
+        AuditLog.table_name == "payment_receipts", AuditLog.record_id == receipt["id"]).order_by(AuditLog.id)).scalars().all()
     assert receipt_actions == ["CREATE_RECEIPT", "VOID_RECEIPT"]
     note_actions = db_session.execute(select(AuditLog.action).where(
         AuditLog.table_name == "billing_notes", AuditLog.record_id == note["id"]).order_by(AuditLog.id)).scalars().all()
