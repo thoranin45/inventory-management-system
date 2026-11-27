@@ -4,6 +4,7 @@ import * as React from "react";
 import { useSearchParams } from "next/navigation";
 
 import { useSession } from "@/components/session-provider";
+import { Button } from "@/components/ui/button";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { FilterStrip } from "@/components/ui/filter-strip";
 import { PageHeader } from "@/components/ui/page-header";
@@ -17,6 +18,7 @@ import { useT } from "@/lib/i18n/client";
 import type { MessageKey } from "@/lib/i18n/translate";
 import { useListParams } from "@/lib/list-params";
 import { useInvoices } from "@/lib/query/invoices";
+import { PaymentStatusBadge } from "@/components/payments/payment-parts";
 import { FinanceStatusBadge } from "./doc-parts";
 import { useFinanceDrawers, useOpenFromUrl } from "./finance-drawers";
 import { RevenueCard } from "./revenue-card";
@@ -25,6 +27,8 @@ const TAB_LABEL: Record<(typeof INVOICE_FILTER_TABS)[number], MessageKey> = {
   all: "orders.tabAll",
   DRAFT: "status.DRAFT",
   ISSUED: "status.ISSUED",
+  OPEN: "invoices.tabOpen",
+  PAID: "status.PAID",
   OVERDUE: "status.OVERDUE",
   VOID: "status.VOID",
 };
@@ -46,14 +50,15 @@ export function InvoicesView() {
       page: state.page,
       page_size: state.pageSize,
       search: state.search || undefined,
-      status: filter === "all" ? undefined : filter,
+      status: filter === "all" || filter === "OPEN" || filter === "PAID" ? undefined : filter,
+      payment: filter === "OPEN" ? "open" : filter === "PAID" ? "paid" : undefined,
       sort_by: state.sortBy || undefined,
       sort_order: state.sortBy ? state.sortOrder : undefined,
     }),
     [state.page, state.pageSize, state.search, state.sortBy, state.sortOrder, filter],
   );
   const { data, isLoading, isFetching, isError, error, refetch } = useInvoices(query, admin);
-  const { openInvoice, drawers } = useFinanceDrawers();
+  const { openInvoice, openPayment, drawers } = useFinanceDrawers();
   useOpenFromUrl(admin ? sp.get("open") : null, openInvoice);
 
   if (!admin) {
@@ -87,6 +92,11 @@ export function InvoicesView() {
       cell: (r) => <FinanceStatusBadge status={r.status} overdue={r.is_overdue} />,
     },
     {
+      key: "payment",
+      header: t("invoices.colPayment"),
+      cell: (r) => <PaymentStatusBadge status={r.payment_status} />,
+    },
+    {
       key: "due_date",
       header: t("invoices.dueDate"),
       sortField: "due_date",
@@ -114,6 +124,7 @@ export function InvoicesView() {
       <PageHeader
         title={t("invoices.title")}
         subtitle={data ? t("invoices.listSubtitle", { n: data.pagination.total_items }) : t("invoices.loading")}
+        actions={<Button variant="secondary" onClick={() => openPayment(null)}>{t("payments.recordPayment")}</Button>}
       />
       <RevenueCard />
 
@@ -159,7 +170,12 @@ export function InvoicesView() {
         }
         renderCard={(r) => ({
           title: <span className="mono">{ref(r)}</span>,
-          badge: <FinanceStatusBadge status={r.status} overdue={r.is_overdue} />,
+          badge: (
+            <span className="flex flex-wrap gap-1">
+              <FinanceStatusBadge status={r.status} overdue={r.is_overdue} />
+              <PaymentStatusBadge status={r.payment_status} />
+            </span>
+          ),
           meta: (
             <>
               <span>{r.customer_name ?? "—"}</span>

@@ -46,6 +46,9 @@ export function RevenueCard() {
         })}
       </p>
       <p className="text-[12px] text-[var(--muted)]">{t("invoices.revenueNote", { year: data.year })}</p>
+      {data.received_total ? (
+        <p className="text-[13px]">{t("invoices.receivedThisYear", { amount: formatMoney(data.received_total) })}</p>
+      ) : null}
       {data.level === "warning" ? <Banner tone="warning" title={t("invoices.revenueWarning")} /> : null}
       {data.level === "over" ? <Banner tone="danger" title={t("invoices.revenueOver")} /> : null}
     </section>

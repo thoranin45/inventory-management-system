@@ -70,6 +70,7 @@ function useSettle() {
     if (invoice) qc.setQueryData(queryKeys.invoices.detail(invoice.id), invoice);
     void qc.invalidateQueries({ queryKey: queryKeys.invoices.all });
     void qc.invalidateQueries({ queryKey: queryKeys.adjustments.all });
+    void qc.invalidateQueries({ queryKey: queryKeys.aging.all });
     void qc.invalidateQueries({ queryKey: queryKeys.audit.all });
   };
 }
@@ -162,6 +163,7 @@ function useSettleAdjustment() {
     if (note) qc.setQueryData(queryKeys.adjustments.detail(note.id), note);
     void qc.invalidateQueries({ queryKey: queryKeys.adjustments.all });
     void qc.invalidateQueries({ queryKey: queryKeys.invoices.all }); // balances change
+    void qc.invalidateQueries({ queryKey: queryKeys.aging.all });
     void qc.invalidateQueries({ queryKey: queryKeys.audit.all });
   };
 }

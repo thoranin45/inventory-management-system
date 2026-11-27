@@ -1,6 +1,9 @@
 import type { LucideIcon } from "lucide-react";
 import {
   FileMinus,
+  Files,
+  Hourglass,
+  Wallet,
   ReceiptText,
   ArrowLeftRight,
   Building2,
@@ -72,6 +75,8 @@ export const NAV_ITEMS: NavItem[] = [
   { key: "quotations", labelKey: "nav.quotations", href: "/quotations", icon: FileText, group: "orders", adminOnly: true },
   { key: "invoices", labelKey: "nav.invoices", href: "/invoices", icon: ReceiptText, group: "orders", adminOnly: true },
   { key: "adjustments", labelKey: "nav.adjustments", href: "/adjustment-notes", icon: FileMinus, group: "orders", adminOnly: true },
+  { key: "receipts", labelKey: "nav.receipts", href: "/payment-receipts", icon: Wallet, group: "orders", adminOnly: true },
+  { key: "billing", labelKey: "nav.billing", href: "/billing-notes", icon: Files, group: "orders", adminOnly: true },
   { key: "picking", labelKey: "nav.picking", href: "/picking", icon: PackageSearch, group: "tasks" },
   { key: "packing", labelKey: "nav.packing", href: "/packing", icon: ClipboardCheck, group: "tasks" },
   { key: "shipping", labelKey: "nav.shipping", href: "/shipping", icon: Send, group: "tasks" },
@@ -82,6 +87,7 @@ export const NAV_ITEMS: NavItem[] = [
   // F0b: finance is Admin-only for now (Owner, 26 Nov); the backend still lets every signed-in user read it.
   { key: "company-profile", labelKey: "nav.companyProfile", href: "/company-profile", icon: Building2, group: "master", adminOnly: true },
   { key: "reports", labelKey: "nav.reports", href: "/reports", icon: ClipboardCheck, group: "reports" },
+  { key: "ar-aging", labelKey: "nav.arAging", href: "/ar-aging", icon: Hourglass, group: "reports", adminOnly: true },
   { key: "audit", labelKey: "nav.audit", href: "/audit", icon: ScrollText, group: "reports", adminOnly: true },
 ];
 

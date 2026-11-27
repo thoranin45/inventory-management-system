@@ -64,6 +64,25 @@ describe("BFF allow-list", () => {
     expect(isAllowed("POST", "invoices/revenue-summary")).toBe(false);
   });
 
+  it("F3b: allows receipts, billing notes and AR aging and nothing wider", () => {
+    expect(isAllowed("GET", "payment-receipts")).toBe(true);
+    expect(isAllowed("POST", "payment-receipts")).toBe(true);
+    expect(isAllowed("GET", "payment-receipts/7")).toBe(true);
+    expect(isAllowed("POST", "payment-receipts/7/void")).toBe(true);
+    expect(isAllowed("GET", "payment-receipts/7/pdf")).toBe(true);
+    expect(isAllowed("PUT", "payment-receipts/7")).toBe(false);
+    expect(isAllowed("DELETE", "payment-receipts/7")).toBe(false);
+    expect(isAllowed("POST", "payment-receipts/7/issue")).toBe(false);
+    for (const action of ["issue", "void"]) expect(isAllowed("POST", `billing-notes/7/${action}`)).toBe(true);
+    for (const method of ["GET", "PUT", "DELETE"]) expect(isAllowed(method, "billing-notes/7")).toBe(true);
+    expect(isAllowed("GET", "billing-notes/7/pdf")).toBe(true);
+    expect(isAllowed("POST", "billing-notes/7/accept")).toBe(false);
+    expect(isAllowed("GET", "invoices/ar-aging")).toBe(true);
+    expect(isAllowed("GET", "invoices/ar-aging/export")).toBe(true);
+    expect(isAllowed("POST", "invoices/ar-aging")).toBe(false);
+    expect(isAllowed("GET", "sales-orders/7/invoice")).toBe(false); // retired in F3a
+  });
+
   it("still allows the pre-existing Stock-In routes (regression)", () => {
     expect(isAllowed("POST", "stock/in")).toBe(true);
     expect(isAllowed("POST", "batches")).toBe(true);

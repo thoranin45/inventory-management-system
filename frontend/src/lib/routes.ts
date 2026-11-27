@@ -49,6 +49,9 @@ const RULES: [RegExp, string, Leaf?][] = [
   [/^\/quotations$/, "quotations"],
   [/^\/invoices$/, "invoices"],
   [/^\/adjustment-notes$/, "adjustments"],
+  [/^\/payment-receipts$/, "receipts"],
+  [/^\/billing-notes$/, "billing"],
+  [/^\/ar-aging$/, "ar-aging"],
   [/^\/picking$/, "picking"],
   [/^\/picking\/[^/]+$/, "picking", "routes.pick"],
   [/^\/packing$/, "packing"],
@@ -82,7 +85,7 @@ export function resolveRoute(pathname: string): RouteTrail | null {
 export const REGISTERED_ROUTE_EXAMPLES = [
   "/", "/dashboard", "/products", "/categories", "/customers", "/suppliers", "/company-profile", "/stock", "/inventory/ledger",
   "/stock-in", "/stock-out", "/stock-adjustments/mine", "/stock-adjustments/new", "/stock-adjustments/approvals",
-  "/sales", "/quotations", "/invoices", "/adjustment-notes", "/picking", "/picking/12", "/packing", "/packing/12", "/shipping", "/purchase-orders",
+  "/sales", "/quotations", "/invoices", "/adjustment-notes", "/payment-receipts", "/billing-notes", "/ar-aging", "/picking", "/picking/12", "/packing", "/packing/12", "/shipping", "/purchase-orders",
   "/purchase-orders/7/receive", "/transfers", "/transfers/3/receive", "/reports", "/audit",
   ...Object.keys(REPORT_LEAF).map((slug) => `/reports/${slug}`),
 ];

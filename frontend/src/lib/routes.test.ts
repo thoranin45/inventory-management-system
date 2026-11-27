@@ -68,7 +68,10 @@ describe("navigation helpers", () => {
     expect(wh).not.toContain("quotations");
     expect(wh).not.toContain("invoices");
     expect(wh).not.toContain("adjustments");
-    expect(wh).toHaveLength(NAV_ITEMS.length - 6);
+    expect(wh).not.toContain("receipts");
+    expect(wh).not.toContain("billing");
+    expect(wh).not.toContain("ar-aging");
+    expect(wh).toHaveLength(NAV_ITEMS.length - 9);
   });
 
   it("active matching is segment-aware", () => {

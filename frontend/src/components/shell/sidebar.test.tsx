@@ -25,11 +25,11 @@ describe("Concept B navigation model", () => {
   it("keeps every destination exactly as before (grouping is presentation only)", () => {
     expect(NAV_ITEMS.map((n) => n.href)).toEqual([
       "/dashboard", "/products", "/categories", "/stock", "/inventory/ledger", "/stock-in", "/stock-out",
-      "/stock-adjustments/mine", "/stock-adjustments/approvals", "/sales", "/quotations", "/invoices", "/adjustment-notes", "/picking", "/packing", "/shipping",
-      "/purchase-orders", "/transfers", "/customers", "/suppliers", "/company-profile", "/reports", "/audit",
+      "/stock-adjustments/mine", "/stock-adjustments/approvals", "/sales", "/quotations", "/invoices", "/adjustment-notes", "/payment-receipts", "/billing-notes", "/picking", "/packing", "/shipping",
+      "/purchase-orders", "/transfers", "/customers", "/suppliers", "/company-profile", "/reports", "/ar-aging", "/audit",
     ]);
     expect(NAV_ITEMS.filter((n) => n.adminOnly).map((n) => n.key)).toEqual([
-      "stock-adjustment-approvals", "quotations", "invoices", "adjustments", "company-profile", "audit",
+      "stock-adjustment-approvals", "quotations", "invoices", "adjustments", "receipts", "billing", "company-profile", "ar-aging", "audit",
     ]);
   });
 
