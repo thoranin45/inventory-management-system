@@ -110,6 +110,10 @@ const FORM_FIXED: Record<string, MessageKey> = {
   "Quantity must be a number with up to 3 decimals": "sales.errReturnQtyFormat",
   "Quantity must be greater than zero": "sales.errReturnQtyPositive",
   "Reason must be 255 characters or fewer": "sales.errReturnReasonLength",
+  // F3b record payment
+  "Enter an amount like 100.50": "payments.errAmount",
+  "More than the balance": "payments.errOverBalance",
+  "Enter a date": "payments.errDate",
 };
 const FIELD: Record<string, MessageKey> = {
   Quantity: "orders.fieldQuantity",

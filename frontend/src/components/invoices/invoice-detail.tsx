@@ -30,6 +30,7 @@ import {
   useInvoiceAction,
   useSaveInvoiceDraft,
 } from "@/lib/query/invoices";
+import { methodLabel, PaymentStatusBadge } from "@/components/payments/payment-parts";
 import { ConfirmAction, errorText, Field, FinanceStatusBadge, inputCls, PdfButton, Row, Section } from "./doc-parts";
 
 /** Preview of one line after its discount (server is authoritative). */
@@ -126,15 +127,18 @@ function DraftEditor({ invoice, onDone }: { invoice: InvoiceDetail; onDone: () =
 
 type Pending = "issue" | "void" | "delete" | null;
 
-function InvoiceActions({ invoice, onEdit, onAdjust, onDeleted }: {
+function InvoiceActions({ invoice, onEdit, onAdjust, onRecordPayment, onDeleted }: {
   invoice: InvoiceDetail;
   onEdit: () => void;
   onAdjust: (invoice: InvoiceDetail) => void;
+  onRecordPayment: (invoice: InvoiceDetail) => void;
   onDeleted: () => void;
 }) {
   const t = useT();
   const hasIssuedAdjustment = invoice.adjustments.some((a) => a.status === "ISSUED");
-  const allowed = invoiceActions(invoice.status, hasIssuedAdjustment);
+  const hasIssuedReceipt = (invoice.payments ?? []).some((p) => p.status === "ISSUED");
+  const balanceLeft = Number(invoice.balance) > 0;
+  const allowed = invoiceActions(invoice.status, hasIssuedAdjustment, hasIssuedReceipt, balanceLeft);
   const action = useInvoiceAction();
   const del = useDeleteInvoiceDraft();
   const [pending, setPending] = React.useState<Pending>(null);
@@ -170,13 +174,16 @@ function InvoiceActions({ invoice, onEdit, onAdjust, onDeleted }: {
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
         {allowed.issue ? <Button variant="primary" onClick={() => setPending("issue")}>{t("invoices.issue")}</Button> : null}
+        {allowed.pay ? <Button variant="primary" onClick={() => onRecordPayment(invoice)}>{t("payments.recordPayment")}</Button> : null}
         {allowed.edit ? <Button variant="secondary" onClick={onEdit}>{t("invoices.edit")}</Button> : null}
         {allowed.adjust ? <Button variant="secondary" onClick={() => onAdjust(invoice)}>{t("invoices.newAdjustment")}</Button> : null}
         {allowed.pdf ? <PdfButton open={() => openInvoicePdf(invoice.id)} label={t("invoices.openPdf")} failed={t("invoices.pdfFailed")} /> : null}
         {allowed.void ? <Button variant="danger" onClick={() => setPending("void")}>{t("invoices.void")}</Button> : null}
         {allowed.remove ? <Button variant="danger" onClick={() => setPending("delete")}>{t("invoices.delete")}</Button> : null}
       </div>
-      {invoice.status === "ISSUED" && hasIssuedAdjustment ? (
+      {invoice.status === "ISSUED" && hasIssuedReceipt ? (
+        <p className="text-[12px] text-[var(--muted)]">{t("invoices.voidBlockedByReceipt")}</p>
+      ) : invoice.status === "ISSUED" && hasIssuedAdjustment ? (
         <p className="text-[12px] text-[var(--muted)]">{t("invoices.voidBlocked")}</p>
       ) : null}
       <ConfirmAction
@@ -196,10 +203,12 @@ function InvoiceActions({ invoice, onEdit, onAdjust, onDeleted }: {
   );
 }
 
-function DetailBody({ id, onAdjust, onOpenAdjustment, onDeleted }: {
+function DetailBody({ id, onAdjust, onOpenAdjustment, onRecordPayment, onOpenReceipt, onDeleted }: {
   id: number;
   onAdjust: (invoice: InvoiceDetail) => void;
   onOpenAdjustment: (id: number) => void;
+  onRecordPayment: (invoice: InvoiceDetail) => void;
+  onOpenReceipt: (id: number) => void;
   onDeleted: () => void;
 }) {
   const t = useT();
@@ -219,7 +228,10 @@ function DetailBody({ id, onAdjust, onOpenAdjustment, onDeleted }: {
           <div className="mono text-[16px] font-semibold">{inv.invoice_number ?? t("invoices.draftRef", { id: inv.id })}</div>
           <div className="text-[13px] text-[var(--muted)]">{String(customer.name ?? inv.customer_name ?? "—")}</div>
         </div>
-        <FinanceStatusBadge status={inv.status} overdue={inv.is_overdue} />
+        <div className="flex flex-col items-end gap-1">
+          <FinanceStatusBadge status={inv.status} overdue={inv.is_overdue} />
+          <PaymentStatusBadge status={inv.payment_status} />
+        </div>
       </div>
 
       {inv.is_overdue ? <Banner tone="warning" title={t("invoices.overdueNote", { date: formatDocDate(inv.due_date) })} /> : null}
@@ -229,7 +241,7 @@ function DetailBody({ id, onAdjust, onOpenAdjustment, onDeleted }: {
         <DraftEditor invoice={inv} onDone={() => setEditing(false)} />
       ) : (
         <>
-          <InvoiceActions invoice={inv} onEdit={() => setEditing(true)} onAdjust={onAdjust} onDeleted={onDeleted} />
+          <InvoiceActions invoice={inv} onEdit={() => setEditing(true)} onAdjust={onAdjust} onRecordPayment={onRecordPayment} onDeleted={onDeleted} />
 
           <Section title={t("sales.summary")}>
             <Row label={t("invoices.issueDate")}>{formatDocDate(inv.issue_date)}</Row>
@@ -271,11 +283,10 @@ function DetailBody({ id, onAdjust, onOpenAdjustment, onDeleted }: {
             {inv.discount_total !== "0.00" ? <Row label={t("invoices.discount")}><MoneyDisplay value={inv.discount_total} /></Row> : null}
             {vatOn ? <Row label={t("invoices.vat")}><MoneyDisplay value={inv.vat_amount} /></Row> : null}
             <Row label={t("invoices.grandTotal")}><MoneyDisplay value={inv.grand_total} className="font-semibold" /></Row>
-            {inv.adjusted_total !== "0.00" ? (
-              <>
-                <Row label={t("invoices.adjusted")}><MoneyDisplay value={inv.adjusted_total} /></Row>
-                <Row label={t("invoices.balance")}><MoneyDisplay value={inv.balance} className="font-semibold" /></Row>
-              </>
+            {inv.adjusted_total !== "0.00" ? <Row label={t("invoices.adjusted")}><MoneyDisplay value={inv.adjusted_total} /></Row> : null}
+            {inv.paid_total && inv.paid_total !== "0.00" ? <Row label={t("invoices.paid")}><MoneyDisplay value={inv.paid_total} /></Row> : null}
+            {inv.status === "ISSUED" || inv.adjusted_total !== "0.00" ? (
+              <Row label={t("invoices.balance")}><MoneyDisplay value={inv.balance} className="font-semibold" /></Row>
             ) : null}
           </Section>
           {!vatOn ? <p className="text-[12px] text-[var(--muted)]">{t("invoices.notTaxInvoice")}</p> : null}
@@ -297,6 +308,24 @@ function DetailBody({ id, onAdjust, onOpenAdjustment, onDeleted }: {
             </Section>
           ) : null}
 
+          {inv.status !== "DRAFT" ? (
+            <Section title={t("invoices.payments")}>
+              {(inv.payments ?? []).length === 0 ? (
+                <p className="py-2 text-[13px] text-[var(--muted)]">{t("invoices.noPayments")}</p>
+              ) : (
+                (inv.payments ?? []).map((p) => (
+                  <Row key={`${p.id}`} label={`${formatDocDate(p.received_date)} · ${methodLabel(t, p.method)}`}>
+                    <button type="button" className="inline-flex items-center gap-2 underline" onClick={() => onOpenReceipt(p.id)}>
+                      <span className="mono">{p.receipt_number}</span>
+                      <MoneyDisplay value={p.amount} />
+                      {p.status !== "ISSUED" ? <FinanceStatusBadge status={p.status} /> : null}
+                    </button>
+                  </Row>
+                ))
+              )}
+            </Section>
+          ) : null}
+
           {inv.notes ? (
             <Section title={t("invoices.notes")}>
               <p className="whitespace-pre-line py-2 text-[13px]">{inv.notes}</p>
@@ -308,19 +337,29 @@ function DetailBody({ id, onAdjust, onOpenAdjustment, onDeleted }: {
   );
 }
 
-export function InvoiceDetailDrawer({ id, open, onOpenChange, onAdjust, onOpenAdjustment }: {
+export function InvoiceDetailDrawer({ id, open, onOpenChange, onAdjust, onOpenAdjustment, onRecordPayment, onOpenReceipt }: {
   id: number | null;
   open: boolean;
   onOpenChange: (v: boolean) => void;
   onAdjust: (invoice: InvoiceDetail) => void;
   onOpenAdjustment: (id: number) => void;
+  onRecordPayment: (invoice: InvoiceDetail) => void;
+  onOpenReceipt: (id: number) => void;
 }) {
   const t = useT();
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
       <DrawerContent title={t("invoices.detailTitle")}>
         {id !== null ? (
-          <DetailBody key={id} id={id} onAdjust={onAdjust} onOpenAdjustment={onOpenAdjustment} onDeleted={() => onOpenChange(false)} />
+          <DetailBody
+            key={id}
+            id={id}
+            onAdjust={onAdjust}
+            onOpenAdjustment={onOpenAdjustment}
+            onRecordPayment={onRecordPayment}
+            onOpenReceipt={onOpenReceipt}
+            onDeleted={() => onOpenChange(false)}
+          />
         ) : null}
       </DrawerContent>
     </Drawer>

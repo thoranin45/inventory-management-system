@@ -52,6 +52,10 @@ export const CANONICAL_STATUS = {
   EXPIRED: { tone: "warning", icon: Clock, labelKey: "status.EXPIRED" },
   // F2b invoices (computed: ISSUED and past the due date)
   OVERDUE: { tone: "warning", icon: Clock, labelKey: "status.OVERDUE" },
+  // F3b invoice payment status (computed by the backend for issued invoices)
+  UNPAID: { tone: "neutral", icon: Circle, labelKey: "status.UNPAID" },
+  PARTIAL: { tone: "warning", icon: CircleDashed, labelKey: "status.PARTIAL" },
+  PAID: { tone: "success", icon: CircleCheck, labelKey: "status.PAID" },
   active: { tone: "success", icon: CircleCheck, labelKey: "status.active" },
   inactive: { tone: "neutral", icon: CircleMinus, labelKey: "status.inactive" },
 } as const satisfies Record<string, { tone: Tone; icon: LucideIcon; labelKey: MessageKey }>;

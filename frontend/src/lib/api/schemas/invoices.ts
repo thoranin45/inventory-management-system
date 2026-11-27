@@ -8,8 +8,11 @@ import { apiEnvelope, decimalString, paginated } from "./common";
  * and the same set under /adjustment-notes). Totals always come from the server.
  */
 
-/** List filter tabs. "OVERDUE" is computed by the backend (ISSUED and past due_date). */
-export const INVOICE_FILTER_TABS = ["all", "DRAFT", "ISSUED", "OVERDUE", "VOID"] as const;
+/**
+ * List filter tabs. "OVERDUE" is computed by the backend (ISSUED, unpaid and past due_date);
+ * "OPEN" / "PAID" use the F3 `payment` filter instead of `status`.
+ */
+export const INVOICE_FILTER_TABS = ["all", "DRAFT", "ISSUED", "OPEN", "PAID", "OVERDUE", "VOID"] as const;
 export type InvoiceFilterKey = (typeof INVOICE_FILTER_TABS)[number];
 export const ADJUSTMENT_FILTER_TABS = ["all", "DRAFT", "ISSUED", "VOID"] as const;
 
@@ -30,6 +33,9 @@ export const invoiceRowSchema = z.object({
   grand_total: decimalString,
   adjusted_total: decimalString,
   balance: decimalString,
+  /** F3: UNPAID / PARTIAL / PAID for issued invoices, null otherwise. */
+  payment_status: z.string().nullish(),
+  paid_total: decimalString.optional(),
   created_at: z.string().nullish(),
   updated_at: z.string().nullish(),
 });
@@ -88,6 +94,19 @@ export const invoiceDetailSchema = invoiceRowSchema.extend({
     }),
   ),
   return_receipts: z.array(returnReceiptSchema),
+  payments: z
+    .array(
+      z.object({
+        id: z.number(),
+        receipt_number: z.string(),
+        status: z.string(),
+        received_date: z.string().nullish(),
+        method: z.string(),
+        amount: decimalString,
+        wht_amount: decimalString,
+      }),
+    )
+    .optional(),
   invoice_created: z.boolean().optional(),
 });
 export type InvoiceDetail = z.infer<typeof invoiceDetailSchema>;
@@ -99,6 +118,7 @@ export const revenueSummarySchema = z.object({
   invoiced_total: decimalString,
   adjusted_total: decimalString,
   net_revenue: decimalString,
+  received_total: decimalString.optional(),
   vat_threshold: decimalString,
   threshold_percent: decimalString,
   level: z.enum(["ok", "warning", "over"]),
@@ -217,14 +237,15 @@ export function toAdjustmentPayload(form: AdjustmentDraftForm) {
 export type AdjustmentDraftPayload = ReturnType<typeof toAdjustmentPayload>;
 
 /** What each status allows (backend is authoritative; this only decides what to show). */
-export function invoiceActions(status: string, hasIssuedAdjustment: boolean) {
+export function invoiceActions(status: string, hasIssuedAdjustment: boolean, hasIssuedReceipt = false, balanceLeft = true) {
   const s = status.toUpperCase();
   return {
     edit: s === "DRAFT",
     remove: s === "DRAFT",
     issue: s === "DRAFT",
-    void: s === "ISSUED" && !hasIssuedAdjustment,
-    adjust: s === "ISSUED",
+    void: s === "ISSUED" && !hasIssuedAdjustment && !hasIssuedReceipt,
+    adjust: s === "ISSUED" && balanceLeft,
+    pay: s === "ISSUED" && balanceLeft,
     pdf: s !== "DRAFT",
   };
 }
