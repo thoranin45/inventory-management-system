@@ -107,6 +107,7 @@ describe("finance form fields", () => {
       vat_registered: false,
       vat_rate: "7.00",
       prices_include_vat: false,
+      default_credit_days: "30",
     };
     expect(companyProfileInput.parse(base)).toEqual({
       ...base,
@@ -115,7 +116,9 @@ describe("finance form fields", () => {
       address_en: null,
       phone: null,
       email: null,
+      default_credit_days: 30,
     });
+    expect(companyProfileInput.safeParse({ ...base, default_credit_days: "366" }).success).toBe(false);
     for (const bad of ["", "101", "7.001", "abc", "-1"]) {
       expect(companyProfileInput.safeParse({ ...base, vat_rate: bad }).success, bad).toBe(false);
     }

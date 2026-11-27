@@ -66,7 +66,9 @@ describe("navigation helpers", () => {
     expect(wh).not.toContain("audit");
     expect(wh).not.toContain("company-profile");
     expect(wh).not.toContain("quotations");
-    expect(wh).toHaveLength(NAV_ITEMS.length - 4);
+    expect(wh).not.toContain("invoices");
+    expect(wh).not.toContain("adjustments");
+    expect(wh).toHaveLength(NAV_ITEMS.length - 6);
   });
 
   it("active matching is segment-aware", () => {

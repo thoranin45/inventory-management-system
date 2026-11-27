@@ -1,5 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import {
+  FileMinus,
+  ReceiptText,
   ArrowLeftRight,
   Building2,
   BookOpen,
@@ -68,6 +70,8 @@ export const NAV_ITEMS: NavItem[] = [
   { key: "sales", labelKey: "nav.sales", href: "/sales", icon: ShoppingCart, group: "orders" },
   // F1b: finance is Admin-only (Owner, 26 Nov); the backend refuses every quotation call from other roles.
   { key: "quotations", labelKey: "nav.quotations", href: "/quotations", icon: FileText, group: "orders", adminOnly: true },
+  { key: "invoices", labelKey: "nav.invoices", href: "/invoices", icon: ReceiptText, group: "orders", adminOnly: true },
+  { key: "adjustments", labelKey: "nav.adjustments", href: "/adjustment-notes", icon: FileMinus, group: "orders", adminOnly: true },
   { key: "picking", labelKey: "nav.picking", href: "/picking", icon: PackageSearch, group: "tasks" },
   { key: "packing", labelKey: "nav.packing", href: "/packing", icon: ClipboardCheck, group: "tasks" },
   { key: "shipping", labelKey: "nav.shipping", href: "/shipping", icon: Send, group: "tasks" },

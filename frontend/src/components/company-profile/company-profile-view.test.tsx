@@ -60,6 +60,7 @@ describe("CompanyProfileView", () => {
         vat_registered: false,
         vat_rate: "7.00",
         prices_include_vat: false,
+        default_credit_days: 30,
       }),
     );
   });

@@ -193,6 +193,22 @@ function ProfileForm({ profile, canEdit }: { profile: CompanyProfile; canEdit: b
           ) : (
             <p className="text-[12px] text-[var(--muted)]">{t("finance.vatOffNote")}</p>
           )}
+          <label className="flex max-w-[240px] flex-col gap-1" htmlFor="company-default_credit_days">
+            <span className="text-[12px] font-semibold text-[var(--muted)]">{t("finance.defaultCreditDays")}</span>
+            <input
+              id="company-default_credit_days"
+              inputMode="numeric"
+              autoComplete="off"
+              className={inputCls}
+              disabled={!canEdit}
+              value={values.default_credit_days}
+              onChange={(e) => set("default_credit_days", e.currentTarget.value)}
+            />
+            <span className="text-[11px] text-[var(--faint)]">{t("finance.defaultCreditDaysHint")}</span>
+            {errors.default_credit_days ? (
+              <span className="text-[11px] text-[var(--danger)]">{formMessageText(t, errors.default_credit_days)}</span>
+            ) : null}
+          </label>
         </PanelBody>
       </Panel>
 
